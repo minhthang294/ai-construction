@@ -41,9 +41,11 @@ from .models import (
     DocumentChunk,
     DocumentEmbedding,
     DocumentPage,
+    PageExtraction,
     SourceDocument,
 )
 from .ocr import OcrEngine
+from .page_extraction import validate_extraction
 from .providers import (
     AnswerProvider,
     ExtractiveProvider,
@@ -69,6 +71,8 @@ from .schemas import (
     MissingFieldOut,
     PageOut,
     PageSummaryOut,
+    PageExtractionIn,
+    PageExtractionOut,
     PhotoSuggestionOut,
     ReportDraftManpower,
     ReportDraftPlan,
@@ -549,6 +553,173 @@ def compare_versions(
         warnings=["Chỉ so sánh metadata/thống kê; không kết luận thay đổi thiết kế."],
         disclaimer=VERSION_COMPARE_DISCLAIMER,
     )
+
+
+def _page_sha256(page: DocumentPage, project_id: str) -> Optional[str]:
+    if not page.rendered_path:
+        return None
+    try:
+        path = Path(page.rendered_path).resolve()
+        root = storage.project_root(project_id).resolve()
+        path.relative_to(root)
+        data = path.read_bytes()
+        return storage.sha256_bytes(data)
+    except (OSError, ValueError):
+        return None
+
+
+def page_extraction_to_out(row: PageExtraction) -> PageExtractionOut:
+    try:
+        extraction = json.loads(row.extraction_json)
+    except (TypeError, ValueError):
+        extraction = {}
+    if not isinstance(extraction, dict):
+        extraction = {}
+    warnings = _warnings(row.warnings_json)
+    return PageExtractionOut(
+        id=row.id,
+        project_id=row.project_id,
+        document_id=row.document_id,
+        page_id=row.page_id,
+        page_number=row.page_number,
+        page_sha256=row.page_sha256,
+        model=row.model,
+        prompt_version=row.prompt_version,
+        mode=row.mode,
+        status=row.status,
+        confidence=row.confidence,
+        extraction=extraction,
+        warnings=warnings,
+        created_by=row.created_by,
+        verified_by=row.verified_by,
+        verified_at=_utc(row.verified_at),
+        verify_note=row.verify_note,
+        created_at=_utc(row.created_at),
+        updated_at=_utc(row.updated_at),
+    )
+
+
+def save_page_extraction(
+    db: Session,
+    project_id: str,
+    document_id: str,
+    page_number: int,
+    payload: PageExtractionIn,
+    actor_id: Optional[str],
+) -> PageExtractionOut:
+    page = get_page(db, project_id, document_id, page_number)
+    if page is None:
+        raise LookupError("Trang không thuộc công trình/hồ sơ này.")
+    errors = validate_extraction(payload.extraction)
+    if errors:
+        raise DocumentValidationError(
+            "Extraction không đúng schema: " + "; ".join(errors[:8])
+        )
+    extraction = payload.extraction
+    confidence = payload.confidence
+    if confidence is None and isinstance(extraction.get("confidence"), (int, float)):
+        confidence = float(extraction["confidence"])
+    warnings = payload.warnings
+    if not warnings and isinstance(extraction.get("warnings"), list):
+        warnings = [str(item) for item in extraction["warnings"] if isinstance(item, str)]
+    page_hash = _page_sha256(page, project_id)
+    row = db.scalar(
+        select(PageExtraction).where(
+            PageExtraction.page_id == page.id,
+            PageExtraction.model == payload.model,
+            PageExtraction.prompt_version == payload.prompt_version,
+            PageExtraction.mode == payload.mode,
+        )
+    )
+    if row is None:
+        row = PageExtraction(
+            project_id=project_id,
+            document_id=document_id,
+            page_id=page.id,
+            page_number=page_number,
+            page_sha256=page_hash,
+            model=payload.model,
+            prompt_version=payload.prompt_version,
+            mode=payload.mode,
+            status="proposed",
+            confidence=confidence,
+            extraction_json=json.dumps(extraction, ensure_ascii=False),
+            warnings_json=json.dumps(warnings, ensure_ascii=False),
+            created_by=actor_id,
+        )
+        db.add(row)
+    else:
+        row.project_id = project_id
+        row.document_id = document_id
+        row.page_number = page_number
+        row.page_sha256 = page_hash
+        row.status = "proposed"
+        row.confidence = confidence
+        row.extraction_json = json.dumps(extraction, ensure_ascii=False)
+        row.warnings_json = json.dumps(warnings, ensure_ascii=False)
+        row.created_by = row.created_by or actor_id
+        row.verified_by = None
+        row.verified_at = None
+        row.verify_note = None
+    db.commit()
+    db.refresh(row)
+    return page_extraction_to_out(row)
+
+
+def list_page_extractions(
+    db: Session,
+    project_id: str,
+    document_id: str,
+    page_number: Optional[int] = None,
+    status: Optional[str] = None,
+) -> List[PageExtractionOut]:
+    if get_document(db, project_id, document_id) is None:
+        raise LookupError("Hồ sơ không thuộc công trình này.")
+    query = select(PageExtraction).where(
+        PageExtraction.project_id == project_id,
+        PageExtraction.document_id == document_id,
+    )
+    if page_number is not None:
+        query = query.where(PageExtraction.page_number == page_number)
+    if status:
+        query = query.where(PageExtraction.status == status)
+    rows = db.scalars(
+        query.order_by(PageExtraction.page_number, PageExtraction.created_at.desc())
+    ).all()
+    return [page_extraction_to_out(row) for row in rows]
+
+
+def get_page_extraction(
+    db: Session, project_id: str, extraction_id: str
+) -> Optional[PageExtraction]:
+    return db.scalar(
+        select(PageExtraction).where(
+            PageExtraction.project_id == project_id,
+            PageExtraction.id == extraction_id,
+        )
+    )
+
+
+def verify_page_extraction(
+    db: Session,
+    project_id: str,
+    extraction_id: str,
+    status: str,
+    note: Optional[str],
+    actor_id: Optional[str],
+) -> PageExtractionOut:
+    if status not in {"verified", "rejected"}:
+        raise DocumentValidationError("Chỉ chấp nhận verified hoặc rejected.")
+    row = get_page_extraction(db, project_id, extraction_id)
+    if row is None:
+        raise LookupError("Extraction không thuộc công trình này.")
+    row.status = status
+    row.verified_by = actor_id
+    row.verified_at = _now()
+    row.verify_note = (note or "").strip() or None
+    db.commit()
+    db.refresh(row)
+    return page_extraction_to_out(row)
 
 
 def _safe_embedding(provider: EmbeddingProvider, text: str) -> Tuple[List[float], str]:

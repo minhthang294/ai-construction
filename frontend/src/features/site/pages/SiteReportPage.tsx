@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { deleteDraft, enqueue, loadDraft, removeQueue, reportQueueId, saveDraft } from "../lib/offlineDb";
+import {
+  deleteDraft,
+  enqueue,
+  loadDraft,
+  loadViewCache,
+  removeQueue,
+  reportQueueId,
+  saveDraft,
+  saveViewCache,
+} from "../lib/offlineDb";
 import { useOfflineSync } from "../hooks/useOfflineSync";
 import {
   ApiError,
@@ -12,6 +21,12 @@ import {
 } from "../lib/api";
 import { presetToManpowerEntry } from "../lib/manpower";
 import { addDaysISO } from "../lib/datetime";
+import {
+  decideViewSource,
+  formatCachedAt,
+  makeViewCacheRecord,
+  offlineDataLabel,
+} from "../lib/viewCache";
 import ManpowerTable from "../components/ManpowerTable";
 import WorkLogForm from "../components/WorkLogForm";
 import NextDayPlanForm from "../components/NextDayPlanForm";
@@ -84,6 +99,8 @@ export default function SiteReportPage({
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [offlineCacheAt, setOfflineCacheAt] = useState<number | null>(null);
+  const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
 
   const draftKey = `${projectId}:${date}`;
   const tomorrow = addDaysISO(date, 1);
@@ -107,13 +124,14 @@ export default function SiteReportPage({
     (async () => {
       setLoaded(false);
       setMessage(null);
+      setOfflineCacheAt(null);
+      setLastSyncedAt(null);
       let remote: DailyReport | null = null;
+      let serverFailed = false;
       try {
         remote = await getDailyReport(projectId, date);
       } catch {
-        if (!cancelled) {
-          setMessage("Không tải được báo cáo từ máy chủ; đang dùng bản nháp offline.");
-        }
+        serverFailed = true;
       }
       let draft;
       try {
@@ -121,11 +139,23 @@ export default function SiteReportPage({
       } catch {
         draft = undefined;
       }
+      let cached;
+      try {
+        cached = await loadViewCache(projectId, date);
+      } catch {
+        cached = undefined;
+      }
       if (cancelled) return;
 
+      const source = decideViewSource(serverFailed, cached);
+      const cachedReport =
+        source === "cache" && cached && cached.report && typeof cached.report === "object"
+          ? (cached.report as DailyReport)
+          : null;
+      const baseReport = remote ?? cachedReport;
       const draftIsNewer =
         draft &&
-        (!remote || draft.updatedAt > Date.parse(remote.updated_at) + 1000);
+        (!baseReport || draft.updatedAt > Date.parse(baseReport.updated_at) + 1000);
 
       if (draftIsNewer && draft) {
         const payload = draft.payload as Partial<DailyReportInput>;
@@ -135,13 +165,13 @@ export default function SiteReportPage({
         setNotes(payload.notes ?? "");
         setSiteNotes(payload.site_notes ?? {});
         setStatus(payload.status === "reviewed" ? "reviewed" : "draft");
-      } else if (remote) {
-        setManpower(remote.manpower);
-        setWorkLogs(remote.work_logs);
-        setPlans(remote.next_day_plans);
-        setNotes(remote.notes ?? "");
-        setSiteNotes(remote.site_notes ?? {});
-        setStatus(remote.status);
+      } else if (baseReport) {
+        setManpower(baseReport.manpower);
+        setWorkLogs(baseReport.work_logs);
+        setPlans(baseReport.next_day_plans);
+        setNotes(baseReport.notes ?? "");
+        setSiteNotes(baseReport.site_notes ?? {});
+        setStatus(baseReport.status);
       } else {
         setManpower([]);
         setWorkLogs([]);
@@ -150,20 +180,77 @@ export default function SiteReportPage({
         setSiteNotes({});
         setStatus("draft");
       }
-      setReport(remote);
+      setReport(baseReport);
 
-      try {
-        const items = await getWorkItems(projectId);
-        if (!cancelled) setWorkItems(items);
-      } catch {
-        if (!cancelled) setWorkItems([]);
+      if (source === "cache" && cached) {
+        setOfflineCacheAt(cached.cachedAt);
+        setPhotos(cached.photos as SitePhoto[]);
+        setWorkItems(cached.workItems as WorkItem[]);
+        setOrganizations([]);
+        setMessage(
+          `Đang dùng bản offline. ${offlineDataLabel(cached.cachedAt)}.`,
+        );
+      } else if (!baseReport) {
+        setPhotos([]);
+        setWorkItems([]);
+        if (serverFailed) {
+          setMessage("Không tải được báo cáo từ máy chủ; chưa có bản lưu trên thiết bị.");
+        }
       }
 
-      try {
-        const orgs = await getOrganizations(projectId);
-        if (!cancelled) setOrganizations(orgs);
-      } catch {
-        if (!cancelled) setOrganizations([]);
+      let loadedWorkItems: WorkItem[] =
+        source === "cache" && cached ? (cached.workItems as WorkItem[]) : [];
+      let loadedPhotos: SitePhoto[] =
+        source === "cache" && cached ? (cached.photos as SitePhoto[]) : [];
+
+      if (!serverFailed && remote) {
+        try {
+          loadedWorkItems = await getWorkItems(projectId);
+          if (!cancelled) setWorkItems(loadedWorkItems);
+        } catch {
+          loadedWorkItems =
+            source === "cache" && cached ? (cached.workItems as WorkItem[]) : [];
+          if (!cancelled) setWorkItems(loadedWorkItems);
+        }
+
+        try {
+          const orgs = await getOrganizations(projectId);
+          if (!cancelled) setOrganizations(orgs);
+        } catch {
+          if (!cancelled) setOrganizations([]);
+        }
+
+        try {
+          loadedPhotos = await listPhotos(projectId, remote.id);
+          if (!cancelled) setPhotos(loadedPhotos);
+        } catch {
+          loadedPhotos = cached?.photos ? (cached.photos as SitePhoto[]) : [];
+          if (!cancelled) setPhotos(loadedPhotos);
+        }
+
+        if (!cancelled) {
+          setLastSyncedAt(Date.now());
+          try {
+            await saveViewCache(
+              makeViewCacheRecord({
+                projectId,
+                date,
+                report: remote,
+                photos: loadedPhotos,
+                workItems: loadedWorkItems,
+              }),
+            );
+          } catch {
+            // Storage quota/private mode must not break the report view.
+          }
+        }
+      } else if (source !== "cache") {
+        try {
+          const orgs = await getOrganizations(projectId);
+          if (!cancelled) setOrganizations(orgs);
+        } catch {
+          if (!cancelled) setOrganizations([]);
+        }
       }
 
       if (!cancelled) setLoaded(true);
@@ -200,6 +287,8 @@ export default function SiteReportPage({
           return;
         }
         setReport(remote);
+        setLastSyncedAt(Date.now());
+        setOfflineCacheAt(null);
       } catch {
         // The next sync tick or manual refresh will retry.
       }
@@ -275,6 +364,8 @@ export default function SiteReportPage({
     try {
       const saved = await saveDailyReport(projectId, date, body);
       setReport(saved);
+      setLastSyncedAt(Date.now());
+      setOfflineCacheAt(null);
       try {
         await removeQueue(reportQueueId(projectId, date));
         await deleteDraft(draftKey);
@@ -284,6 +375,7 @@ export default function SiteReportPage({
 
       // Photos captured before the first save are linked to this report now.
       const unlinked = photos.filter((photo) => !photo.report_id);
+      let nextPhotos = photos;
       if (unlinked.length > 0) {
         const linked = await Promise.all(
           unlinked.map((photo) =>
@@ -292,7 +384,24 @@ export default function SiteReportPage({
             ),
           ),
         );
-        setPhotos((previous) => mergePhotos(previous, linked));
+        nextPhotos = mergePhotos(photos, linked);
+        setPhotos(nextPhotos);
+      }
+      const filtersActive = Object.values(photoFilters).some(Boolean);
+      if (!filtersActive) {
+        try {
+          await saveViewCache(
+            makeViewCacheRecord({
+              projectId,
+              date,
+              report: saved,
+              photos: nextPhotos,
+              workItems,
+            }),
+          );
+        } catch {
+          // Storage quota/private mode must not fail the save.
+        }
       }
       setMessage("Đã lưu báo cáo.");
     } catch (error) {
@@ -372,6 +481,20 @@ export default function SiteReportPage({
           </span>
         </div>
       </header>
+
+      {(offlineCacheAt != null || lastSyncedAt != null) && (
+        <div
+          className={`rounded-lg px-3 py-2 text-xs ${
+            offlineCacheAt != null
+              ? "bg-amber-50 text-amber-800"
+              : "bg-green-50 text-green-800"
+          }`}
+        >
+          {offlineCacheAt != null
+            ? `Đang dùng bản offline · ${offlineDataLabel(offlineCacheAt)}`
+            : `Đã đồng bộ lúc ${formatCachedAt(lastSyncedAt as number)}`}
+        </div>
+      )}
 
       {!online && (
         <div className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">

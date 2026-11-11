@@ -171,6 +171,16 @@ export type WorkItemAcceptanceHistory = {
   items: AcceptanceHistoryItem[];
 };
 
+export type WorkItemSummary = {
+  id: string;
+  project_id: string;
+  code: string;
+  name: string;
+  location?: string | null;
+  component?: string | null;
+  status: string;
+};
+
 export type ParticipantInput = {
   role: ParticipantRole;
   person_name: string;

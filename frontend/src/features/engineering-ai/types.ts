@@ -297,3 +297,41 @@ export type VersionCompareResponse = {
   warnings: string[];
   disclaimer: string;
 };
+
+export type PageExtractionStatus = "proposed" | "verified" | "rejected";
+
+export type PageExtractionRecord = {
+  id: string;
+  project_id: string;
+  document_id: string;
+  page_id: string;
+  page_number: number;
+  page_sha256?: string | null;
+  model: string;
+  prompt_version: string;
+  mode: string;
+  status: PageExtractionStatus;
+  confidence?: number | null;
+  extraction: {
+    page_type?: string;
+    title?: string | null;
+    drawing_number?: string | null;
+    revision?: string | null;
+    summary?: string;
+    key_values?: Array<{
+      name: string;
+      value: string;
+      unit?: string | null;
+      quote: string;
+    }>;
+    table_rows?: string[][];
+    warnings?: string[];
+  };
+  warnings: string[];
+  created_by?: string | null;
+  verified_by?: string | null;
+  verified_at?: string | null;
+  verify_note?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};

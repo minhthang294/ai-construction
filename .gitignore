@@ -5,6 +5,7 @@ frontend/node_modules/
 frontend/dist/
 backend/data/
 data/app.db
+data/.admin*
 data/templates/*.xlsx
 data/templates/archive/
 data/storage/
@@ -13,3 +14,4 @@ docs/agent-reports/logs/
 .env
 .env.*
 !.env.example
+*.tsbuildinfo

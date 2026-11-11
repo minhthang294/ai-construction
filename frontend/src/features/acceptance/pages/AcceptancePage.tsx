@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
+import AcceptanceHistoryPanel from "../components/AcceptanceHistoryPanel";
 import ConfirmDialog from "../components/ConfirmDialog";
+import NumberingPanel from "../components/NumberingPanel";
 import ParticipantLibrary from "../components/ParticipantLibrary";
 import ParticipantsEditor from "../components/ParticipantsEditor";
 import RequestForm from "../components/RequestForm";
@@ -241,6 +243,40 @@ export default function AcceptancePage({ projectId }: Props) {
 
   function recordFor(requestId: string): AcceptanceRecord | undefined {
     return records.find((record) => record.request_id === requestId);
+  }
+
+  async function openRequestById(requestId: string) {
+    let request = requests.find((item) => item.id === requestId);
+    if (!request) {
+      const { requestList } = await refresh();
+      request = requestList.find((item) => item.id === requestId);
+    }
+    if (!request) {
+      setMessage("Không tìm thấy PYC trong danh sách hiện tại.");
+      return;
+    }
+    setPreview(null);
+    setTab("requests");
+    setEditingRequest(request);
+  }
+
+  async function openRecordById(recordId: string) {
+    let record = records.find((item) => item.id === recordId);
+    let request = record
+      ? requests.find((item) => item.id === record?.request_id)
+      : undefined;
+    if (!record) {
+      const { recordList, requestList } = await refresh();
+      record = recordList.find((item) => item.id === recordId);
+      request = requestList.find((item) => item.id === record?.request_id);
+    }
+    if (!record) {
+      setMessage("Không tìm thấy BBNT trong danh sách hiện tại.");
+      return;
+    }
+    setPreview(null);
+    setTab("records");
+    setDraft(draftFor(record, request));
   }
 
   async function saveRequest(input: RequestInput) {
@@ -834,6 +870,20 @@ export default function AcceptancePage({ projectId }: Props) {
           )}
         </div>
       )}
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <NumberingPanel
+          projectId={projectId}
+          onSaved={() => {
+            void refresh();
+          }}
+        />
+        <AcceptanceHistoryPanel
+          projectId={projectId}
+          onOpenRequest={openRequestById}
+          onOpenRecord={openRecordById}
+        />
+      </div>
 
       {draft && confirming && draft.id && (
         (() => {

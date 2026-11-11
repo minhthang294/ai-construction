@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { fetchResourceBlob, getDocumentPage } from "../lib/api";
 import type { DocumentPage } from "../types";
+import PageExtractionPanel from "./PageExtractionPanel";
 
 type Props = {
   projectId: string;
@@ -144,6 +145,11 @@ export default function PageViewer({
               {page.text || "(trang không có text trích xuất được)"}
             </pre>
           </div>
+          <PageExtractionPanel
+            projectId={projectId}
+            documentId={documentId}
+            pageNumber={pageNumber}
+          />
         </>
       )}
     </section>

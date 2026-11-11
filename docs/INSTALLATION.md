@@ -33,6 +33,7 @@ Chạy `scripts/start.sh`. Backend ở `http://localhost:8765` (đổi bằng `C
 - `SITE_REPORT_STORAGE`, `ENGINEERING_AI_STORAGE`, `ACCEPTANCE_STORAGE`: nơi lưu file private; `scripts/start.sh` trỏ vào `data/storage/`.
 - `ACCEPTANCE_TEMPLATE`: mặc định khi chạy script là `data/templates/acceptance-original.xlsx`.
 - `ENGINEERING_AI_*`: cấu hình model chat, vision và embedding tương thích OpenAI ở backend; xem `backend/app/engineering_ai/providers.py` và `embeddings.py`. Không đặt key vào frontend.
+- `ENGINEERING_AI_MAX_PDF_BYTES`: giới hạn PDF; `scripts/start.sh` mặc định 80 MB để nhận file thuyết minh thực tế 66 MB.
 - `TESSDATA_PREFIX`: thư mục chứa `vie.traineddata` nếu gói tiếng Việt không nằm trong `/usr/share/tessdata`. Có thể cài user-space:
 
 ```bash

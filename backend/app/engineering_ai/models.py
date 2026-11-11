@@ -180,6 +180,47 @@ class DocumentEmbedding(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
 
 
+class PageExtraction(Base):
+    """AI page-extraction enrichment awaiting explicit engineer verification.
+
+    This is never used as retrieval text.  The source page/chunk text remains the
+    only citation source; this table stores proposed/verified structured data.
+    """
+
+    __tablename__ = "engineering_ai_page_extractions"
+    __table_args__ = (
+        UniqueConstraint(
+            "page_id",
+            "model",
+            "prompt_version",
+            "mode",
+            name="uq_ea_page_extraction_version",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    project_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    document_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    page_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    page_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    page_sha256: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    model: Mapped[str] = mapped_column(String(120), nullable=False)
+    prompt_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    mode: Mapped[str] = mapped_column(String(20), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="proposed", index=True)
+    confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    extraction_json: Mapped[str] = mapped_column(Text, nullable=False)
+    warnings_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    verified_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    verify_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
+    )
+
+
 class AIConversation(Base):
     """Project-scoped conversation; messages are stored as a JSON array."""
 

@@ -7,7 +7,7 @@ returned; clients receive permission-checked URLs instead.
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import List, Literal, Optional
+from typing import Any, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -75,6 +75,43 @@ class PageOut(BaseModel):
     warnings: List[str] = Field(default_factory=list)
     render_url: Optional[str] = None
     original_url: Optional[str] = None
+
+
+class PageExtractionIn(BaseModel):
+    model: str = Field(min_length=1, max_length=120)
+    prompt_version: str = Field(min_length=1, max_length=40)
+    mode: str = Field(min_length=1, max_length=20)
+    extraction: dict[str, Any]
+    confidence: Optional[float] = Field(default=None, ge=0, le=1)
+    warnings: List[str] = Field(default_factory=list)
+
+
+class PageExtractionOut(BaseModel):
+    id: str
+    project_id: str
+    document_id: str
+    page_id: str
+    page_number: int
+    page_sha256: Optional[str] = None
+    model: str
+    prompt_version: str
+    mode: str
+    status: str
+    confidence: Optional[float] = None
+    extraction: dict[str, Any]
+    warnings: List[str] = Field(default_factory=list)
+    created_by: Optional[str] = None
+    verified_by: Optional[str] = None
+    verified_at: Optional[datetime] = None
+    verify_note: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class PageExtractionVerifyIn(BaseModel):
+    status: Literal["verified", "rejected"]
+    note: Optional[str] = Field(default=None, max_length=2000)
+
 
 
 class SearchRequest(BaseModel):

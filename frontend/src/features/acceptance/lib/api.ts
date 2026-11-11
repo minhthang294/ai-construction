@@ -11,6 +11,7 @@ import type {
   RecordInput,
   RequestInput,
   WorkItemAcceptanceHistory,
+  WorkItemSummary,
 } from "../types";
 
 const API_BASE = (import.meta as any)?.env?.VITE_API_BASE ?? "/api/v1";
@@ -158,6 +159,10 @@ export async function deleteParticipantProfile(
     { method: "DELETE" },
   );
   if (!response.ok) throw await readError(response);
+}
+
+export function listWorkItems(projectId: string): Promise<WorkItemSummary[]> {
+  return jsonRequest(`/projects/${projectId}/work-items`, { method: "GET" });
 }
 
 export function listNumbering(projectId: string): Promise<NumberingConfig[]> {

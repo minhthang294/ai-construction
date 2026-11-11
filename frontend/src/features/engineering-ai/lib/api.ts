@@ -5,6 +5,7 @@ import type {
   DailyReportDraftResponse,
   DocumentPage,
   InspectionChecklistResponse,
+  PageExtractionRecord,
   PhotoSuggestion,
   SearchResponse,
   SourceDocument,
@@ -273,6 +274,39 @@ export async function compareVersions(
     `/projects/${projectId}/documents/${leftId}/compare/${rightId}`,
   );
   return jsonOrThrow<VersionCompareResponse>(response);
+}
+
+export async function listPageExtractions(
+  projectId: string,
+  documentId: string,
+  page?: number,
+  status?: "proposed" | "verified" | "rejected",
+): Promise<PageExtractionRecord[]> {
+  const params = new URLSearchParams();
+  if (page != null) params.set("page", String(page));
+  if (status) params.set("status", status);
+  const suffix = params.size > 0 ? `?${params.toString()}` : "";
+  const response = await apiFetch(
+    `/projects/${projectId}/documents/${documentId}/extractions${suffix}`,
+  );
+  return jsonOrThrow<PageExtractionRecord[]>(response);
+}
+
+export async function verifyPageExtraction(
+  projectId: string,
+  extractionId: string,
+  status: "verified" | "rejected",
+  note?: string,
+): Promise<PageExtractionRecord> {
+  const response = await apiFetch(
+    `/projects/${projectId}/page-extractions/${extractionId}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status, note: note?.trim() || null }),
+    },
+  );
+  return jsonOrThrow<PageExtractionRecord>(response);
 }
 
 export async function getConversation(

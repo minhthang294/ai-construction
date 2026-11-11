@@ -40,6 +40,30 @@ Tổng thời gian: **~13,5 phút** cho 6 trang. Một trang bản vẽ phức t
 
 Tổng thời gian: **~6,2 phút** cho 5 trang. Không có tool loop, ít token cache hơn.
 
+## POC 20 trang (tile + direct)
+
+Chạy 10 trang bản vẽ bằng tile 2×2 + title block, 240 DPI, 4 worker; 10 trang thuyết minh bằng direct, 220 DPI. Không ghi DB, không dùng model khác.
+
+| Nhóm | Trang | JSON OK | Key values | KV/trang | Trang có conflict | Numeric warning | Conf trung bình | Tổng thời gian |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Bản vẽ | 10 | 10/10 | 594 | 59,4 | 6/10 (58 conflict) | 112 | 0,589 | 23,8 phút |
+| Thuyết minh | 10 | 10/10 | 75 | 7,5 | 0/10 | 0 | 0,901 | 5,4 phút |
+| **Tổng** | **20** | **20/20** | **669** | — | **6/10** | **112** | — | **~29,2 phút** |
+
+Token bản vẽ: 292.230 input / 72.823 output / 131.448 reasoning / 349.440 cache read. Token thuyết minh: 41.677 / 11.464 / 18.958 / 59.520. Chi phí ước tính theo bảng giá DeepSeek: **~0,10 USD cho 20 trang**, tức khoảng **1,2–1,4 USD cho 241 trang**.
+
+Nhận xét:
+- Tile mode tăng recall rõ rệt trên bản vẽ: có trang 71–78 key values, gồm kích thước, cao độ, ghi chú, bảng.
+- Conflict được phát hiện đúng: 6/10 trang bản vẽ có mâu thuẫn; trang p6 có 30 conflict và 73 warning.
+- 112 numeric warning trên bản vẽ cho thấy số của model thường không khớp OCR — một phần do OCR bản vẽ kém, một phần do model đọc sai. Không thể tự động coi là đúng.
+- Trang thuyết minh sạch hơn nhiều: 0 conflict, 0 numeric warning, confidence 0,84–0,96.
+- Trang mục lục có 0 key values là bình thường.
+- 20/20 JSON hợp lệ; merge giữ metadata full page và lọc warning nhiễu của tile.
+
+Ước tính full 241 trang: tuần tự ~6,3 giờ; chạy 4 worker ~1,5–2 giờ; chi phí ~1,3 USD. Chưa nên chạy full vì tỷ lệ conflict trên bản vẽ còn cao.
+
+Review sheet: `/tmp/opencode/poc20-review.html` (ảnh + JSON + warning từng trang).
+
 ## Chất lượng
 
 ### Điểm tốt
@@ -67,22 +91,27 @@ Theo bảng giá DeepSeek Flash hiện tại, 6 trang chế độ agent ước t
 
 ## Kết luận
 
-1. **Direct image API là hướng chính** cho trang text/thuyết minh: nhanh, rẻ, JSON tốt.
-2. **Bản vẽ phức tạp cần crop/tile**: gửi 4–6 vùng ảnh (khung tên, mặt bằng, mặt cắt, bảng) thay vì một ảnh full-page.
+1. **Direct image API** là hướng chính cho trang text/thuyết minh: nhanh, rẻ, JSON tốt, 0 conflict trên 10 trang mẫu.
+2. **Tile 2×2 + title block** là hướng chính cho bản vẽ: recall cao hơn hẳn full-page, nhưng conflict cần được xử lý trước khi dùng.
 3. **Không bỏ OCR**: OCR là baseline để đối chiếu số liệu, tạo text search và citation.
 4. **Không dùng kết quả model làm số liệu cuối cùng**: mọi kích thước/khối lượng phải kiểm tra trang gốc.
-5. **Chưa nên chạy toàn bộ 241 trang** cho đến khi làm POC 20–30 trang với tile + kiểm chứng số liệu.
+5. **Chưa nên chạy full 241 trang** ngay. Cần thêm bước phân loại verified/proposed và kiểm chứng 20–30 trang nữa trước khi chạy toàn bộ.
 
 ## Đề xuất bước tiếp theo
 
-- Thêm chế độ `tile` cho bản vẽ: render 300 DPI, crop 4–6 vùng, gọi DeepSeek direct cho từng vùng, merge JSON, deduplicate key values.
-- So sánh số liệu model với OCR và với một mẫu kiểm tra tay.
-- Lưu `page_sha256`, `model`, `prompt_version`, `source_page`, `extraction_mode`, `warnings`, `confidence`.
-- Chỉ số liệu đã kiểm tra mới được đưa vào KB dạng “verified”; còn lại là “proposed”.
-- Sau POC 20–30 trang, quyết định chạy full 241 trang.
+- Phân loại key values thành:
+  - `verified`: số/đơn vị khớp OCR hoặc không có conflict;
+  - `proposed`: có conflict, warning số/đơn vị, hoặc confidence thấp.
+- Chỉ `verified` được đưa vào KB dạng tin cậy; `proposed` vào hàng đợi kỹ sư duyệt.
+- Thêm vote/consensus giữa full page và các tile cho các giá trị trùng tên; nếu lệch, giữ cả hai và đánh dấu conflict.
+- Chạy thêm 20–30 trang bản vẽ có nhiều dạng khác nhau để đo tỷ lệ conflict thực tế.
+- Nếu tỷ lệ conflict giảm sau khi lọc, mới chạy full 241 trang với 4 worker, lưu `page_sha256`, model/prompt version và review queue.
 
 ## Artifacts
 
-- Script: `scripts/deepseek_page_extract.py`
-- Kết quả POC: `/tmp/opencode/deepseek-poc-*`
+- Script: `scripts/deepseek_page_extract.py` (`--mode direct|agent`, `--tile-grid`)
+- Logic tile/merge/validate: `backend/app/engineering_ai/page_extraction.py`
+- Review sheet: `scripts/poc_review.py` → `/tmp/opencode/poc20-review.html`
+- Kết quả 20 trang: `/tmp/opencode/poc20-drawings`, `/tmp/opencode/poc20-report`
+- Kết quả POC nhỏ: `/tmp/opencode/deepseek-poc-*`
 - Không có dữ liệu thật nào được ghi vào DB hay commit vào repo.

@@ -4,9 +4,11 @@ import {
   registerQueueFailure,
   type QueueItemStatus,
 } from "./queueRetry";
+import type { ViewCacheRecord } from "./viewCache";
+import { viewCacheKey } from "./viewCache";
 
 const DB_NAME = "site-report-offline";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 export type DraftRecord = {
   key: string; // `${projectId}:${date}`
@@ -65,6 +67,9 @@ function openDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains("queue")) {
         db.createObjectStore("queue", { keyPath: "id" });
       }
+      if (!db.objectStoreNames.contains("views")) {
+        db.createObjectStore("views", { keyPath: "key" });
+      }
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -72,7 +77,7 @@ function openDb(): Promise<IDBDatabase> {
 }
 
 async function withStore<T>(
-  storeName: "drafts" | "queue",
+  storeName: "drafts" | "queue" | "views",
   mode: IDBTransactionMode,
   operation: (store: IDBObjectStore) => IDBRequest<T>,
 ): Promise<T> {
@@ -100,6 +105,22 @@ export async function loadDraft(key: string): Promise<DraftRecord | undefined> {
 
 export async function deleteDraft(key: string): Promise<void> {
   await withStore("drafts", "readwrite", (store) => store.delete(key));
+}
+
+/** Persist the last successfully viewed report + photo metadata (no bytes). */
+export async function saveViewCache(
+  record: ViewCacheRecord,
+): Promise<void> {
+  await withStore("views", "readwrite", (store) => store.put(record));
+}
+
+export async function loadViewCache(
+  projectId: string,
+  date: string,
+): Promise<ViewCacheRecord | undefined> {
+  return withStore<ViewCacheRecord | undefined>("views", "readonly", (store) =>
+    store.get(viewCacheKey(projectId, date)),
+  );
 }
 
 export async function enqueue(item: QueueItem): Promise<void> {

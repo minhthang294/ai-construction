@@ -16,6 +16,7 @@ export SITE_REPORT_STORAGE="$ROOT/data/storage/site"
 export ENGINEERING_AI_STORAGE="$ROOT/data/storage/engineering-ai"
 export ACCEPTANCE_STORAGE="$ROOT/data/storage/acceptance"
 export ACCEPTANCE_TEMPLATE="$ROOT/data/templates/acceptance-original.xlsx"
+export ENGINEERING_AI_MAX_PDF_BYTES="${ENGINEERING_AI_MAX_PDF_BYTES:-80000000}"
 if [[ -z "${TESSDATA_PREFIX:-}" && -f "$HOME/.local/share/tessdata/vie.traineddata" ]]; then
   export TESSDATA_PREFIX="$HOME/.local/share/tessdata"
 fi

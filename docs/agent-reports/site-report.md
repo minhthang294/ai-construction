@@ -60,6 +60,14 @@ Cập nhật: 11/11/2026. Phạm vi chỉ trong `backend/app/site/`, `frontend/s
 - Snapshot ghi rõ `photo_summary.evidence_count`, `omitted_unconfirmed_count`, `evidence_policy`, `auto_send=false`.
 - Lịch sử xuất `GET /daily-reports/{date}/exports`; tải file qua `/generated-documents/{id}/download` sau kiểm tra project.
 
+### Cache dữ liệu đã xem (offline read-only)
+- Sau khi tải báo cáo thành công, lưu snapshot `(projectId, date)` vào IndexedDB store `views`: report JSON + metadata danh sách ảnh + work items. Không lưu bytes ảnh gốc.
+- Khi `GET daily-report` lỗi/offline, dùng snapshot đúng project/date gần nhất; hiển thị nhãn “Đang dùng bản offline · Dữ liệu lưu trên thiết bị, cập nhật lúc …”.
+- Không ghi đè server từ cache; cache chỉ là nguồn đọc dự phòng. Draft mới hơn vẫn được ưu tiên cho phần nhập liệu.
+- Ảnh trong cache chỉ là metadata; nếu ảnh gốc không tải được khi offline, `AuthenticatedImage` hiện placeholder, không làm hỏng trang.
+- Chỉ báo “Đã đồng bộ lúc …” sau khi tải/lưu server thành công; “Đang dùng bản offline” khi đang đọc cache.
+- Service worker hiện chỉ cache shell/app assets, bỏ qua mọi `/api/`; test service-worker có sẵn xác nhận API có auth không bị cache.
+
 ### Mobile-first / offline
 - Trang báo cáo một cột, nút lớn, sticky action bar, sticky header online/offline + số mục chờ.
 - Nhập nhân lực có ghi chú rõ “để trống = chưa rõ, 0 = không có người”; hiển thị tổng đã biết, nhóm chưa rõ, nhóm 0 người; chọn organization.
@@ -74,6 +82,7 @@ Cập nhật: 11/11/2026. Phạm vi chỉ trong `backend/app/site/`, `frontend/s
 - Sau `QUEUE_MAX_ATTEMPTS = 8` lần lỗi, mục chuyển `failed`, dừng tự retry; người dùng có thể “Bỏ mục” sau xác nhận.
 - “Bỏ mục” chỉ xoá đúng item queue đang chọn, không xoá bản nháp/ảnh gốc và không đụng queue project khác.
 - Queue được lọc theo `item.projectId === projectId` trước khi tính pending/sync; item của project khác không bị replay, sửa hay xoá.
+- Snapshot xem gần nhất được lưu theo `(projectId,date)`; offline mở lại không cần mạng, có nhãn thời điểm cập nhật và không ghi đè server.
 - Ảnh chụp/chọn nhiều ảnh; nếu mất mạng giữ nguyên bytes trong IndexedDB và hiện preview chờ đồng bộ.
 - Ảnh xem qua fetch có Bearer token (không dùng `<img src>` trực tiếp vì trình duyệt không gắn header Authorization).
 - Ảnh chụp trước lần lưu đầu được tự gắn vào báo cáo khi lưu thành công; ảnh queue trước khi có báo cáo được gắn sau khi đồng bộ báo cáo.
@@ -106,6 +115,8 @@ Frontend:
 - `frontend/src/features/site/lib/queueRetry.test.ts` (mới)
 - `frontend/src/features/site/lib/acceptanceHistory.ts` (mới)
 - `frontend/src/features/site/lib/acceptanceHistory.test.ts` (mới)
+- `frontend/src/features/site/lib/viewCache.ts` (mới)
+- `frontend/src/features/site/lib/viewCache.test.ts` (mới)
 - `frontend/src/features/site/lib/manpower.ts`
 - `frontend/src/features/site/lib/manpower.test.ts`
 - `frontend/src/features/site/lib/datetime.ts`
@@ -237,7 +248,7 @@ Frontend (Vitest, chạy từ `frontend/`):
 ```bash
 cd frontend
 npm test
-# 6 test files, 28 tests passed
+# 7 test files, 34 tests passed
 npm run build
 # tsc -b && vite build: OK
 ```
@@ -250,6 +261,8 @@ npm run build
 - Discard chỉ xoá đúng id đã chọn; queue/array gốc và item project khác không bị thay đổi; id giữ nguyên sau lỗi để retry idempotent.
 - Trạng thái queue hiển thị pending/failed, số lần thử, thời gian chờ và last error.
 - Test acceptance history: normalize payload, lọc theo work item, ghép record theo request, payload rỗng/không hợp lệ trả rỗng.
+- Cache snapshot: key theo project+date, chọn bản mới nhất đúng scope, không trả cache project/ngày khác; fallback chỉ khi server lỗi và có cache.
+- Nhãn thời gian cache hiển thị theo Asia/Ho_Chi_Minh; payload không hợp lệ không làm hỏng luồng.
 
 Typecheck/build:
 - `npm run build` chạy `tsc -b` + `vite build`: **thành công**.
@@ -295,6 +308,10 @@ Biến môi trường:
 13. **Acceptance history endpoint**: `GET /projects/{p}/work-items/{id}/acceptance-history` do acceptance-agent thêm; hiện chưa có trong router. Site đã có fallback `/acceptance-requests` + `/acceptance-records`; shape/revision/stale cuối cùng cần đối chiếu khi endpoint hoàn tất.
 14. **Link Nghiệm thu**: `SiteReportPage` nhận prop optional `onOpenAcceptance`; app shell hiện chưa truyền callback nên nút chỉ hiện khi coordinator nối `setPage("acceptance")`.
 15. **Acceptance history UI**: chỉ hiển thị work item xuất hiện trong work log/kế hoạch ngày; chưa lấy work item chỉ gắn qua ảnh, chưa phân trang lịch sử.
+16. **Offline cache adapter**: logic thuần đã test Vitest; phần ghi/đọc IndexedDB thật chưa có test fake-indexeddb. Cần kiểm tra thực tế trên trình duyệt/PWA.
+17. **Cache storage**: mỗi `(projectId,date)` chỉ giữ một snapshot mới nhất; chưa có eviction/giới hạn dung lượng và chưa cache bytes ảnh (đúng chủ đích). IndexedDB đầy/quota sẽ bỏ qua cache, không làm hỏng trang.
+18. **Multi-tab/upgrade**: DB_VERSION đã tăng lên 2 để thêm store `views`; nếu tab cũ đang mở giữ kết nối cũ, upgrade IndexedDB có thể bị chặn. Cần kiểm tra đóng/mở nhiều tab.
+19. **Service worker**: giữ cache shell hiện tại (`site-assistant-shell-v2`), không cache `/api/`; chưa cần đổi version trong vòng này. Test service-worker hiện có xác nhận API request không được respondWith.
 
 ## Hướng dẫn chạy
 
@@ -328,8 +345,9 @@ Kiểm tra thủ công sau khi Codex mount router + app shell:
 4. Nhập nhân lực có cả `0` và để trống, chọn organization; lưu nháp; tải lại trang kiểm tra bản nháp còn.
 5. Nhập structured site notes, kiểm tra roundtrip và block “Ghi chú hiện trường” khi xuất.
 6. Chụp ảnh với vị trí/hạng mục/giai đoạn và gắn work item; sửa metadata; lọc ảnh theo ngày/vị trí/hạng mục/giai đoạn/work item; kiểm tra ảnh gốc vẫn tải được và bytes không đổi; filter work item ở project khác phải rỗng.
-7. Ngắt mạng: sửa báo cáo + chụp ảnh; bật mạng; kiểm tra queue tự đồng bộ, không tạo ảnh trùng, queue project khác không bị đụng.
-8. Giả lập lỗi sync liên tiếp: kiểm tra thời gian chờ tăng dần (5 s → 10 s → … → 5 phút), sau 8 lần chuyển “thất bại”, bấm “Bỏ mục” phải xác nhận và chỉ mục đó biến mất; nháp/ảnh gốc còn nguyên.
-9. Chuyển báo cáo sang “Đã duyệt”, lưu, xuất Zalo/PDF/DOCX/ZIP.
-10. Xác nhận Zalo chỉ hiện nội dung + nút sao chép/chia sẻ; không có hành vi gửi tự động. Trên thiết bị có Web Share, bấm “Chia sẻ…” phải mở hộp thoại hệ thống; huỷ không gửi.
-11. Có work item trong work log/kế hoạch: panel lịch sử nghiệm thu hiển thị PYC/BBNT read-only. Khi endpoint history chưa có, fallback danh sách PYC/BBNT phải không làm lỗi trang; empty/404 hiển thị “Chưa có PYC/BBNT”. Nút “Mở Nghiệm thu” cần app shell truyền `onOpenAcceptance`.
+7. Tải báo cáo thành công, sau đó ngắt mạng và mở lại cùng project/ngày: phải thấy snapshot gần nhất + nhãn “Đang dùng bản offline · Dữ liệu lưu trên thiết bị, cập nhật lúc …”; ảnh không tải được hiện placeholder, trang không hỏng.
+8. Ngắt mạng: sửa báo cáo + chụp ảnh; bật mạng; kiểm tra queue tự đồng bộ, không tạo ảnh trùng, queue project khác không bị đụng.
+9. Giả lập lỗi sync liên tiếp: kiểm tra thời gian chờ tăng dần (5 s → 10 s → … → 5 phút), sau 8 lần chuyển “thất bại”, bấm “Bỏ mục” phải xác nhận và chỉ mục đó biến mất; nháp/ảnh gốc còn nguyên.
+10. Chuyển báo cáo sang “Đã duyệt”, lưu, xuất Zalo/PDF/DOCX/ZIP.
+11. Xác nhận Zalo chỉ hiện nội dung + nút sao chép/chia sẻ; không có hành vi gửi tự động. Trên thiết bị có Web Share, bấm “Chia sẻ…” phải mở hộp thoại hệ thống; huỷ không gửi.
+12. Có work item trong work log/kế hoạch: panel lịch sử nghiệm thu hiển thị PYC/BBNT read-only. Khi endpoint history chưa có, fallback danh sách PYC/BBNT phải không làm lỗi trang; empty/404 hiển thị “Chưa có PYC/BBNT”. Nút “Mở Nghiệm thu” cần app shell truyền `onOpenAcceptance`.

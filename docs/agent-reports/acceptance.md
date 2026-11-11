@@ -6,12 +6,12 @@ Acceptance router and frontend page are mounted. Export history and audit use th
 
 ## Vòng 2 — Addendum acceptance (11/11/2026)
 
-- **AI separation:** `backend/app/acceptance/` contains no LLM/Vision/Embedding provider import or call. `test_ai_separation.py` statically scans the package and monkeypatches `provider_from_env`, `vision_from_env`, `embeddings_from_env` to raise; PYC/BBNT create + XLSX/PDF export still succeed. A new record has `result=null` and checklist `unconfirmed`.
+- **AI separation:** `backend/app/acceptance/` contains no LLM/Vision/Embedding provider import or call, and no reference to the DeepSeek POC `engineering_ai.page_extraction` module or `scripts/deepseek_page_extract.py`. `test_ai_separation.py` statically scans the package and monkeypatches `provider_from_env`, `vision_from_env`, `embeddings_from_env` plus a fake `app.engineering_ai.page_extraction` module to raise; PYC/BBNT create + XLSX/PDF export still succeed. A new record has `result=null` and checklist `unconfirmed`.
 - **Deterministic numbering:** `acceptance_number_sequences` model matches migration `c7d41f2b9a10`. Number allocation uses one atomic `UPDATE ... RETURNING`; unique `(project_id, kind)` and request/record number constraints protect against duplicates. Supports `never|yearly|monthly`, `prefix`, `start_number`, `width`, `date_format`, `period_key`.
 - **Participant library:** CRUD for `acceptance_participant_profiles`; PYC stores profile ids plus name/organization snapshots. BBNT prefill uses the PYC's selected profiles; it never invents names or signatures.
 - **BBNT reuse/stale/revision/snapshot:** creation reuses PYC project/work item/location/date/time/daily report/confirmed photos/technical document metadata. It stores `request_updated_at` and a frozen `request_snapshot_json` of printable PYC fields, returns `stale=true` + warning after PYC edits, and never mutates the old record. Preview/export/reused data for an issued record use the snapshot, not the live PYC. Records created before the snapshot column fall back to the current PYC. `POST .../revisions` copies data into `revision+1`, `supersedes_id`, `status=draft`, `result=null`, checklist `unconfirmed`, and freezes the current PYC; the previous record stays unchanged.
 - **Preview + history:** `GET .../preview` returns the exact template cell mapping without writing files; `GET /projects/{p}/work-items/{id}/acceptance-history` returns PYC/BBNT number, status, revision and result.
-- **Frontend:** participant library manager, profile selection in PYC, preview panel, stale warning, BBNT revision action, responsive existing form.
+- **Frontend:** participant library manager, profile selection in PYC, preview panel, stale warning, BBNT revision action, numbering configuration panel (PYC/BBNT prefix/start/width/reset/date format + next number), and work-item acceptance-history panel with links to open PYC/BBNT. Mobile-first stacked layout; no auto-confirmation and no AI calls.
 
 ### V2 APIs
 
@@ -33,21 +33,22 @@ Acceptance router and frontend page are mounted. Export history and audit use th
 ### V2 tests
 
 New files: `test_ai_separation.py`, `test_numbering.py`, `test_participants.py`, `test_reuse_revision.py`, `test_preview_history.py`, `test_addendum_models.py`.
+AI boundary tests include `test_deepseek_page_extraction_poc_is_not_imported_or_invoked` (static scan + fake module that raises).
 Snapshot test: confirmed BBNT preview/export keeps the old location after PYC edit; revision 2 previews the new location.
 
 Result:
-- `cd backend && DATABASE_URL="sqlite:////tmp/opencode/acceptance-v2-$$.db" ../.venv/bin/python -m pytest tests/acceptance -q` → **66 passed**.
+- `cd backend && DATABASE_URL="sqlite:////tmp/opencode/acceptance-r4-$$.db" ../.venv/bin/python -m pytest tests/acceptance -q` → **67 passed**.
 - Acceptance feature TypeScript check → **exit 0**.
-- Full backend/frontend gate remains coordinator-owned.
+- Full frontend build `cd frontend && npm run build` → **exit 0**.
+- Full backend gate remains coordinator-owned.
 
 ### V2 unresolved
 
 1. Shared migrations `c7d41f2b9a10` + `d8e52a3c4b21` are coordinator-owned and not edited here; any future schema change must update both migrations and these models.
 2. Records created before `request_snapshot_json` existed deliberately fall back to the live PYC. A data backfill is a coordinator decision if legacy freeze is required.
-3. Numbering config UI is not added; API is complete and UI auto-numbers with defaults/config.
-4. Work-item history API is implemented; dedicated history UI is not added.
-5. The canonical template snapshot can drift; refresh remains coordinator-owned.
-6. PDF tests skip if LibreOffice is absent; clear-error path is always tested.
+3. The canonical template snapshot can drift; refresh remains coordinator-owned.
+4. PDF tests skip if LibreOffice is absent; clear-error path is always tested.
+5. Full backend suite remains coordinator-owned; acceptance tests alone were run here.
 
 ## Scope implemented
 
@@ -117,6 +118,8 @@ Frontend:
 - `frontend/src/features/acceptance/components/RequestForm.tsx`
 - `frontend/src/features/acceptance/components/ConfirmDialog.tsx`
 - `frontend/src/features/acceptance/components/ParticipantLibrary.tsx`
+- `frontend/src/features/acceptance/components/NumberingPanel.tsx`
+- `frontend/src/features/acceptance/components/AcceptanceHistoryPanel.tsx`
 - `frontend/src/features/acceptance/pages/AcceptancePage.tsx`
 
 Report:
@@ -202,7 +205,7 @@ PDF export applies the same mapping first, then converts that copied workbook. P
 - Template: style-preserving cell replace/clear/insert, sorted row insert, template validation, canonical real-template validation, CWD-independent canonical default path, clear `template_missing` error when the canonical default is absent, and a fixture guard proving tests use the repo canonical copy rather than `~/Downloads`.
 
 Results:
-- `cd backend && DATABASE_URL="sqlite:////tmp/opencode/acceptance-v2-$$.db" ../.venv/bin/python -m pytest tests/acceptance -q` → `66 passed`.
+- `cd backend && DATABASE_URL="sqlite:////tmp/opencode/acceptance-r4-$$.db" ../.venv/bin/python -m pytest tests/acceptance -q` → `67 passed`.
 - Acceptance feature TypeScript check → exit `0`:
   `npx tsc --noEmit --jsx react-jsx --target ES2022 --module ESNext --moduleResolution Bundler --lib ES2022,DOM,DOM.Iterable --strict --skipLibCheck --isolatedModules src/features/acceptance/index.ts`
 - Full backend suite and full frontend build are run by the coordinator after all module agents finish; this agent did not run them.
@@ -232,7 +235,7 @@ Template isolation:
 5. `work_item_id`, `daily_report_id`, photo, and Engineering AI evidence checks import shared/site module models lazily. If those modules are unavailable in an isolated deployment, validation is skipped rather than guessing.
 6. Evidence clients must use the supported typed forms (`photo:`, `document:`, `page:`) or a valid bare photo id. Opaque refs are no longer accepted.
 7. PDF output depends on the server's LibreOffice version and installed fonts. The validated intermediate `.xlsx` is retained on disk and recorded in export metadata, but there is no separate API download route for it.
-8. No component test runner is configured (no jsdom/@testing-library); acceptance verification is TypeScript compilation. At the time of this run the full `npm run build` was reported blocked by the site module's missing `site_notes` field in `SiteReportPage.tsx`, outside the acceptance edit boundary; re-check after the site agent's changes.
+8. No component test runner is configured (no jsdom/@testing-library); acceptance verification is the feature TypeScript check plus full `npm run build`, both passing.
 9. PDF integration tests skip automatically when LibreOffice is not installed; the clear-error path (`pdf_converter_unavailable`) is always tested.
 10. The canonical template `data/templates/acceptance-original.xlsx` is a repo snapshot and can drift from the user's latest workbook (for example the new `DM` rows 38–39 and YC number 34). Refreshing it requires closing LibreOffice and running `scripts/refresh_acceptance_template.sh`; that script is coordinator-owned. Tests intentionally run against the canonical snapshot, not the live `~/Downloads` file.
 
@@ -243,7 +246,7 @@ Template isolation:
    - `uv pip install fastapi sqlalchemy pytest httpx openpyxl pillow`
 2. Run acceptance tests:
    - `cd backend`
-   - `DATABASE_URL="sqlite:////tmp/opencode/acceptance-v2-$$.db" ../.venv/bin/python -m pytest tests/acceptance -q`
+   - `DATABASE_URL="sqlite:////tmp/opencode/acceptance-r4-$$.db" ../.venv/bin/python -m pytest tests/acceptance -q`
 3. Run the full backend suite (coordinator gate):
    - `cd backend`
    - `DATABASE_URL="sqlite:////tmp/opencode/acceptance-full-$$.db" ../.venv/bin/python -m pytest tests -q`
@@ -251,7 +254,7 @@ Template isolation:
    - `cd frontend`
    - Acceptance feature typecheck:
      `npx tsc --noEmit --jsx react-jsx --target ES2022 --module ESNext --moduleResolution Bundler --lib ES2022,DOM,DOM.Iterable --strict --skipLibCheck --isolatedModules src/features/acceptance/index.ts`
-   - Full build: `npm run build` (re-check after the site module's type fix; it was blocked when this module ran)
+   - Full build: `npm run build`
 5. Runtime template selection:
    - Default: `data/templates/acceptance-original.xlsx`, resolved from the package location (works from any working directory).
    - Override with `ACCEPTANCE_TEMPLATE=/path/to/template.xlsx`

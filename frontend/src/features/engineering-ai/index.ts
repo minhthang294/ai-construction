@@ -7,6 +7,7 @@ export { default as DocumentList } from "./components/DocumentList";
 export { default as DocumentUploadPanel } from "./components/DocumentUploadPanel";
 export { default as InspectionChecklistPanel } from "./components/InspectionChecklistPanel";
 export { default as PageViewer } from "./components/PageViewer";
+export { default as PageExtractionPanel } from "./components/PageExtractionPanel";
 export { default as PhotoSuggestionPanel } from "./components/PhotoSuggestionPanel";
 export { default as VersionComparePanel } from "./components/VersionComparePanel";
 export * from "./types";

@@ -52,6 +52,9 @@ from .schemas import (
     InspectionChecklistRequest,
     InspectionChecklistResponse,
     PageOut,
+    PageExtractionIn,
+    PageExtractionOut,
+    PageExtractionVerifyIn,
     PhotoSuggestionOut,
     SearchRequest,
     SearchResponse,
@@ -74,16 +77,21 @@ from .service import (
     get_conversation,
     get_document,
     get_page,
+    get_page_extraction,
     inspection_checklist,
     list_conversations,
     list_documents,
+    list_page_extractions,
     list_versions,
     page_to_out,
+    page_extraction_to_out,
     perform_search,
     rename_conversation,
     retry_ingest,
     run_ingest_job,
+    save_page_extraction,
     suggest_photo,
+    verify_page_extraction,
 )
 
 router = APIRouter(prefix="", tags=["engineering-ai"])
@@ -419,6 +427,103 @@ def get_page_render_route(
     )
     path = _ensure_private_file(candidate, project_id)
     return FileResponse(path, media_type="image/png", filename=path.name)
+
+
+@router.post(
+    "/projects/{project_id}/documents/{document_id}/pages/{page_number}/extractions",
+    response_model=PageExtractionOut,
+)
+def save_page_extraction_route(
+    project_id: str,
+    document_id: str,
+    page_number: int,
+    payload: PageExtractionIn,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+    _access=Depends(project_access),
+):
+    _guard_rate(project_id, user, "page_extraction")
+    try:
+        return save_page_extraction(
+            db,
+            project_id,
+            document_id,
+            page_number,
+            payload,
+            current_user_id(user),
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except DocumentValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get(
+    "/projects/{project_id}/documents/{document_id}/extractions",
+    response_model=List[PageExtractionOut],
+)
+def list_page_extractions_route(
+    project_id: str,
+    document_id: str,
+    page: Optional[int] = None,
+    status: Optional[str] = None,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+    _access=Depends(project_access),
+):
+    if status is not None and status not in {"proposed", "verified", "rejected"}:
+        raise HTTPException(status_code=422, detail="Invalid extraction status")
+    try:
+        return list_page_extractions(
+            db, project_id, document_id, page_number=page, status=status
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get(
+    "/projects/{project_id}/page-extractions/{extraction_id}",
+    response_model=PageExtractionOut,
+)
+def get_page_extraction_route(
+    project_id: str,
+    extraction_id: str,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+    _access=Depends(project_access),
+):
+    row = get_page_extraction(db, project_id, extraction_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Page extraction not found")
+    return page_extraction_to_out(row)
+
+
+@router.patch(
+    "/projects/{project_id}/page-extractions/{extraction_id}",
+    response_model=PageExtractionOut,
+)
+def verify_page_extraction_route(
+    project_id: str,
+    extraction_id: str,
+    payload: PageExtractionVerifyIn,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+    _access=Depends(project_access),
+):
+    _guard_rate(project_id, user, "page_extraction_verify")
+    try:
+        return verify_page_extraction(
+            db,
+            project_id,
+            extraction_id,
+            payload.status,
+            payload.note,
+            current_user_id(user),
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except DocumentValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.post("/projects/{project_id}/ai/search", response_model=SearchResponse)

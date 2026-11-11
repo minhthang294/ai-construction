@@ -12,5 +12,6 @@
 - [Nạp hồ sơ thật và kiểm chứng](docs/REAL_DATA_INGESTION.md)
 - [Kiến trúc bổ sung: Knowledge Base và Acceptance tất định](docs/ADDENDUM_ARCHITECTURE.md)
 - [POC DeepSeek đọc trang scan một lần](docs/agent-reports/deepseek-page-extraction-poc.md)
+- [Vận hành và bàn giao](docs/OPERATIONS.md)
 
 Backend dùng FastAPI, SQLAlchemy, Alembic và SQLite. Frontend dùng React, TypeScript, Vite, Tailwind và IndexedDB. Tất cả file gốc được lưu ngoài DB trong thư mục private; API kiểm quyền trước khi tải. AI chỉ trả lời theo trang hồ sơ đã nạp, và không xác nhận nghiệm thu.

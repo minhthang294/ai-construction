@@ -55,10 +55,11 @@ Backend (all inside the allowed module):
 - `backend/app/engineering_ai/inspection.py` (new)
 - `backend/app/engineering_ai/grounding.py` (new)
 - `backend/app/engineering_ai/vector_store.py` (new)
+- `backend/app/engineering_ai/page_extraction.py` (pure POC tile/merge/validation/numeric check; new)
 - `backend/app/engineering_ai/service.py` (new)
 - `backend/app/engineering_ai/router.py` (new)
 - `backend/app/engineering_ai/dependencies.py` (extended with `project_access`, OCR/language/page-limit getters)
-- `backend/app/engineering_ai/models.py` (addendum fields `change_note/is_effective/effective_at/effective_by`, `tables_json`, `section`; unique project/key/version constraint)
+- `backend/app/engineering_ai/models.py` (addendum fields `change_note/is_effective/effective_at/effective_by`, `tables_json`, `section`; unique project/key/version constraint; `PageExtraction` matching migration `e2f6a1c9d430`)
 - `backend/app/engineering_ai/storage.py` (existing private storage reused)
 
 Tests:
@@ -70,6 +71,8 @@ Tests:
 - `backend/tests/engineering_ai/test_embeddings.py`
 - `backend/tests/engineering_ai/test_assistive_apis.py`
 - `backend/tests/engineering_ai/test_ocr_vision.py`
+- `backend/tests/engineering_ai/test_page_extraction.py` (POC tile/merge/validate/numeric check)
+- `backend/tests/engineering_ai/test_page_extraction_api.py` (save/upsert/scope/verify/retrieval isolation)
 - `backend/tests/engineering_ai/test_documents.py` (extended for statuses/vectors/tables/sections/effective/compare)
 
 Frontend:
@@ -84,6 +87,7 @@ Frontend:
 - `frontend/src/features/engineering-ai/components/CrossReferencePanel.tsx`
 - `frontend/src/features/engineering-ai/components/DailyReportDraftPanel.tsx`
 - `frontend/src/features/engineering-ai/components/InspectionChecklistPanel.tsx`
+- `frontend/src/features/engineering-ai/components/PageExtractionPanel.tsx`
 - `frontend/src/features/engineering-ai/components/VersionComparePanel.tsx`
 - `frontend/src/features/engineering-ai/components/PhotoSuggestionPanel.tsx`
 - `frontend/src/features/engineering-ai/pages/EngineeringAIPage.tsx`
@@ -110,6 +114,10 @@ No shared core, migration, site, acceptance or frontend app files were edited.
 - `POST /projects/{p}/ai/conversations` — create conversation.
 - `GET /projects/{p}/ai/conversations?q=` — project-scoped history with text search.
 - `PATCH/DELETE /projects/{p}/ai/conversations/{id}` — rename/delete; source documents/pages remain.
+- `POST /projects/{p}/documents/{d}/pages/{n}/extractions` — validate/save or upsert page extraction by `(page_id, model, prompt_version, mode)`; status `proposed`, actor recorded, rendered-page SHA-256 when available.
+- `GET /projects/{p}/documents/{d}/extractions?page=&status=` — project/document-scoped extraction list.
+- `GET /projects/{p}/page-extractions/{id}` — one project-scoped extraction.
+- `PATCH /projects/{p}/page-extractions/{id}` — `{status: verified|rejected, note?}`; writes verifier/timestamp/note, never auto-verifies.
 - `POST /projects/{p}/ai/cross-references` — `{first:{document_id,page_number}, second:{document_id,page_number}, topic?}` → two page citations plus review-only suggestions. Each suggestion carries both citation objects, verbatim quotes, observation, confidence and `requires_engineer_review=true`; empty suggestions never mean the pages agree.
 - `POST /projects/{p}/ai/daily-report-drafts` — exactly one of `{report_id}`, `{report_date}` or `{report}`. Returns a copy of recorded manpower/work/plans, summary lines, missing fields and `no_invented_quantities=true`. No report is written.
 - `POST /projects/{p}/ai/inspection-checklists` — exactly one of `{work_item_id}` or `{work_item:{code?,name?,location?,component?}}`, optional `focus`, `top_k`. Each suggestion has a page citation, `status=unconfirmed`, `auto_approved=false`; no sources returns the fixed refusal.
@@ -367,6 +375,42 @@ Tests assert exact status order on first ingest and retry, and unchanged page/ch
 - Status labels updated for `ocr_completed`/`indexing`; effective badge, confirm-effective action, version compare panel, scope selector, conversation management and opt-in vision control added.
 - Feature typecheck clean; full `npm run build` also passed after site changes.
 
+## Page extraction enrichment (vòng 4)
+
+Executable storage for POC/tiled page extraction, without model calls:
+
+- `PageExtraction` model matches migration `e2f6a1c9d430` exactly: project/document/page/page-number, rendered-page SHA-256, model, prompt version, mode, proposed/verified/rejected status, confidence, extraction JSON, warnings, creator/verifier/timestamps/note; unique `(page_id, model, prompt_version, mode)`.
+- POST validates the POC schema (`validate_extraction`) before saving, computes SHA-256 from the private rendered page when present, resets upserts to `proposed`, and records the current actor as creator.
+- GET list/detail are project-scoped; PATCH verify/reject records `verified_by`, `verified_at`, `verify_note`.
+- Unverified extraction is **not** retrieval text: search/chat still use only `DocumentPage`/`DocumentChunk` content and citations. A test stores an invented token in extraction JSON and confirms search does not find it.
+- UI `PageExtractionPanel` inside the page viewer shows summary/key values/warnings/confidence/status, marks data as AI-extracted pending original-page comparison, and exposes explicit confirm/reject buttons with notes. No automatic verification.
+
+## POC tile extraction helpers
+
+`backend/app/engineering_ai/page_extraction.py` is pure logic for the coordinator to wire into `scripts/deepseek_page_extract.py`; this module calls no model, DB, storage or migration.
+
+- `Tile(label,left,top,right,bottom)`: pixel rectangle with `width`, `height`, `area` helpers.
+- `plan_page_tiles(width,height,grid=2,overlap=0.06,include_title_block=True)`: row-major overlapping tiles plus a bottom-right title-block tile; no empty/too-small tiles; all coordinates clipped to the page.
+- `merge_extractions(parts, full_page=None)`: full page wins for page type/title/drawing number/revision/summary; key values, table rows and warnings are merged/deduped; key values dedupe on normalized `name+value+unit+quote`; size caps; conflicts add warnings and reduce confidence; output matches the POC schema. Only `drawing_number`/`revision` differences are page-level metadata conflicts; tile title/page_type is not treated as a page conflict because tiles only see a region.
+- Tile warning noise filter: full-page warnings are always kept. Tile warnings containing crop-context phrases (`vùng crop`, `đây là vùng`, `trong vùng`, `không đủ ngữ cảnh`, `bị cắt`, `không thấy số hiệu bản vẽ`, `không thấy revision`, `không xác định được revision`) are dropped. Warnings about conflicting numbers/units, blurry text, hidden stamps or uncertain symbols remain.
+- `numeric_cross_check(value, ocr_text)`: compares model key-value numbers against OCR numbers and warns on absence or unit mismatch; never changes the model number. Warnings are de-duplicated and capped at 20, followed by `Còn N cảnh báo số/đơn vị khác` when more remain.
+
+Recommended coordinator use:
+
+```python
+from app.engineering_ai.page_extraction import (
+    plan_page_tiles, merge_extractions, validate_extraction, numeric_cross_check,
+)
+
+tiles = plan_page_tiles(width, height, grid=2, overlap=0.06)
+# crop each Tile, run the existing DeepSeek direct-image call, collect JSON by label
+merged = merge_extractions(tile_results, full_page=full_page_result)
+errors = validate_extraction(merged)
+cross_check_warnings = numeric_cross_check(merged, ocr_text)
+```
+
+The POC script is not modified. Results must remain proposed/unverified until an engineer checks the page; tile conflict warnings and numeric cross-check warnings must never be silently dropped.
+
 ## Tests
 
 Command:
@@ -376,7 +420,7 @@ cd backend
 ../.venv/bin/python -m pytest tests/engineering_ai -q
 ```
 
-Result this pass: **47 passed** (1 third-party Starlette/httpx deprecation warning).
+Result this pass: **59 passed** (1 third-party Starlette/httpx deprecation warning).
 
 A separate manual smoke (not part of the automated suite because it needs the system binary/traineddata) generated a scanned image-only PDF, ran the real Tesseract engine through the API, and produced `extraction_method=ocr`, `ocr_confidence≈0.92`, drawing number `BV-09`, and a searchable page citation. Automated tests inject a mock OCR engine so they remain deterministic.
 
@@ -404,6 +448,8 @@ Coverage:
 - low-OCR fixed warning and confidence cap.
 - photo suggestion is proposal-only; non-image rejection.
 - offline extractive default without env/key; deterministic normalized local embeddings.
+- page extraction enrichment: save/upsert, rendered-page SHA-256, project/document/page scope, verify/reject with note, and proof that invented extraction text does not enter retrieval.
+- POC tile helpers: page coverage/overlap/title block, full-page metadata priority, dedupe/warnings/confidence, tile crop-noise filtering while keeping full-page warnings, schema validation, numeric/unit cross-check (`87140` vs `87440`, `mm` vs `cm`) with exact dedupe and 20-warning cap.
 - per-project/user rate limit returns 429 with `Retry-After`.
 
 Frontend verification:
@@ -428,6 +474,8 @@ Full-suite note: the coordinator gate now passes `171 passed` with a temporary D
 
 ## Unresolved issues
 
+- Page-extraction verify/reject currently checks project access/membership, not a dedicated reviewer role; coordinator should map it to shared role policy. Re-saving the same unique extraction resets it to `proposed` and clears prior verification.
+- Verified extraction is intentionally not merged into retrieval/citation text yet; only the original page/chunk text is cited. A future coordinator decision must define how verified enrichment is exposed without replacing source text.
 - Real-scan ingest is not executed yet. Required before it: raise `ENGINEERING_AI_MAX_PDF_BYTES` above 66,405,004 B (recommended 70 MiB), raise reverse-proxy/body limits, and reserve ~1 GB storage for OCR renders/originals.
 - Real scans are available but not ingested; only four pages and a temporary 2-page cut were measured. No verified project knowledge exists yet.
 - OCR confidence is Tesseract word-average; it is not a calibrated probability. Drawing samples measured 0.67–0.69, so engineers must visually verify dimensions and notes; low-confidence pages always require direct drawing review.

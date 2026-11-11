@@ -18,10 +18,23 @@ import re
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
 import pymupdf
+from PIL import Image
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT / "backend") not in sys.path:
+    sys.path.insert(0, str(ROOT / "backend"))
+
+from app.engineering_ai.page_extraction import (  # noqa: E402
+    merge_extractions,
+    numeric_cross_check,
+    plan_page_tiles,
+    validate_extraction,
+)
 
 SCHEMA = {
     "page_type": "drawing|specification|table|text|other",
@@ -70,6 +83,17 @@ PROMPT_AGENT = PROMPT.replace(
     "Được phép dùng tool để đọc/crop chính ảnh đính kèm khi cần nhìn rõ chi tiết; không đọc file ngoài ảnh.",
 )
 
+PROMPT_TILE = PROMPT.replace(
+    "Bạn đang trích xuất MỘT trang hồ sơ công trình để làm kho tri thức.",
+    "Bạn đang trích xuất MỘT VÙNG CROP của một trang hồ sơ công trình để làm kho tri thức.",
+).replace(
+    "Hãy đọc ảnh trang đính kèm và chỉ ghi lại thông tin NHÌN THẤY.",
+    "Hãy đọc ảnh vùng crop đính kèm và chỉ ghi lại thông tin NHÌN THẤY TRONG VÙNG NÀY.",
+).replace(
+    "- Nếu trang là bìa/danh mục, dùng page_type \"text\" hoặc \"other\".",
+    "- Đây là vùng crop, nên page_type có thể là \"other\" nếu không đủ ngữ cảnh; không suy đoán ngoài vùng.",
+)
+
 
 def _parse_pages(value: str) -> list[int]:
     pages: list[int] = []
@@ -116,6 +140,7 @@ def _ocr(image: Path, languages: str) -> dict[str, Any]:
         )
         words = 0
         confidences: list[float] = []
+        texts: list[str] = []
         for line in result.stdout.splitlines()[1:]:
             cols = line.split("\t")
             if len(cols) < 12 or not cols[11].strip():
@@ -127,6 +152,7 @@ def _ocr(image: Path, languages: str) -> dict[str, Any]:
             if confidence >= 0:
                 words += 1
                 confidences.append(confidence)
+                texts.append(cols[11])
         return {
             "engine": "tesseract",
             "languages": languages,
@@ -137,6 +163,7 @@ def _ocr(image: Path, languages: str) -> dict[str, Any]:
             "seconds": round(time.time() - started, 2),
             "exit": result.returncode,
             "stderr": result.stderr[-500:],
+            "text": " ".join(texts)[:50000],
         }
     except Exception as exc:  # noqa: BLE001 - POC records the failure
         return {"engine": "tesseract", "error": str(exc), "seconds": round(time.time() - started, 2)}
@@ -154,7 +181,13 @@ def _api(method: str, path: str, body: dict[str, Any] | None = None, timeout: in
     return json.loads(result.stdout) if result.stdout.strip() else None
 
 
-def _run_deepseek(image: Path, model: str, _workdir: Path, timeout: int) -> dict[str, Any]:
+def _run_deepseek(
+    image: Path,
+    model: str,
+    _workdir: Path,
+    timeout: int,
+    prompt: str = PROMPT,
+) -> dict[str, Any]:
     """Send the image as a direct attachment, not through an agent tool loop.
 
     This is the fast path: the model receives the page image as content, so it
@@ -180,7 +213,7 @@ def _run_deepseek(image: Path, model: str, _workdir: Path, timeout: int) -> dict
             "POST",
             f"/api/session/{session_id}/prompt",
             {
-                "text": PROMPT,
+                "text": prompt,
                 "files": [
                     {
                         "uri": f"file://{image.resolve()}",
@@ -228,7 +261,13 @@ def _run_deepseek(image: Path, model: str, _workdir: Path, timeout: int) -> dict
             pass
 
 
-def _run_deepseek_agent(image: Path, model: str, workdir: Path, timeout: int) -> dict[str, Any]:
+def _run_deepseek_agent(
+    image: Path,
+    model: str,
+    workdir: Path,
+    timeout: int,
+    prompt: str = PROMPT_AGENT,
+) -> dict[str, Any]:
     """Slow comparison path: agent may use read/crop tools on the page image."""
 
     started = time.time()
@@ -242,7 +281,7 @@ def _run_deepseek_agent(image: Path, model: str, workdir: Path, timeout: int) ->
         "--archived",
         "--file",
         str(image),
-        PROMPT_AGENT,
+        prompt,
     ]
     result = subprocess.run(
         command, cwd=workdir, capture_output=True, text=True, timeout=timeout
@@ -276,6 +315,86 @@ def _run_deepseek_agent(image: Path, model: str, workdir: Path, timeout: int) ->
         "text": "\n".join(texts).strip(),
         "tokens": tokens,
         "errors": errors,
+    }
+
+
+def _run_tiles(
+    image: Path,
+    model: str,
+    out_dir: Path,
+    timeout: int,
+    grid: int,
+    overlap: float,
+    workers: int,
+    ocr_text: str = "",
+) -> dict[str, Any]:
+    """Full-page extraction plus overlapping tile crops, merged by the pure helper."""
+
+    started = time.time()
+    full = _run_deepseek(image, model, out_dir, timeout)
+    full_value, full_error = _parse_json(full.get("text") or "")
+    tiles_dir = out_dir / "tiles"
+    tiles_dir.mkdir(exist_ok=True)
+    crops: list[tuple[Any, Path]] = []
+    with Image.open(image) as source:
+        tiles = plan_page_tiles(
+            source.width, source.height, grid=grid, overlap=overlap, include_title_block=True
+        )
+        for tile in tiles:
+            crop = source.crop((tile.left, tile.top, tile.right, tile.bottom))
+            path = tiles_dir / f"{image.stem}-{tile.label}.jpg"
+            crop.convert("RGB").save(path, format="JPEG", quality=92)
+            crops.append((tile, path))
+
+    def run_crop(item: tuple[Any, Path]) -> dict[str, Any]:
+        tile, path = item
+        result = _run_deepseek(
+            path, model, out_dir, timeout, prompt=PROMPT_TILE
+        )
+        value, error = _parse_json(result.get("text") or "")
+        return {
+            "tile": tile.label,
+            "image": str(path),
+            "seconds": result.get("seconds"),
+            "tokens": result.get("tokens"),
+            "cost": result.get("cost"),
+            "value": value,
+            "error": error,
+        }
+
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as executor:
+        tile_results = list(executor.map(run_crop, crops))
+    parts = [item["value"] for item in tile_results if item.get("value") is not None]
+    merged = merge_extractions(parts, full_page=full_value)
+    validation = validate_extraction(merged)
+    if validation:
+        merged["warnings"] = list(merged.get("warnings") or []) + [
+            "Lỗi cấu trúc sau merge: " + "; ".join(validation)
+        ]
+    if ocr_text:
+        numeric_warnings = numeric_cross_check(merged, ocr_text)
+        if numeric_warnings:
+            merged["warnings"] = list(merged.get("warnings") or []) + numeric_warnings
+    merged["warnings"] = list(merged.get("warnings") or [])[:100]
+
+    tokens = {"input": 0, "output": 0, "reasoning": 0, "cache_read": 0}
+    cost = 0.0
+    for item in [full, *tile_results]:
+        for key, value in (item.get("tokens") or {}).items():
+            if key in tokens:
+                tokens[key] += int(value or 0)
+        if isinstance(item.get("cost"), (int, float)):
+            cost += float(item["cost"])
+    return {
+        "mode": "direct-tiles",
+        "seconds": round(time.time() - started, 2),
+        "tokens": tokens,
+        "cost": cost or None,
+        "text": json.dumps(merged, ensure_ascii=False),
+        "value": merged,
+        "validation": validation,
+        "tiles": tile_results,
+        "errors": [err for err in (full_error,) if err],
     }
 
 
@@ -359,6 +478,14 @@ def main() -> int:
         help="direct: image attachment, fast; agent: read/crop tools, slower but more detailed",
     )
     parser.add_argument("--dpi", type=int, default=220)
+    parser.add_argument(
+        "--tile-grid",
+        type=int,
+        default=1,
+        help="1 = full page only; 2+ = overlapping tiles plus title block",
+    )
+    parser.add_argument("--tile-overlap", type=float, default=0.06)
+    parser.add_argument("--tile-workers", type=int, default=3)
     parser.add_argument("--ocr-languages", default="vie+eng")
     parser.add_argument("--skip-ocr", action="store_true")
     parser.add_argument("--timeout", type=int, default=900)
@@ -388,26 +515,60 @@ def main() -> int:
             image = _render(args.pdf, page_number, pages_dir, args.dpi)
             entry["image"] = str(image)
             entry["image_bytes"] = image.stat().st_size
+            ocr_text = ""
             if not args.skip_ocr:
                 print(f"[page {page_number}] OCR baseline", flush=True)
-                entry["ocr"] = _ocr(image, args.ocr_languages)
-            print(f"[page {page_number}] DeepSeek V4.1 Flash ({args.mode})", flush=True)
-            if args.mode == "agent":
+                ocr_result = _ocr(image, args.ocr_languages)
+                ocr_text = ocr_result.pop("text", "")
+                ocr_path = results_dir / f"page-{page_number:04d}.ocr.txt"
+                ocr_path.write_text(ocr_text)
+                entry["ocr"] = ocr_result
+                entry["ocr_text"] = str(ocr_path)
+            print(
+                f"[page {page_number}] DeepSeek V4.1 Flash "
+                f"({args.mode}, tile_grid={args.tile_grid})",
+                flush=True,
+            )
+            if args.tile_grid > 1:
+                if args.mode != "direct":
+                    raise ValueError("tile mode currently supports --mode direct only")
+                model_result = _run_tiles(
+                    image,
+                    args.model,
+                    args.out,
+                    args.timeout,
+                    args.tile_grid,
+                    args.tile_overlap,
+                    args.tile_workers,
+                    ocr_text,
+                )
+            elif args.mode == "agent":
                 model_result = _run_deepseek_agent(
                     image, args.model, workdir, args.timeout
                 )
             else:
                 model_result = _run_deepseek(image, args.model, workdir, args.timeout)
-            entry["model"] = {
+            model_meta = {
                 key: value
                 for key, value in model_result.items()
-                if key not in {"text", "stdout_tail", "stderr_tail"}
+                if key not in {"text", "value", "stdout_tail", "stderr_tail"}
             }
+            if isinstance(model_meta.get("tiles"), list):
+                model_meta["tiles"] = [
+                    {key: value for key, value in item.items() if key != "value"}
+                    for item in model_meta["tiles"]
+                ]
+            entry["model"] = model_meta
+            if model_meta.get("tiles"):
+                entry["tile_count"] = len(model_meta["tiles"])
             raw = model_result.get("text") or ""
             raw_path = results_dir / f"page-{page_number:04d}.raw.txt"
             raw_path.write_text(raw)
             entry["raw_text"] = str(raw_path)
-            value, parse_error = _parse_json(raw)
+            value = model_result.get("value")
+            parse_error = None
+            if value is None:
+                value, parse_error = _parse_json(raw)
             if value is None:
                 entry["status"] = "invalid_json"
                 entry["parse_error"] = parse_error

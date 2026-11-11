@@ -2,7 +2,7 @@
 
 Cập nhật: 15:26 11/11/2026 (Asia/Ho_Chi_Minh). Người điều phối giữ shared core, migration, tích hợp, kiểm thử và quyết định cuối cùng; ba agent module chỉ sửa trong `docs/AGENT_BOUNDARIES.md`.
 
-**Cổng xác minh cuối vòng 2:** `scripts/verify_all.sh` → backend **172 passed**, frontend **29 passed**, production build **pass**. Migration head `d8e52a3c4b21`, đã áp dụng vào `data/app.db` (DB chưa có dữ liệu người dùng).
+**Cổng xác minh cuối vòng 2:** `scripts/verify_all.sh` → backend **181 passed**, frontend **29 passed**, production build **pass**. Migration head `d8e52a3c4b21`, đã áp dụng vào `data/app.db` (DB chưa có dữ liệu người dùng).
 
 ## 1. Trạng thái xác minh
 
@@ -75,7 +75,30 @@ Kiến trúc và schema chi tiết tại `docs/ADDENDUM_ARCHITECTURE.md`. Migrat
 | 14 | Không tự kết luận | record mới result null, checklist toàn unconfirmed |
 | 15 | Lịch sử/truy xuất | work-item acceptance-history + conversation history |
 
-## 7. Cổng xác minh
+## 7. Vòng 3 — POC tile extraction
+
+| Việc | Chủ sở hữu | Trạng thái |
+| --- | --- | --- |
+| Logic tile/merge/validate/numeric cross-check cho trang scan | engineering-ai-agent | xong: 55 engineering test pass; lọc nhiễu tile, numeric dedupe/cap |
+| Guard AI separation sau POC | acceptance-agent | xong: 67 acceptance test pass, guard chặn page_extraction/DeepSeek |
+| Nối tile mode vào script, chạy POC 20–30 trang, đánh giá | điều phối viên | xong: 20/20 JSON hợp lệ; 10 trang bản vẽ tile 594 KV, 10 trang thuyết minh direct 75 KV; ~29 phút; báo cáo POC cập nhật |
+
+Nguyên tắc: chỉ dùng DeepSeek V4.1 Flash; OCR vẫn là baseline; không ghi dữ liệu thật vào `data/app.db`; không commit raw output.
+
+## 9. Vòng 4 — vận hành thật
+
+| Việc | Chủ sở hữu | Trạng thái |
+| --- | --- | --- |
+| Page extraction API/UI proposed/verified | engineering-ai-agent | xong: 59 engineering test pass |
+| Numbering UI + work-item history UI | acceptance-agent | xong: 67 acceptance test pass |
+| Cache offline báo cáo/ảnh metadata | site-report-agent | xong: 34 frontend test pass |
+| Admin, project thật, upload 2 PDF, ingest OCR | điều phối viên | xong: 133 + 108 trang ready; 41 work item |
+| Import 20 trang extraction POC vào DB | điều phối viên | xong: 20 proposed (594 KV bản vẽ + 75 KV thuyết minh) |
+| Full gate, backup, hướng dẫn vận hành | điều phối viên | xong: 185 backend, 34 frontend, build pass; backup 508 MB; `docs/OPERATIONS.md` |
+
+Cổng xác minh hiện tại: backend **185 passed**, frontend **34 passed**, build pass; migration head `e2f6a1c9d430`.
+
+## 10. Cổng xác minh
 
 ```bash
 scripts/verify_all.sh
