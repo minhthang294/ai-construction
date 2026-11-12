@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   deleteDraft,
   enqueue,
@@ -27,6 +27,12 @@ import {
   makeViewCacheRecord,
   offlineDataLabel,
 } from "../lib/viewCache";
+import {
+  decideReconnectAction,
+  hasLocalChanges,
+  reportContentKey,
+  selectDraftForLoad,
+} from "../lib/reportReconnect";
 import ManpowerTable from "../components/ManpowerTable";
 import WorkLogForm from "../components/WorkLogForm";
 import NextDayPlanForm from "../components/NextDayPlanForm";
@@ -101,6 +107,12 @@ export default function SiteReportPage({
   const [message, setMessage] = useState<string | null>(null);
   const [offlineCacheAt, setOfflineCacheAt] = useState<number | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
+  const [serverConflict, setServerConflict] = useState<DailyReport | null>(null);
+  const [saveFeedback, setSaveFeedback] = useState<string | null>(null);
+  const [draftBaseUpdatedAt, setDraftBaseUpdatedAt] = useState<string | null>(null);
+  const [draftBaselineKey, setDraftBaselineKey] = useState<string | null>(null);
+  const reportRef = useRef<DailyReport | null>(null);
+  const bodyRef = useRef<DailyReportInput | null>(null);
 
   const draftKey = `${projectId}:${date}`;
   const tomorrow = addDaysISO(date, 1);
@@ -120,12 +132,22 @@ export default function SiteReportPage({
   );
 
   useEffect(() => {
+    reportRef.current = report;
+  }, [report]);
+
+  useEffect(() => {
+    bodyRef.current = buildBody();
+  }, [buildBody]);
+
+  useEffect(() => {
     let cancelled = false;
     (async () => {
       setLoaded(false);
       setMessage(null);
       setOfflineCacheAt(null);
       setLastSyncedAt(null);
+      setServerConflict(null);
+      setSaveFeedback(null);
       let remote: DailyReport | null = null;
       let serverFailed = false;
       try {
@@ -153,11 +175,19 @@ export default function SiteReportPage({
           ? (cached.report as DailyReport)
           : null;
       const baseReport = remote ?? cachedReport;
-      const draftIsNewer =
-        draft &&
-        (!baseReport || draft.updatedAt > Date.parse(baseReport.updated_at) + 1000);
+      const draftDecision = selectDraftForLoad({
+        draft,
+        serverReport: remote,
+        fallbackReport: cachedReport,
+      });
+      setDraftBaseUpdatedAt(
+        draftDecision.useDraft && draft
+          ? (draft.baseUpdatedAt ?? null)
+          : (baseReport?.updated_at ?? null),
+      );
+      setDraftBaselineKey(draftDecision.baselineKey);
 
-      if (draftIsNewer && draft) {
+      if (draftDecision.useDraft && draft) {
         const payload = draft.payload as Partial<DailyReportInput>;
         setManpower(Array.isArray(payload.manpower) ? payload.manpower : []);
         setWorkLogs(Array.isArray(payload.work_logs) ? payload.work_logs : []);
@@ -181,6 +211,9 @@ export default function SiteReportPage({
         setStatus("draft");
       }
       setReport(baseReport);
+      if (draftDecision.conflict && remote) {
+        setServerConflict(remote);
+      }
 
       if (source === "cache" && cached) {
         setOfflineCacheAt(cached.cachedAt);
@@ -269,11 +302,13 @@ export default function SiteReportPage({
         projectId,
         date,
         payload: buildBody(),
+        baseUpdatedAt: draftBaseUpdatedAt,
+        baselineKey: draftBaselineKey,
         updatedAt: Date.now(),
       }).catch(() => undefined);
     }, 400);
     return () => window.clearTimeout(timer);
-  }, [loaded, buildBody, draftKey, projectId, date]);
+  }, [loaded, buildBody, draftKey, projectId, date, draftBaseUpdatedAt, draftBaselineKey]);
 
   useEffect(() => {
     if (!loaded || revision === 0) return;
@@ -287,6 +322,8 @@ export default function SiteReportPage({
           return;
         }
         setReport(remote);
+        setDraftBaseUpdatedAt(remote.updated_at);
+        setDraftBaselineKey(reportContentKey(remote));
         setLastSyncedAt(Date.now());
         setOfflineCacheAt(null);
       } catch {
@@ -314,6 +351,48 @@ export default function SiteReportPage({
     };
   }, [projectId, report?.id, photoFilters, revision]);
 
+  useEffect(() => {
+    if (!online || offlineCacheAt == null) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const remote = await getDailyReport(projectId, date);
+        if (cancelled || !remote) return;
+        const base = reportRef.current;
+        const localChanges = hasLocalChanges(
+          bodyRef.current ?? buildBody(),
+          base,
+        );
+        const decision = decideReconnectAction({
+          usingCache: true,
+          serverReport: remote,
+          cachedUpdatedAt: base?.updated_at ?? null,
+          localChanges,
+        });
+        if (decision === "conflict") {
+          setServerConflict(remote);
+          return;
+        }
+        if (decision === "reload") {
+          await applyServerReport(remote, false);
+          setSaveFeedback("Đã tải bản mới nhất từ máy chủ.");
+          return;
+        }
+        // Server is reachable and has no newer version; leave edits intact.
+        setOfflineCacheAt(null);
+        setLastSyncedAt(Date.now());
+        setMessage(null);
+      } catch {
+        // Still offline/unreachable; keep the cached view and banner.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // applyServerReport/buildBody are intentionally read through current refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [online, offlineCacheAt, projectId, date]);
+
   async function persistLocalDraft() {
     try {
       await saveDraft({
@@ -321,6 +400,8 @@ export default function SiteReportPage({
         projectId,
         date,
         payload: buildBody(),
+        baseUpdatedAt: draftBaseUpdatedAt,
+        baselineKey: draftBaselineKey,
         updatedAt: Date.now(),
       });
     } catch {
@@ -344,15 +425,114 @@ export default function SiteReportPage({
     }
   }
 
+  async function applyServerReport(remote: DailyReport, discardDraft: boolean) {
+    setManpower(remote.manpower);
+    setWorkLogs(remote.work_logs);
+    setPlans(remote.next_day_plans);
+    setNotes(remote.notes ?? "");
+    setSiteNotes(remote.site_notes ?? {});
+    setStatus(remote.status);
+    setReport(remote);
+    setDraftBaseUpdatedAt(remote.updated_at);
+    setDraftBaselineKey(reportContentKey(remote));
+    setServerConflict(null);
+    setOfflineCacheAt(null);
+    setLastSyncedAt(Date.now());
+    setMessage(null);
+    if (discardDraft) {
+      try {
+        await deleteDraft(draftKey);
+      } catch {
+        // Keep the remote view even if IndexedDB cleanup is unavailable.
+      }
+    }
+    let loadedPhotos = photos;
+    try {
+      loadedPhotos = await listPhotos(projectId, remote.id);
+      setPhotos(loadedPhotos);
+    } catch {
+      // Keep cached photo metadata when the photo list cannot be refreshed.
+    }
+    try {
+      await saveViewCache(
+        makeViewCacheRecord({
+          projectId,
+          date,
+          report: remote,
+          photos: loadedPhotos,
+          workItems,
+        }),
+      );
+    } catch {
+      // Storage quota/private mode must not break the reload.
+    }
+  }
+
   async function handleSave() {
     setSaving(true);
     setMessage(null);
+    setSaveFeedback(null);
     await persistLocalDraft();
     const body = buildBody();
+    const wasCachedView = offlineCacheAt != null;
+
+    if (serverConflict) {
+      setSaveFeedback(
+        "Máy chủ có bản mới hơn. Hãy tải lại bản máy chủ trước khi lưu để tránh ghi đè.",
+      );
+      setSaving(false);
+      return;
+    }
+
+    if (wasCachedView) {
+      if (!online) {
+        setSaveFeedback(
+          "Đang dùng bản offline: thay đổi được giữ trên thiết bị, chưa đưa vào queue để tránh ghi đè máy chủ khi có mạng.",
+        );
+        setSaving(false);
+        return;
+      }
+      try {
+        const remote = await getDailyReport(projectId, date);
+        if (!remote) {
+          setSaveFeedback(
+            "Báo cáo không còn trên máy chủ. Kiểm tra lại trước khi lưu bản trên thiết bị.",
+          );
+          setSaving(false);
+          return;
+        }
+        const decision = decideReconnectAction({
+          usingCache: true,
+          serverReport: remote,
+          cachedUpdatedAt: reportRef.current?.updated_at ?? null,
+          localChanges: hasLocalChanges(body, reportRef.current),
+        });
+        if (decision === "conflict") {
+          setServerConflict(remote);
+          setSaveFeedback(
+            "Máy chủ có bản mới hơn. Hãy tải lại bản máy chủ trước khi lưu để tránh ghi đè.",
+          );
+          setSaving(false);
+          return;
+        }
+        if (decision === "reload") {
+          await applyServerReport(remote, false);
+          setSaveFeedback("Đã tải bản mới nhất từ máy chủ.");
+          setSaving(false);
+          return;
+        }
+      } catch {
+        setSaveFeedback(
+          "Chưa kiểm tra được máy chủ. Thay đổi được giữ trên thiết bị; thử lại khi có mạng.",
+        );
+        setSaving(false);
+        return;
+      }
+    }
 
     if (!online) {
       const queued = await queueReportSave();
-      setMessage(
+      setSaveFeedback(
         queued
           ? "Đã lưu nháp trên thiết bị. Báo cáo sẽ đồng bộ khi có mạng."
           : "Không lưu được hàng đợi offline trên thiết bị này.",
@@ -364,6 +544,9 @@ export default function SiteReportPage({
     try {
       const saved = await saveDailyReport(projectId, date, body);
       setReport(saved);
+      setDraftBaseUpdatedAt(saved.updated_at);
+      setDraftBaselineKey(reportContentKey(saved));
+      setServerConflict(null);
       setLastSyncedAt(Date.now());
       setOfflineCacheAt(null);
       try {
@@ -403,19 +586,41 @@ export default function SiteReportPage({
           // Storage quota/private mode must not fail the save.
         }
       }
-      setMessage("Đã lưu báo cáo.");
+      setSaveFeedback("Đã lưu báo cáo.");
     } catch (error) {
       const isValidationError = error instanceof ApiError && error.status < 500;
       if (isValidationError) {
-        setMessage(error.message);
+        setSaveFeedback(error.message);
+      } else if (wasCachedView) {
+        setSaveFeedback(
+          "Mất kết nối khi lưu. Thay đổi được giữ trên thiết bị; chưa đưa vào queue để tránh ghi đè.",
+        );
       } else {
         const queued = await queueReportSave();
-        setMessage(
+        setSaveFeedback(
           queued
             ? "Mất kết nối. Đã lưu nháp và xếp hàng đồng bộ."
             : "Mất kết nối và không lưu được hàng đợi offline.",
         );
       }
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function reloadServerVersion() {
+    if (!serverConflict) return;
+    if (
+      !window.confirm(
+        "Tải lại bản máy chủ sẽ bỏ các thay đổi đang có trên form. Tiếp tục?",
+      )
+    ) {
+      return;
+    }
+    setSaving(true);
+    try {
+      await applyServerReport(serverConflict, true);
+      setSaveFeedback("Đã tải bản máy chủ. Thay đổi trên form đã được thay thế.");
     } finally {
       setSaving(false);
     }
@@ -434,7 +639,10 @@ export default function SiteReportPage({
   }, [workLogs, plans, workItems]);
 
   return (
-    <div className="mx-auto min-h-screen max-w-2xl space-y-4 bg-gray-100 p-3 pb-28">
+    <div
+      className="mx-auto min-h-screen max-w-2xl space-y-4 bg-gray-100 p-3"
+      style={{ paddingBottom: "calc(10rem + env(safe-area-inset-bottom))" }}
+    >
       <header className="sticky top-0 z-20 -mx-3 border-b border-gray-200 bg-gray-100/95 px-3 py-2 backdrop-blur">
         <div className="flex items-start justify-between gap-2">
           <div>
@@ -498,7 +706,9 @@ export default function SiteReportPage({
 
       {!online && (
         <div className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
-          Đang offline. Mọi thay đổi được lưu trên thiết bị và tự đồng bộ khi có mạng.
+          {offlineCacheAt != null
+            ? "Đang offline. Báo cáo đang xem từ bản lưu trên thiết bị: thay đổi báo cáo chỉ được giữ nháp trên thiết bị, không tự xếp hàng đồng bộ để tránh ghi đè máy chủ. Ảnh mới vẫn được xếp hàng khi mất mạng."
+            : "Đang offline. Thay đổi báo cáo và ảnh mới được lưu/xếp hàng trên thiết bị và tự đồng bộ khi có mạng."}
         </div>
       )}
 
@@ -628,24 +838,61 @@ export default function SiteReportPage({
         Ảnh gốc được bảo toàn. Không tự động gửi Zalo. Dữ liệu nhân lực 0 khác “chưa rõ”.
       </p>
 
-      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-gray-200 bg-white/95 p-3 backdrop-blur">
-        <div className="mx-auto flex max-w-2xl gap-2">
-          <button
-            type="button"
-            className="min-h-12 flex-1 rounded-xl bg-green-700 px-4 text-base font-semibold text-white active:bg-green-800 disabled:opacity-60"
-            disabled={saving}
-            onClick={() => void handleSave()}
-          >
-            {saving ? "Đang lưu…" : "Lưu báo cáo"}
-          </button>
-          <button
-            type="button"
-            className="min-h-12 rounded-xl border border-gray-300 px-4 text-sm font-medium text-gray-800 disabled:opacity-40"
-            disabled={!online || syncing}
-            onClick={() => void syncNow()}
-          >
-            {syncing ? "Đang đồng bộ…" : "Đồng bộ"}
-          </button>
+      <div
+        className="fixed inset-x-0 bottom-0 z-30 border-t border-gray-200 bg-white/95 px-3 pt-3 backdrop-blur"
+        style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}
+      >
+        <div className="mx-auto max-w-2xl space-y-2">
+          {serverConflict && (
+            <div
+              role="alert"
+              className="rounded-lg border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900"
+            >
+              <p>
+                Máy chủ có bản mới hơn. Không tự động ghi đè; thay đổi trên form vẫn
+                được giữ trên thiết bị. Chỉ nút tải lại mới thay thế nội dung form.
+              </p>
+              <button
+                type="button"
+                className="mt-1 min-h-11 w-full rounded-lg bg-red-700 px-3 text-xs font-semibold text-white disabled:opacity-50"
+                disabled={saving}
+                onClick={() => void reloadServerVersion()}
+              >
+                Tải lại bản máy chủ — bỏ thay đổi trên form
+              </button>
+            </div>
+          )}
+          {saveFeedback && !serverConflict && (
+            <p
+              role="status"
+              aria-live="polite"
+              className="rounded-lg bg-slate-100 p-2 text-xs text-slate-700"
+            >
+              {saveFeedback}
+            </p>
+          )}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              className="min-h-12 flex-1 rounded-xl bg-green-700 px-4 text-base font-semibold text-white active:bg-green-800 disabled:opacity-60"
+              disabled={saving || serverConflict != null}
+              onClick={() => void handleSave()}
+            >
+              {saving
+                ? "Đang lưu…"
+                : serverConflict
+                  ? "Cần tải lại máy chủ"
+                  : "Lưu báo cáo"}
+            </button>
+            <button
+              type="button"
+              className="min-h-12 rounded-xl border border-gray-300 px-4 text-sm font-medium text-gray-800 disabled:opacity-40"
+              disabled={!online || syncing}
+              onClick={() => void syncNow()}
+            >
+              {syncing ? "Đang đồng bộ…" : "Đồng bộ"}
+            </button>
+          </div>
         </div>
       </div>
     </div>

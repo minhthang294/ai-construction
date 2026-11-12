@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 
 import httpx
@@ -121,6 +122,21 @@ def main() -> int:
                 headers=headers,
                 json=payload,
             )
+            attempts = 0
+            while response.status_code == 429 and attempts < 3:
+                attempts += 1
+                retry_after = response.headers.get("Retry-After")
+                try:
+                    delay = min(90, max(5, int(retry_after or 60)))
+                except ValueError:
+                    delay = 60
+                print("rate limited; waiting", delay, "seconds", flush=True)
+                time.sleep(delay)
+                response = client.post(
+                    f"{base}/documents/{document['id']}/pages/{page_number}/extractions",
+                    headers=headers,
+                    json=payload,
+                )
             if response.status_code not in (200, 201):
                 print(
                     "error",

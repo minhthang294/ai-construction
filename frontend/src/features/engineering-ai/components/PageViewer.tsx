@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
 import { fetchResourceBlob, getDocumentPage } from "../lib/api";
 import type { DocumentPage } from "../types";
+import {
+  clampPageZoom,
+  MAX_PAGE_ZOOM,
+  MIN_PAGE_ZOOM,
+  stepPageZoom,
+} from "../lib/pageViewport";
 import PageExtractionPanel from "./PageExtractionPanel";
 
 type Props = {
@@ -10,6 +16,7 @@ type Props = {
   totalPages: number;
   onClose: () => void;
   onPageChange: (pageNumber: number) => void;
+  closeLabel?: string;
 };
 
 export default function PageViewer({
@@ -19,11 +26,13 @@ export default function PageViewer({
   totalPages,
   onClose,
   onPageChange,
+  closeLabel = "Đóng",
 }: Props) {
   const [page, setPage] = useState<DocumentPage | null>(null);
   const [renderUrl, setRenderUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [zoom, setZoom] = useState(MIN_PAGE_ZOOM);
 
   useEffect(() => {
     let cancelled = false;
@@ -34,6 +43,7 @@ export default function PageViewer({
       setError(null);
       setPage(null);
       setRenderUrl(null);
+      setZoom(MIN_PAGE_ZOOM);
       try {
         const result = await getDocumentPage(projectId, documentId, pageNumber);
         if (cancelled) return;
@@ -82,18 +92,18 @@ export default function PageViewer({
         <div className="flex items-center gap-2">
           <button
             type="button"
-            className="rounded border border-gray-300 px-2 py-1 text-xs disabled:opacity-40"
+            className="min-h-11 rounded border border-gray-300 px-3 py-2 text-sm disabled:opacity-40"
             onClick={() => onPageChange(pageNumber - 1)}
             disabled={pageNumber <= 1 || loading}
           >
             Trang trước
           </button>
-          <span className="text-xs text-gray-600">
+          <span className="flex min-h-11 items-center text-xs text-gray-600">
             {pageNumber}/{Math.max(1, totalPages)}
           </span>
           <button
             type="button"
-            className="rounded border border-gray-300 px-2 py-1 text-xs disabled:opacity-40"
+            className="min-h-11 rounded border border-gray-300 px-3 py-2 text-sm disabled:opacity-40"
             onClick={() => onPageChange(pageNumber + 1)}
             disabled={pageNumber >= totalPages || loading}
           >
@@ -101,10 +111,10 @@ export default function PageViewer({
           </button>
           <button
             type="button"
-            className="rounded border border-gray-300 px-2 py-1 text-xs"
+            className="min-h-11 rounded border border-gray-300 px-3 py-2 text-sm"
             onClick={onClose}
           >
-            Đóng
+            {closeLabel}
           </button>
         </div>
       </div>
@@ -127,11 +137,55 @@ export default function PageViewer({
             </ul>
           )}
           {renderUrl ? (
-            <img
-              src={renderUrl}
-              alt={`Trang ${pageNumber} bản vẽ`}
-              className="max-h-[70vh] w-full rounded border border-gray-200 object-contain"
-            />
+            <>
+              <div className="flex flex-wrap items-center gap-2 rounded border border-gray-200 bg-gray-50 p-2 text-xs">
+                <button
+                  type="button"
+                  className="min-h-11 min-w-11 rounded border border-gray-300 bg-white px-3 py-2 text-base disabled:opacity-40"
+                  onClick={() => setZoom((current) => stepPageZoom(current, -1))}
+                  disabled={zoom <= MIN_PAGE_ZOOM}
+                  aria-label="Thu nhỏ bản vẽ"
+                >
+                  −
+                </button>
+                <span className="flex min-h-11 min-w-14 items-center justify-center text-sm">
+                  {Math.round(zoom * 100)}%
+                </span>
+                <button
+                  type="button"
+                  className="min-h-11 min-w-11 rounded border border-gray-300 bg-white px-3 py-2 text-base disabled:opacity-40"
+                  onClick={() => setZoom((current) => stepPageZoom(current, 1))}
+                  disabled={zoom >= MAX_PAGE_ZOOM}
+                  aria-label="Phóng to bản vẽ"
+                >
+                  +
+                </button>
+                <button
+                  type="button"
+                  className="min-h-11 rounded border border-gray-300 bg-white px-3 py-2 text-sm disabled:opacity-40"
+                  onClick={() => setZoom(MIN_PAGE_ZOOM)}
+                  disabled={zoom === MIN_PAGE_ZOOM}
+                >
+                  Về 100%
+                </button>
+                <button
+                  type="button"
+                  className="ml-auto min-h-11 rounded border border-gray-300 bg-white px-3 py-2 text-sm"
+                  onClick={onClose}
+                >
+                  {closeLabel}
+                </button>
+              </div>
+              <div className="max-h-[70vh] overflow-auto overscroll-contain rounded border border-gray-200 bg-gray-100">
+                <img
+                  src={renderUrl}
+                  alt={`Trang ${pageNumber} bản vẽ`}
+                  draggable={false}
+                  className="block h-auto max-w-none select-none rounded object-contain"
+                  style={{ width: `${clampPageZoom(zoom) * 100}%` }}
+                />
+              </div>
+            </>
           ) : (
             <p className="text-xs text-gray-500">
               Không có ảnh render cho trang này; chỉ hiển thị text trích xuất.
@@ -146,6 +200,7 @@ export default function PageViewer({
             </pre>
           </div>
           <PageExtractionPanel
+            key={`${documentId}:${pageNumber}`}
             projectId={projectId}
             documentId={documentId}
             pageNumber={pageNumber}

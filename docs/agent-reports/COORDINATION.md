@@ -98,7 +98,20 @@ Nguyên tắc: chỉ dùng DeepSeek V4.1 Flash; OCR vẫn là baseline; không g
 
 Cổng xác minh hiện tại: backend **185 passed**, frontend **34 passed**, build pass; migration head `e2f6a1c9d430`.
 
-## 10. Cổng xác minh
+## 10. Vòng 5 — AI provider, đổi mật khẩu, extraction toàn bộ
+
+| Việc | Chủ sở hữu | Trạng thái |
+| --- | --- | --- |
+| OpenCode DeepSeek provider cho chat backend | engineering-ai-agent | xong: 63 engineering test pass; chat thật trả `165m [2]` |
+| Backend đổi mật khẩu + thu hồi token | acceptance-agent | xong: test core pass; đã smoke API |
+| UI đổi mật khẩu | site-report-agent | xong: build/test pass |
+| Retrieval boost từ page extraction key values | điều phối viên | xong: query “chiều dài cầu cảng” trả đúng trang 10 |
+| Extraction toàn bộ 221 trang còn lại | điều phối viên | thuyết minh 108/108 xong; bản vẽ đang chạy 4 shard |
+| Import extraction còn lại + full gate + backup | điều phối viên | chờ bản vẽ xong |
+
+Cổng xác minh hiện tại: backend **191 passed**, frontend **34 passed**, build pass.
+
+## 11. Cổng xác minh
 
 ```bash
 scripts/verify_all.sh

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import ChatPanel from "../components/ChatPanel";
 import CrossReferencePanel from "../components/CrossReferencePanel";
 import DailyReportDraftPanel from "../components/DailyReportDraftPanel";
@@ -14,13 +14,32 @@ import type { Citation, SourceDocument } from "../types";
 type Props = { projectId: string };
 type Tab = "documents" | "chat" | "crossref" | "reportDraft" | "inspection" | "photos";
 
+const RETURN_LABEL: Record<Tab, string> = {
+  documents: "Hồ sơ & trang",
+  chat: "Hỏi đáp",
+  crossref: "Đối chiếu",
+  reportDraft: "Báo cáo nháp",
+  inspection: "Checklist",
+  photos: "Đề xuất ảnh",
+};
+
 export default function EngineeringAIPage({ projectId }: Props) {
+  // Remount the complete feature on project switch so no prior-project document,
+  // conversation, citation or extraction state can survive. Within one project the
+  // inner state remains mounted for citation return/chat continuity.
+  return <EngineeringAIProjectPage key={projectId} projectId={projectId} />;
+}
+
+function EngineeringAIProjectPage({ projectId }: Props) {
   const [tab, setTab] = useState<Tab>("documents");
   const [documents, setDocuments] = useState<SourceDocument[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [pageNumber, setPageNumber] = useState(1);
+  const [returnTab, setReturnTab] = useState<Tab | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const pageViewerRef = useRef<HTMLDivElement | null>(null);
+  const scrollToViewerRef = useRef(false);
 
   const refresh = useCallback(
     async (showLoading = false) => {
@@ -60,16 +79,39 @@ export default function EngineeringAIPage({ projectId }: Props) {
 
   const selected = documents.find((document) => document.id === selectedId) ?? null;
 
+  useEffect(() => {
+    if (!scrollToViewerRef.current) return;
+    if (tab !== "documents" || !selected || selected.status !== "ready") return;
+    const frame = window.requestAnimationFrame(() => {
+      pageViewerRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      scrollToViewerRef.current = false;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [tab, selectedId, pageNumber, selected?.status]);
+
   function selectDocument(document: SourceDocument) {
+    scrollToViewerRef.current = false;
     setSelectedId(document.id);
     setPageNumber(1);
+    setReturnTab(null);
     setTab("documents");
   }
 
   function openCitation(citation: Citation) {
+    setReturnTab(tab !== "documents" ? tab : null);
+    scrollToViewerRef.current = true;
     setSelectedId(citation.document_id);
     setPageNumber(citation.page_number);
     setTab("documents");
+  }
+
+  function closePage() {
+    scrollToViewerRef.current = false;
+    setSelectedId(null);
+    if (returnTab) {
+      setTab(returnTab);
+      setReturnTab(null);
+    }
   }
 
   async function openOriginal(document: SourceDocument) {
@@ -144,7 +186,11 @@ export default function EngineeringAIPage({ projectId }: Props) {
             className={`rounded px-3 py-2 text-sm font-medium ${
               tab === value ? "bg-blue-600 text-white" : "border border-gray-300 bg-white"
             }`}
-            onClick={() => setTab(value)}
+            onClick={() => {
+              scrollToViewerRef.current = false;
+              setTab(value);
+              setReturnTab(null);
+            }}
           >
             {label}
           </button>
@@ -178,17 +224,20 @@ export default function EngineeringAIPage({ projectId }: Props) {
             loading={loading}
           />
           {selected && selected.status === "ready" && (
-            <VersionComparePanel projectId={projectId} document={selected} />
+            <VersionComparePanel key={selected.id} projectId={projectId} document={selected} />
           )}
           {selected && selected.status === "ready" && (
-            <PageViewer
-              projectId={projectId}
-              documentId={selected.id}
-              pageNumber={pageNumber}
-              totalPages={Math.max(selected.page_count, 1)}
-              onClose={() => setSelectedId(null)}
-              onPageChange={setPageNumber}
-            />
+            <div ref={pageViewerRef} className="scroll-mt-2">
+              <PageViewer
+                projectId={projectId}
+                documentId={selected.id}
+                pageNumber={pageNumber}
+                totalPages={Math.max(selected.page_count, 1)}
+                onClose={closePage}
+                onPageChange={setPageNumber}
+                closeLabel={returnTab ? `Quay lại ${RETURN_LABEL[returnTab]}` : "Đóng"}
+              />
+            </div>
           )}
           {selected && selected.status !== "ready" && (
             <div className="rounded border border-gray-200 bg-white p-3 text-xs text-gray-700">
@@ -200,9 +249,9 @@ export default function EngineeringAIPage({ projectId }: Props) {
         </div>
       )}
 
-      {tab === "chat" && (
-        <ChatPanel projectId={projectId} onOpenCitation={openCitation} />
-      )}
+      <div hidden={tab !== "chat"}>
+        <ChatPanel key={projectId} projectId={projectId} onOpenCitation={openCitation} />
+      </div>
 
       {tab === "crossref" && (
         <CrossReferencePanel

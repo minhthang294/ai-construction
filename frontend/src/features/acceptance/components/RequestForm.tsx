@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getDailyReportByDate } from "../lib/api";
+import { shouldMarkSaved } from "../lib/formGuard";
 import type {
   AcceptanceRequest,
   FieldKind,
@@ -14,8 +15,9 @@ type Props = {
   initial?: AcceptanceRequest | null;
   dailyReport?: LinkedDailyReport | null;
   profiles?: ParticipantProfile[];
-  onSubmit: (input: RequestInput) => Promise<void> | void;
+  onSubmit: (input: RequestInput) => Promise<boolean | void> | boolean | void;
   onCancel?: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
   submitting?: boolean;
 };
 
@@ -109,6 +111,7 @@ export default function RequestForm({
   profiles = [],
   onSubmit,
   onCancel,
+  onDirtyChange,
   submitting = false,
 }: Props) {
   const [form, setForm] = useState<FormState>(() => toForm(initial));
@@ -126,6 +129,7 @@ export default function RequestForm({
     setDailyReportDate(dailyReport?.report_date ?? "");
     setReportMessage(null);
     setError(null);
+    onDirtyChange?.(false);
   }, [initial?.id]);
 
   useEffect(() => {
@@ -169,6 +173,7 @@ export default function RequestForm({
     setDailyReportDate("");
     setReportMessage(null);
     setForm((previous) => ({ ...previous, daily_report_id: "" }));
+    onDirtyChange?.(true);
   }
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
@@ -204,14 +209,20 @@ export default function RequestForm({
       notes: nullable(form.notes),
     };
     try {
-      await onSubmit(payload);
+      const result = await onSubmit(payload);
+      if (shouldMarkSaved(result)) onDirtyChange?.(false);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Không lưu được PYC.");
     }
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-3" aria-label="Phiếu yêu cầu nghiệm thu">
+    <form
+      onSubmit={handleSubmit}
+      onChange={() => onDirtyChange?.(true)}
+      className="space-y-3"
+      aria-label="Phiếu yêu cầu nghiệm thu"
+    >
       <h2 className="text-lg font-semibold">
         {initial ? `Sửa PYC ${initial.number}` : "Tạo PYC nháp"}
       </h2>

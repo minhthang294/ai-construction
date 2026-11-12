@@ -33,7 +33,7 @@ export default function CitationCard({ citation, onOpen }: Props) {
       {onOpen && (
         <button
           type="button"
-          className="rounded border border-blue-300 bg-white px-2 py-1 text-[11px] text-blue-800"
+          className="min-h-11 rounded border border-blue-300 bg-white px-3 py-2 text-xs text-blue-800"
           onClick={() => onOpen(citation)}
         >
           Xem trang nguồn

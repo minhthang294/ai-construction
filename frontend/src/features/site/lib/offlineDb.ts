@@ -15,6 +15,10 @@ export type DraftRecord = {
   projectId: string;
   date: string;
   payload: unknown;
+  /** Server `updated_at` this draft was based on, when known. */
+  baseUpdatedAt?: string | null;
+  /** Content key of the base body, used to detect real local edits. */
+  baselineKey?: string | null;
   updatedAt: number;
 };
 

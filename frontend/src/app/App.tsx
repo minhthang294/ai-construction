@@ -6,6 +6,16 @@ import { Dashboard, ProjectSetup, WorkItemList, request } from "./CorePages";
 import type { Project } from "./CorePages";
 import ChangePasswordDialog from "./ChangePasswordDialog";
 
+export function needsAcceptanceLeaveConfirmation(
+  page: string,
+  nextPage: string,
+  projectId: string,
+  nextProjectId: string,
+  dirty: boolean,
+) {
+  return page === "acceptance" && dirty && (nextPage !== page || nextProjectId !== projectId);
+}
+
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem("access_token") || "");
   const [projects, setProjects] = useState<Project[]>([]);
@@ -16,6 +26,7 @@ export default function App() {
   const [error, setError] = useState("");
   const [loginNotice, setLoginNotice] = useState("");
   const [showChangePassword, setShowChangePassword] = useState(false);
+  const [acceptanceDirty, setAcceptanceDirty] = useState(false);
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "Asia/Ho_Chi_Minh",
     year: "numeric",
@@ -57,6 +68,7 @@ export default function App() {
   }
 
   function signOut() {
+    if (!canLeaveAcceptance("dashboard")) return;
     void request("/auth/logout", token, { method: "POST" }).catch(() => undefined);
     localStorage.removeItem("access_token");
     setToken("");
@@ -66,6 +78,13 @@ export default function App() {
     setShowChangePassword(false);
     setLoginNotice("");
     setError("");
+  }
+
+  function canLeaveAcceptance(nextPage: string, nextProjectId = projectId) {
+    return (
+      !needsAcceptanceLeaveConfirmation(page, nextPage, projectId, nextProjectId, acceptanceDirty) ||
+      window.confirm("PYC/BBNT có thay đổi chưa lưu. Bỏ thay đổi và tiếp tục?")
+    );
   }
 
   function handlePasswordChanged() {
@@ -160,7 +179,9 @@ export default function App() {
             <button
               type="button"
               className="underline"
-              onClick={() => setShowChangePassword(true)}
+              onClick={() => {
+                if (canLeaveAcceptance("dashboard")) setShowChangePassword(true);
+              }}
             >
               Đổi mật khẩu
             </button>
@@ -176,7 +197,11 @@ export default function App() {
           Công trình
           <select
             value={projectId}
-            onChange={(event) => setProjectId(event.target.value)}
+            onChange={(event) => {
+              if (canLeaveAcceptance(page, event.target.value)) {
+                setProjectId(event.target.value);
+              }
+            }}
             className="block w-full rounded border p-2"
           >
             <option value="">Chọn công trình</option>
@@ -195,7 +220,9 @@ export default function App() {
           {menu.map((item) => (
             <button
               key={item}
-              onClick={() => setPage(item)}
+              onClick={() => {
+                if (canLeaveAcceptance(item)) setPage(item);
+              }}
               className={`whitespace-nowrap rounded px-3 py-2 ${
                 page === item ? "bg-teal-700 text-white" : "border bg-white"
               }`}
@@ -227,7 +254,7 @@ export default function App() {
             onOpenAcceptance={() => setPage("acceptance")}
           />
         ) : projectId && page === "acceptance" ? (
-          <AcceptancePage projectId={projectId} />
+          <AcceptancePage projectId={projectId} onDirtyChange={setAcceptanceDirty} />
         ) : projectId && (page === "documents" || page === "ai") ? (
           <EngineeringAIPage projectId={projectId} />
         ) : (

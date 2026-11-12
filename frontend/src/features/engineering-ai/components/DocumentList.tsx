@@ -49,7 +49,7 @@ export default function DocumentList({
         <div>
           <h2 className="text-sm font-semibold">Hồ sơ nguồn</h2>
           <p className="text-xs text-gray-600">
-            Chỉ hồ sơ <span className="font-medium">ready</span> và phiên bản hiện hành
+            Chỉ hồ sơ <span className="font-medium">ready</span> và phiên bản có hiệu lực
             được dùng để trả lời.
           </p>
         </div>
@@ -135,7 +135,7 @@ export default function DocumentList({
                 {!document.is_effective && onConfirmEffective && (
                   <button
                     type="button"
-                    className="rounded border border-emerald-400 bg-emerald-50 px-2 py-1 text-[11px] text-emerald-900"
+                    className="min-h-11 rounded border border-emerald-400 bg-emerald-50 px-3 py-2 text-xs text-emerald-900"
                     onClick={() => onConfirmEffective(document)}
                   >
                     Xác nhận hiệu lực
@@ -144,7 +144,7 @@ export default function DocumentList({
                 {document.status === "failed" && onReingest && (
                   <button
                     type="button"
-                    className="rounded border border-amber-400 bg-amber-50 px-2 py-1 text-[11px] text-amber-900"
+                    className="min-h-11 rounded border border-amber-400 bg-amber-50 px-3 py-2 text-xs text-amber-900"
                     onClick={() => onReingest(document)}
                   >
                     Xử lý lại
@@ -152,7 +152,7 @@ export default function DocumentList({
                 )}
                 <button
                   type="button"
-                  className="rounded border border-gray-300 px-2 py-1 text-[11px]"
+                  className="min-h-11 rounded border border-gray-300 px-3 py-2 text-xs"
                   onClick={() => onOpenOriginal(document)}
                 >
                   Mở PDF gốc

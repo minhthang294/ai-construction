@@ -1,5 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { listPageExtractions, verifyPageExtraction } from "../lib/api";
+import {
+  isExtractionInScope,
+  isStaleExtractionResponse,
+} from "../lib/pageExtractionGuard";
 import type { PageExtractionRecord } from "../types";
 
 type Props = {
@@ -26,27 +30,70 @@ export default function PageExtractionPanel({
   pageNumber,
 }: Props) {
   const [rows, setRows] = useState<PageExtractionRecord[]>([]);
+  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  async function refresh() {
-    try {
-      setRows(await listPageExtractions(projectId, documentId, pageNumber));
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Không tải được extraction.");
-    }
-  }
+  const requestIdRef = useRef(0);
 
   useEffect(() => {
-    void refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    let cancelled = false;
+    const requestId = ++requestIdRef.current;
+    // Never show the previous page's extraction while the new request runs.
+    setRows([]);
+    setLoading(true);
+    setError(null);
+
+    listPageExtractions(projectId, documentId, pageNumber)
+      .then((data) => {
+        if (
+          cancelled ||
+          isStaleExtractionResponse(requestId, requestIdRef.current)
+        ) {
+          return;
+        }
+        setRows(
+          data.filter((row) =>
+            isExtractionInScope(row, projectId, documentId, pageNumber),
+          ),
+        );
+      })
+      .catch((err) => {
+        if (
+          cancelled ||
+          isStaleExtractionResponse(requestId, requestIdRef.current)
+        ) {
+          return;
+        }
+        setError(
+          err instanceof Error ? err.message : "Không tải được extraction.",
+        );
+      })
+      .finally(() => {
+        if (
+          cancelled ||
+          isStaleExtractionResponse(requestId, requestIdRef.current)
+        ) {
+          return;
+        }
+        setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+      requestIdRef.current += 1;
+    };
   }, [projectId, documentId, pageNumber]);
 
   async function decide(
     row: PageExtractionRecord,
     status: "verified" | "rejected",
   ) {
+    if (busy || loading) return;
+    if (!isExtractionInScope(row, projectId, documentId, pageNumber)) {
+      setError("Extraction không còn thuộc trang hiện tại; đã bỏ qua thao tác.");
+      return;
+    }
+    const requestId = requestIdRef.current;
     const note = window.prompt(
       status === "verified"
         ? "Ghi chú xác nhận (đã đối chiếu trang gốc):"
@@ -62,18 +109,28 @@ export default function PageExtractionPanel({
         status,
         note.trim() || undefined,
       );
+      if (isStaleExtractionResponse(requestId, requestIdRef.current)) {
+        return;
+      }
       setRows((previous) =>
         previous.map((item) => (item.id === updated.id ? updated : item)),
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Không cập nhật được trạng thái.");
+      if (!isStaleExtractionResponse(requestId, requestIdRef.current)) {
+        setError(
+          err instanceof Error ? err.message : "Không cập nhật được trạng thái.",
+        );
+      }
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <section className="space-y-2 rounded border border-purple-200 bg-purple-50/40 p-2">
+    <section
+      className="space-y-2 rounded border border-purple-200 bg-purple-50/40 p-2"
+      aria-busy={loading || busy}
+    >
       <div>
         <h3 className="text-xs font-semibold text-purple-950">
           Trích xuất AI cho trang (POC)
@@ -84,8 +141,11 @@ export default function PageExtractionPanel({
         </p>
       </div>
 
+      {loading && (
+        <p className="text-[11px] text-gray-600">Đang tải extraction của trang...</p>
+      )}
       {error && <div className="rounded bg-red-50 p-2 text-xs text-red-800">{error}</div>}
-      {rows.length === 0 && (
+      {!loading && !error && rows.length === 0 && (
         <p className="text-[11px] text-gray-600">Chưa có extraction AI cho trang này.</p>
       )}
 
@@ -143,17 +203,17 @@ export default function PageExtractionPanel({
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                className="rounded bg-green-600 px-2 py-1 text-[11px] font-semibold text-white disabled:opacity-50"
+                className="min-h-11 min-w-28 rounded bg-green-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
                 onClick={() => void decide(row, "verified")}
-                disabled={busy}
+                disabled={busy || loading}
               >
                 Xác nhận
               </button>
               <button
                 type="button"
-                className="rounded bg-red-600 px-2 py-1 text-[11px] font-semibold text-white disabled:opacity-50"
+                className="min-h-11 min-w-28 rounded bg-red-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
                 onClick={() => void decide(row, "rejected")}
-                disabled={busy}
+                disabled={busy || loading}
               >
                 Từ chối
               </button>

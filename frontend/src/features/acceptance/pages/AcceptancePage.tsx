@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import AcceptanceHistoryPanel from "../components/AcceptanceHistoryPanel";
 import ConfirmDialog from "../components/ConfirmDialog";
 import NumberingPanel from "../components/NumberingPanel";
@@ -39,8 +39,17 @@ import type {
   YesNo,
 } from "../types";
 import { emptyChecklist } from "../types";
+import {
+  DISCARD_MESSAGE,
+  requiresDiscardConfirmation,
+  shouldOfferRevision,
+  type GuardTarget,
+} from "../lib/formGuard";
 
-type Props = { projectId: string };
+type Props = {
+  projectId: string;
+  onDirtyChange?: (dirty: boolean) => void;
+};
 
 type Tab = "requests" | "records";
 
@@ -164,7 +173,7 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Thao tác thất bại.";
 }
 
-export default function AcceptancePage({ projectId }: Props) {
+export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
   const [tab, setTab] = useState<Tab>("requests");
   const [requests, setRequests] = useState<AcceptanceRequest[]>([]);
   const [records, setRecords] = useState<AcceptanceRecord[]>([]);
@@ -180,6 +189,24 @@ export default function AcceptancePage({ projectId }: Props) {
   >({});
   const [profiles, setProfiles] = useState<ParticipantProfile[]>([]);
   const [preview, setPreview] = useState<PreviewPayload | null>(null);
+  const [requestDirty, setRequestDirty] = useState(false);
+  const [recordDirty, setRecordDirty] = useState(false);
+  const onDirtyChangeRef = useRef(onDirtyChange);
+
+  useEffect(() => {
+    onDirtyChangeRef.current = onDirtyChange;
+    onDirtyChange?.(requestDirty || recordDirty);
+  }, [onDirtyChange]);
+
+  useEffect(() => {
+    onDirtyChangeRef.current?.(requestDirty || recordDirty);
+  }, [requestDirty, recordDirty]);
+
+  useEffect(() => {
+    return () => {
+      onDirtyChangeRef.current?.(false);
+    };
+  }, [projectId]);
 
   async function refresh() {
     const [requestList, recordList] = await Promise.all([
@@ -212,6 +239,8 @@ export default function AcceptancePage({ projectId }: Props) {
     setEditingRequest(null);
     setLastExport(null);
     setPreview(null);
+    setRequestDirty(false);
+    setRecordDirty(false);
     return () => {
       active = false;
     };
@@ -245,6 +274,74 @@ export default function AcceptancePage({ projectId }: Props) {
     return records.find((record) => record.request_id === requestId);
   }
 
+  function confirmDiscard(target: GuardTarget): boolean {
+    const snapshot = {
+      tab,
+      requestDirty,
+      recordDirty,
+      hasEditingRequest: Boolean(editingRequest),
+      hasDraft: Boolean(draft),
+    };
+    if (!requiresDiscardConfirmation(snapshot, target)) return true;
+    return window.confirm(DISCARD_MESSAGE);
+  }
+
+  function loadDraft(next: RecordDraft | null) {
+    setDraft(next);
+    setRecordDirty(false);
+  }
+
+  function updateDraft(updater: (current: RecordDraft) => RecordDraft) {
+    setDraft((current) => (current ? updater(current) : current));
+    setRecordDirty(true);
+  }
+
+  function switchTab(next: Tab) {
+    if (next === tab) return;
+    if (!confirmDiscard({ type: "switch-tab", tab: next })) return;
+    if (tab === "requests") {
+      setEditingRequest(null);
+      setRequestDirty(false);
+    } else {
+      setDraft(null);
+      setRecordDirty(false);
+    }
+    setPreview(null);
+    setTab(next);
+  }
+
+  function closeRequestEditor() {
+    if (!confirmDiscard({ type: "close-request" })) return;
+    setEditingRequest(null);
+    setRequestDirty(false);
+  }
+
+  function closeRecordEditor() {
+    if (!confirmDiscard({ type: "close-record" })) return;
+    setConfirming(false);
+    setDraft(null);
+    setRecordDirty(false);
+  }
+
+  function startEditRequest(request: AcceptanceRequest) {
+    if (editingRequest === request) {
+      setTab("requests");
+      return;
+    }
+    if (tab === "records" && !confirmDiscard({ type: "switch-tab", tab: "requests" })) {
+      return;
+    }
+    if (!confirmDiscard({ type: "edit-request" })) return;
+    if (tab === "records") {
+      setDraft(null);
+      setRecordDirty(false);
+    }
+    setRequestDirty(false);
+    setPreview(null);
+    setTab("requests");
+    setEditingRequest(request);
+  }
+
   async function openRequestById(requestId: string) {
     let request = requests.find((item) => item.id === requestId);
     if (!request) {
@@ -255,8 +352,19 @@ export default function AcceptancePage({ projectId }: Props) {
       setMessage("Không tìm thấy PYC trong danh sách hiện tại.");
       return;
     }
+    if (tab === "records" && !confirmDiscard({ type: "switch-tab", tab: "requests" })) {
+      return;
+    }
+    if (tab === "requests" && editingRequest !== request && !confirmDiscard({ type: "edit-request" })) {
+      return;
+    }
+    if (tab === "records") {
+      setDraft(null);
+      setRecordDirty(false);
+    }
     setPreview(null);
     setTab("requests");
+    setRequestDirty(false);
     setEditingRequest(request);
   }
 
@@ -274,12 +382,22 @@ export default function AcceptancePage({ projectId }: Props) {
       setMessage("Không tìm thấy BBNT trong danh sách hiện tại.");
       return;
     }
+    if (tab === "requests" && !confirmDiscard({ type: "switch-tab", tab: "records" })) {
+      return;
+    }
+    if (tab === "records" && draft && !confirmDiscard({ type: "close-record" })) {
+      return;
+    }
+    if (tab === "requests") {
+      setEditingRequest(null);
+      setRequestDirty(false);
+    }
     setPreview(null);
     setTab("records");
-    setDraft(draftFor(record, request));
+    loadDraft(draftFor(record, request));
   }
 
-  async function saveRequest(input: RequestInput) {
+  async function saveRequest(input: RequestInput): Promise<boolean> {
     setBusy(true);
     setError(null);
     try {
@@ -291,16 +409,28 @@ export default function AcceptancePage({ projectId }: Props) {
         setMessage(`Đã tạo PYC nháp ${input.number}.`);
       }
       setEditingRequest(null);
+      setRequestDirty(false);
       await refresh();
+      return true;
     } catch (cause) {
       setError(errorMessage(cause));
-      throw cause;
+      return false;
     } finally {
       setBusy(false);
     }
   }
 
   function startRecord(request: AcceptanceRequest) {
+    if (tab === "records" && draft && !confirmDiscard({ type: "close-record" })) {
+      return;
+    }
+    if (tab === "requests" && !confirmDiscard({ type: "switch-tab", tab: "records" })) {
+      return;
+    }
+    if (tab === "requests" && requestDirty) {
+      setEditingRequest(null);
+      setRequestDirty(false);
+    }
     const existing = recordFor(request.id);
     setError(null);
     setMessage(null);
@@ -309,9 +439,9 @@ export default function AcceptancePage({ projectId }: Props) {
       if (existing.status === "confirmed") {
         setMessage("BBNT đã được xác nhận và chỉ được xem/xuất.");
       }
-      setDraft(draftFor(existing, request));
+      loadDraft(draftFor(existing, request));
     } else {
-      setDraft(newDraft(request));
+      loadDraft(newDraft(request));
     }
   }
 
@@ -330,7 +460,7 @@ export default function AcceptancePage({ projectId }: Props) {
       }
       const { requestList, recordList } = await refresh();
       const request = requestList.find((item) => item.id === saved.request_id);
-      setDraft(draftFor(saved, request));
+      loadDraft(draftFor(saved, request));
       setRecords(recordList);
       setMessage(
         saved.status === "confirmed"
@@ -355,7 +485,7 @@ export default function AcceptancePage({ projectId }: Props) {
       });
       const { requestList, recordList } = await refresh();
       const request = requestList.find((item) => item.id === confirmed.request_id);
-      setDraft(draftFor(confirmed, request));
+      loadDraft(draftFor(confirmed, request));
       setRecords(recordList);
       setConfirming(false);
       setMessage("Đã ghi nhận xác nhận của người có quyền.");
@@ -407,13 +537,20 @@ export default function AcceptancePage({ projectId }: Props) {
 
   async function handleRevision() {
     if (!draft?.id) return;
+    if (
+      !window.confirm(
+        "Tạo revision mới từ bản hiện tại? Bản cũ sẽ được giữ nguyên và revision mới ở trạng thái nháp.",
+      )
+    ) {
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
       const revised = await createRecordRevision(projectId, draft.id);
       const { requestList, recordList } = await refresh();
       const request = requestList.find((item) => item.id === revised.request_id);
-      setDraft(draftFor(revised, request));
+      loadDraft(draftFor(revised, request));
       setRecords(recordList);
       setPreview(null);
       setMessage(`Đã tạo revision ${revised.revision}; bản cũ được giữ nguyên.`);
@@ -455,14 +592,14 @@ export default function AcceptancePage({ projectId }: Props) {
         <div className="flex gap-2">
           <button
             type="button"
-            onClick={() => setTab("requests")}
+            onClick={() => switchTab("requests")}
             className={`rounded px-3 py-2 text-sm ${tab === "requests" ? "bg-teal-700 text-white" : "border bg-white"}`}
           >
             Phiếu yêu cầu (PYC)
           </button>
           <button
             type="button"
-            onClick={() => setTab("records")}
+            onClick={() => switchTab("records")}
             className={`rounded px-3 py-2 text-sm ${tab === "records" ? "bg-teal-700 text-white" : "border bg-white"}`}
           >
             Biên bản nghiệm thu (BBNT)
@@ -520,7 +657,8 @@ export default function AcceptancePage({ projectId }: Props) {
                 profiles={profiles}
                 submitting={busy}
                 onSubmit={saveRequest}
-                onCancel={() => setEditingRequest(null)}
+                onDirtyChange={setRequestDirty}
+                onCancel={closeRequestEditor}
               />
             </div>
           ) : (
@@ -560,41 +698,48 @@ export default function AcceptancePage({ projectId }: Props) {
                     </div>
                     <button
                       type="button"
-                      onClick={() => setEditingRequest(request)}
-                      className="rounded border px-3 py-2 text-sm"
-                    >
-                      Sửa
-                    </button>
-                    <button
-                      type="button"
                       onClick={() => startRecord(request)}
-                      className="rounded border border-teal-700 px-3 py-2 text-sm text-teal-800"
+                      className="min-h-11 rounded bg-teal-700 px-4 py-2 text-sm font-semibold text-white"
                     >
                       {record ? "Mở BBNT" : "Tạo BBNT"}
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => handlePreviewRequest(request)}
-                      className="rounded border px-3 py-2 text-sm"
-                    >
-                      Xem trước
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleExportRequest(request, "xlsx")}
-                      disabled={busy}
-                      className="rounded bg-slate-700 px-3 py-2 text-sm text-white disabled:opacity-50"
-                    >
-                      PYC Excel
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleExportRequest(request, "pdf")}
-                      disabled={busy}
-                      className="rounded bg-slate-700 px-3 py-2 text-sm text-white disabled:opacity-50"
-                    >
-                      PYC PDF
-                    </button>
+                    <details className="relative">
+                      <summary className="min-h-11 cursor-pointer list-none rounded border px-4 py-2 text-sm [&::-webkit-details-marker]:hidden">
+                        Thao tác
+                      </summary>
+                      <div className="absolute right-0 z-10 mt-1 w-48 rounded border bg-white p-1 shadow-lg">
+                        <button
+                          type="button"
+                          onClick={() => startEditRequest(request)}
+                          className="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-50"
+                        >
+                          Sửa PYC
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handlePreviewRequest(request)}
+                          className="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-50"
+                        >
+                          Xem trước
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleExportRequest(request, "xlsx")}
+                          disabled={busy}
+                          className="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-50 disabled:opacity-50"
+                        >
+                          PYC Excel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleExportRequest(request, "pdf")}
+                          disabled={busy}
+                          className="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-50 disabled:opacity-50"
+                        >
+                          PYC PDF
+                        </button>
+                      </div>
+                    </details>
                   </li>
                 );
               })}
@@ -677,7 +822,7 @@ export default function AcceptancePage({ projectId }: Props) {
                     className="mt-1 w-full rounded border p-3"
                     value={draft.record_date}
                     disabled={draft.status === "confirmed"}
-                    onChange={(event) => setDraft({ ...draft, record_date: event.target.value })}
+                    onChange={(event) => updateDraft((current) => ({ ...current, record_date: event.target.value }))}
                   />
                 </label>
                 <label className="block text-sm">
@@ -687,7 +832,7 @@ export default function AcceptancePage({ projectId }: Props) {
                     value={draft.start_time}
                     placeholder="Ví dụ: 15h00"
                     disabled={draft.status === "confirmed"}
-                    onChange={(event) => setDraft({ ...draft, start_time: event.target.value })}
+                    onChange={(event) => updateDraft((current) => ({ ...current, start_time: event.target.value }))}
                   />
                 </label>
                 <label className="block text-sm">
@@ -697,7 +842,7 @@ export default function AcceptancePage({ projectId }: Props) {
                     value={draft.end_time}
                     placeholder="Ví dụ: 16h20"
                     disabled={draft.status === "confirmed"}
-                    onChange={(event) => setDraft({ ...draft, end_time: event.target.value })}
+                    onChange={(event) => updateDraft((current) => ({ ...current, end_time: event.target.value }))}
                   />
                 </label>
                 <label className="block text-sm">
@@ -707,7 +852,10 @@ export default function AcceptancePage({ projectId }: Props) {
                     value={draft.design_compliance}
                     disabled={draft.status === "confirmed"}
                     onChange={(event) =>
-                      setDraft({ ...draft, design_compliance: event.target.value as YesNo | "" })
+                      updateDraft((current) => ({
+                        ...current,
+                        design_compliance: event.target.value as YesNo | "",
+                      }))
                     }
                   >
                     <option value="">Chưa đánh giá</option>
@@ -722,10 +870,10 @@ export default function AcceptancePage({ projectId }: Props) {
                     value={draft.technical_compliance}
                     disabled={draft.status === "confirmed"}
                     onChange={(event) =>
-                      setDraft({
-                        ...draft,
+                      updateDraft((current) => ({
+                        ...current,
                         technical_compliance: event.target.value as YesNo | "",
-                      })
+                      }))
                     }
                   >
                     <option value="">Chưa đánh giá</option>
@@ -742,20 +890,20 @@ export default function AcceptancePage({ projectId }: Props) {
                   rows={2}
                   value={draft.other_notes}
                   disabled={draft.status === "confirmed"}
-                  onChange={(event) => setDraft({ ...draft, other_notes: event.target.value })}
+                  onChange={(event) => updateDraft((current) => ({ ...current, other_notes: event.target.value }))}
                 />
               </label>
 
               <ParticipantsEditor
                 items={draft.participants}
                 disabled={draft.status === "confirmed"}
-                onChange={(participants) => setDraft({ ...draft, participants })}
+                onChange={(participants) => updateDraft((current) => ({ ...current, participants }))}
               />
 
               <TriStateChecklist
                 items={draft.checklist}
                 disabled={draft.status === "confirmed"}
-                onChange={(checklist) => setDraft({ ...draft, checklist })}
+                onChange={(checklist) => updateDraft((current) => ({ ...current, checklist }))}
               />
 
               <label className="block text-sm">
@@ -765,7 +913,7 @@ export default function AcceptancePage({ projectId }: Props) {
                   rows={2}
                   value={draft.conclusion_note}
                   disabled={draft.status === "confirmed"}
-                  onChange={(event) => setDraft({ ...draft, conclusion_note: event.target.value })}
+                  onChange={(event) => updateDraft((current) => ({ ...current, conclusion_note: event.target.value }))}
                 />
               </label>
 
@@ -800,12 +948,12 @@ export default function AcceptancePage({ projectId }: Props) {
                     Xem trước
                   </button>
                 )}
-                {draft.id && (
+                {draft.id && shouldOfferRevision(draft.status, draft.stale) && (
                   <button
                     type="button"
                     onClick={handleRevision}
                     disabled={busy}
-                    className="rounded border border-amber-600 px-4 py-3 text-amber-800 disabled:opacity-50"
+                    className="min-h-11 rounded border border-amber-600 px-4 py-3 text-amber-800 disabled:opacity-50"
                   >
                     Tạo revision
                   </button>
@@ -854,8 +1002,8 @@ export default function AcceptancePage({ projectId }: Props) {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setDraft(null)}
-                  className="rounded border px-4 py-3"
+                  onClick={closeRecordEditor}
+                  className="min-h-11 rounded border px-4 py-3"
                 >
                   Đóng
                 </button>

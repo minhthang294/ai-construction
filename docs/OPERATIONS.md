@@ -25,7 +25,7 @@ cat data/.admin-initial-password
 rm data/.admin-initial-password
 ```
 
-Chưa có màn hình đổi mật khẩu; nếu cần đổi, tạo user admin mới hoặc cập nhật `users.password_hash` qua script quản trị.
+Có thể đổi mật khẩu ngay trong giao diện: nút **Đổi mật khẩu** ở header. Backend thu hồi toàn bộ token cũ và buộc đăng nhập lại.
 
 ## 3. Dữ liệu thật đã nạp
 
@@ -36,23 +36,26 @@ Chưa có màn hình đổi mật khẩu; nếu cần đổi, tạo user admin m
   - `Tập 1 - thuyết minh báo cáo KTKT sửa chữa nứt cọc dầm cầu cảng_0001.pdf` — 108 trang, trạng thái `ready`
 - Storage: `data/storage/engineering-ai` (khoảng 450 MB render + file gốc).
 - Search/chat theo project đã trả citation và mở đúng trang render.
+- Chat backend dùng **OpenCode DeepSeek V4.1 Flash** (`ENGINEERING_AI_PROVIDER=opencode_deepseek`); nếu OpenCode service lỗi thì tự fallback extractive, vẫn giữ citation.
+- Ví dụ đã kiểm tra: “Chiều dài cầu cảng là bao nhiêu?” → `165m [2]`, citation trang 10 hồ sơ thuyết minh.
 
 ## 4. Page extraction
 
-- 20 trang đã import vào bảng `engineering_ai_page_extractions`:
-  - 10 trang bản vẽ: mode `tile`, 594 key values
-  - 10 trang thuyết minh: mode `direct`, 75 key values
-- Tất cả đang ở trạng thái `proposed`; **chưa có trang nào được kỹ sư xác nhận**.
+- Đã import 20 trang POC ban đầu; đang chạy extraction toàn bộ 241 trang.
+- Thuyết minh: **108/108 trang** đã extraction.
+- Bản vẽ: đang chạy 4 shard, dự kiến hoàn tất sau.
+- Dữ liệu extraction nằm trong `engineering_ai_page_extractions`, mặc định `proposed`.
 - Review trong `AI hồ sơ kỹ thuật → Hồ sơ & trang → chọn trang`: panel hiển thị summary/key values/warnings/confidence, nút Xác nhận/Từ chối.
 - Chỉ dữ liệu `verified` mới nên dùng làm thông tin tin cậy; `proposed` phải đối chiếu trang gốc.
-- Chạy thêm extraction:
+- Import kết quả extraction hàng loạt:
 
 ```bash
-scripts/deepseek_page_extract.py \
-  --pdf "/path/to/file.pdf" \
-  --pages 1-20 \
-  --out /tmp/opencode/extract \
-  --mode direct
+.venv/bin/python scripts/import_page_extractions.py \
+  /tmp/opencode/full-drawings-a \
+  /tmp/opencode/full-drawings-b \
+  /tmp/opencode/full-drawings-c \
+  /tmp/opencode/full-drawings-d \
+  --prompt-version batch-v1
 ```
 
 Với bản vẽ dùng `--tile-grid 2 --tile-workers 4`. Script chỉ dùng DeepSeek V4.1 Flash.
@@ -85,16 +88,15 @@ scripts/verify_all.sh
 
 Kết quả hiện tại:
 
-- Backend: **185 passed**
+- Backend: **191 passed**
 - Frontend: **34 passed**
 - Production build: pass
 - Migration head: `e2f6a1c9d430`
 
 ## 8. Giới hạn cần biết
 
-1. **AI trả lời mặc định là offline extractive**, chưa cấu hình LLM provider. Câu trả lời có citation nhưng có thể chỉ liệt kê đoạn liên quan, chưa diễn giải tốt.
+1. **AI trả lời dùng OpenCode DeepSeek V4.1 Flash** ở backend (`ENGINEERING_AI_PROVIDER=opencode_deepseek`). Nếu OpenCode service không khả dụng, tự fallback extractive. Câu trả lời vẫn có citation và kiểm tra grounding.
 2. **OCR bản vẽ có lỗi**; không dùng số OCR/model làm kết luận kỹ thuật khi chưa kiểm tra trang gốc.
-3. **Page extraction 20 trang mới là proposed**, chưa verified; chưa chạy toàn bộ 241 trang.
+3. **Page extraction toàn bộ 241 trang đang chạy nền**; dữ liệu mới ở trạng thái `proposed` cho đến khi kỹ sư xác nhận.
 4. **PWA/camera trên điện thoại** cần HTTPS và kiểm tra thiết bị thật.
-5. **Chưa có màn hình đổi mật khẩu**; xử lý file mật khẩu ban đầu cẩn thận.
-6. SQLite một file; phù hợp một máy/công trường nhỏ, chưa phải multi-worker.
+5. SQLite một file; phù hợp một máy/công trường nhỏ, chưa phải multi-worker.
