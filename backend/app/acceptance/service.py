@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import subprocess
+import unicodedata
 import uuid
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -44,8 +45,10 @@ from .schemas import (
 from .template import copy_and_fill, sha256_file, template_path, validate_template
 
 try:  # shared core when available
+    from app.core.models import Project as _SharedProject  # type: ignore
     from app.core.models import WorkItem as _SharedWorkItem  # type: ignore
 except Exception:  # pragma: no cover - isolated fallback
+    _SharedProject = None  # type: ignore
     _SharedWorkItem = None  # type: ignore
 
 try:  # site daily reports and photo evidence when available
@@ -207,6 +210,76 @@ def _request_values(payload: RequestIn | RequestUpdate, *, include_unset: bool) 
     if include_unset:
         return payload.model_dump()
     return payload.model_dump(exclude_unset=True)
+
+
+PROJECT_METADATA_FIELDS = ("project_name", "client", "project_location")
+
+
+def _clean_text(value: Any) -> Optional[str]:
+    text = str(value).strip() if value is not None else ""
+    return text or None
+
+
+def _project_metadata(db: Session, project_id: str) -> Dict[str, Optional[str]]:
+    """Return the project setup values reused by PYC and BBNT.
+
+    The shared ``Project`` model owns name/client/location.  The import is
+    guarded so the acceptance module still works in isolation; when shared
+    core is absent there is no project metadata to reuse.
+    """
+
+    if _SharedProject is None:
+        return {}
+    project = db.get(_SharedProject, project_id)
+    if project is None:
+        return {}
+    return {
+        "project_name": _clean_text(getattr(project, "name", None)),
+        "client": _clean_text(getattr(project, "client", None)),
+        "project_location": _clean_text(getattr(project, "location", None)),
+    }
+
+
+def _fill_missing_project_metadata(
+    values: Dict[str, Any], metadata: Mapping[str, Optional[str]]
+) -> None:
+    """Fill blank metadata in an incoming PYC payload from project setup."""
+
+    for field in PROJECT_METADATA_FIELDS:
+        if field in values and not _clean_text(values.get(field)) and metadata.get(field):
+            values[field] = metadata[field]
+    # The investor/client is the same organisation in the source form, so a
+    # blank "Đơn vị chủ đầu tư" can safely reuse the project client.
+    if "investor_org" in values and not _clean_text(values.get("investor_org")):
+        fallback = _clean_text(values.get("client")) or metadata.get("client")
+        if fallback:
+            values["investor_org"] = fallback
+
+
+def _backfill_request_project_metadata(
+    request: AcceptanceRequest, metadata: Mapping[str, Optional[str]]
+) -> None:
+    """Fill only blank fields on an existing PYC; never overwrite edits."""
+
+    for field in PROJECT_METADATA_FIELDS:
+        if not _clean_text(getattr(request, field, None)) and metadata.get(field):
+            setattr(request, field, metadata[field])
+    client_value = _clean_text(request.client) or metadata.get("client")
+    if not _clean_text(request.investor_org) and client_value:
+        request.investor_org = client_value
+
+
+def _fill_view_project_metadata(
+    view: Any, metadata: Mapping[str, Optional[str]]
+) -> None:
+    if not metadata:
+        return
+    for field in PROJECT_METADATA_FIELDS:
+        if not _clean_text(getattr(view, field, None)) and metadata.get(field):
+            setattr(view, field, metadata[field])
+    client_value = _clean_text(getattr(view, "client", None)) or metadata.get("client")
+    if not _clean_text(getattr(view, "investor_org", None)) and client_value:
+        setattr(view, "investor_org", client_value)
 
 
 def _validate_request_for_submit(values: Mapping[str, Any]) -> None:
@@ -796,38 +869,65 @@ SNAPSHOT_FIELDS = (
 )
 
 
-def _request_snapshot_json(request: AcceptanceRequest) -> str:
+def _request_view(request: AcceptanceRequest) -> Any:
+    return SimpleNamespace(
+        **{field: getattr(request, field, None) for field in SNAPSHOT_FIELDS}
+    )
+
+
+def _request_snapshot_json(
+    request: AcceptanceRequest, db: Optional[Session] = None
+) -> str:
     data: Dict[str, Any] = {}
+    metadata = _project_metadata(db, request.project_id) if db is not None else {}
     for field in SNAPSHOT_FIELDS:
         value = getattr(request, field, None)
+        if not _clean_text(value) and metadata.get(field):
+            value = metadata[field]
+        if field == "investor_org" and not _clean_text(value):
+            value = _clean_text(getattr(request, "client", None)) or metadata.get("client")
         data[field] = value.isoformat() if isinstance(value, (date, datetime)) else value
     return json.dumps(data, ensure_ascii=False)
 
 
 def _record_request_view(
-    record: AcceptanceRecord, current: Optional[AcceptanceRequest]
+    record: AcceptanceRecord,
+    current: Optional[AcceptanceRequest],
+    db: Optional[Session] = None,
 ) -> Optional[Any]:
     """Return the frozen PYC view for an issued record, or the live PYC.
 
     Records created before the snapshot column existed fall back to the live
-    request so old data remains exportable.
+    request so old data remains exportable.  Project setup values fill only
+    blank header fields, never an explicit PYC override.
     """
 
+    view: Optional[Any]
     if not record.request_snapshot_json:
-        return current
-    try:
-        data = json.loads(record.request_snapshot_json)
-    except (TypeError, ValueError):
-        return current
-    if not isinstance(data, dict):
-        return current
-    request_date = data.get("request_date")
-    if isinstance(request_date, str) and request_date:
+        view = _request_view(current) if current is not None else None
+    else:
         try:
-            data["request_date"] = date.fromisoformat(request_date)
-        except ValueError:
-            pass
-    return SimpleNamespace(**data)
+            data = json.loads(record.request_snapshot_json)
+        except (TypeError, ValueError):
+            data = None
+        if not isinstance(data, dict):
+            view = _request_view(current) if current is not None else None
+        else:
+            request_date = data.get("request_date")
+            if isinstance(request_date, str) and request_date:
+                try:
+                    data["request_date"] = date.fromisoformat(request_date)
+                except ValueError:
+                    pass
+            view = SimpleNamespace(
+                **{field: data.get(field) for field in SNAPSHOT_FIELDS}
+            )
+
+    # A frozen snapshot is the source of truth for an issued BBNT.  Only a
+    # legacy record without a snapshot may fall back to live project setup.
+    if view is not None and db is not None and not record.request_snapshot_json:
+        _fill_view_project_metadata(view, _project_metadata(db, record.project_id))
+    return view
 
 
 def create_request(
@@ -841,13 +941,7 @@ def create_request(
         _validate_request_for_submit(values)
 
     _apply_request_profiles(db, project_id, values)
-    from app.core.models import Project
-
-    project = db.get(Project, project_id)
-    if project is not None:
-        values["project_name"] = values["project_name"] or project.name
-        values["client"] = values["client"] or project.client
-        values["project_location"] = values["project_location"] or project.location
+    _fill_missing_project_metadata(values, _project_metadata(db, project_id))
 
     attempts = 0
     while True:
@@ -912,6 +1006,12 @@ def update_request(
     if "daily_report_id" in data:
         _validate_daily_report(db, project_id, data.get("daily_report_id"))
     _apply_request_profiles(db, project_id, data)
+
+    # Project setup is the source of truth for repeated header metadata.  Fill
+    # only blanks, so a PYC-specific override is never overwritten.
+    metadata = _project_metadata(db, project_id)
+    _fill_missing_project_metadata(data, metadata)
+    _backfill_request_project_metadata(request, metadata)
 
     merged = {
         column.name: getattr(request, column.name)
@@ -1051,7 +1151,7 @@ def create_record(
         request_id=request.id,
         number=number,
         request_updated_at=request.updated_at,
-        request_snapshot_json=_request_snapshot_json(request),
+        request_snapshot_json=_request_snapshot_json(request, db),
         revision=1,
         record_date=payload.record_date or request.request_date,
         start_time=payload.start_time or request.inspection_time,
@@ -1125,7 +1225,7 @@ def create_record_revision(
         request_id=previous.request_id,
         number=number,
         request_updated_at=request.updated_at,
-        request_snapshot_json=_request_snapshot_json(request),
+        request_snapshot_json=_request_snapshot_json(request, db),
         revision=next_revision,
         supersedes_id=previous.id,
         status="draft",
@@ -1280,10 +1380,13 @@ def _as_utc(value: Optional[datetime]) -> Optional[datetime]:
 def _reuse_payload(
     db: Optional[Session], record: AcceptanceRecord, request: Optional[AcceptanceRequest]
 ) -> Dict[str, Any]:
-    view = _record_request_view(record, request)
+    view = _record_request_view(record, request, db)
     if view is None:
         return {}
     reused: Dict[str, Any] = {
+        "project_name": view.project_name,
+        "client": view.client,
+        "project_location": view.project_location,
         "work_item_id": view.work_item_id,
         "work_item_name": None,
         "location": view.location,
@@ -1393,7 +1496,11 @@ def preview_request(
     return {
         "kind": "pyc",
         "source_id": request.id,
-        "cells": {"PYC": _json_safe(_pyc_replacements(request))},
+        "cells": {
+            "PYC": _json_safe(
+                _pyc_replacements(request, _project_metadata(db, project_id))
+            )
+        },
         "warnings": [],
         "stale": False,
     }
@@ -1409,7 +1516,7 @@ def preview_record(
     if request is None:
         raise AcceptanceError(404, "Không tìm thấy PYC của BBNT", "request_not_found")
     payload = record_payload(record, db)
-    view = _record_request_view(record, request)
+    view = _record_request_view(record, request, db)
     warnings = [payload["stale_warning"]] if payload.get("stale_warning") else []
     if record.status != "confirmed":
         warnings.append("BBNT chưa được người có quyền xác nhận; chưa thể xuất chính thức.")
@@ -1561,8 +1668,19 @@ def confirm_record(
     return record
 
 
-def _number_value(number: str) -> object:
+# Numbers may be stored with the numbering prefix ("YC-001", "PYC-001",
+# "BBNT-001") or as a bare body ("32").  The template already prints the label
+# ("Số: YC-"), so the prefix must be removed before writing the value cell.
+NUMBER_PREFIX_RE = re.compile(r"^(?:PYC-|YC-|BBNT-|NT-)", re.IGNORECASE)
+
+
+def _number_body(number: Optional[str]) -> str:
     text = (number or "").strip()
+    return NUMBER_PREFIX_RE.sub("", text, count=1).strip()
+
+
+def _number_value(number: str) -> object:
+    text = _number_body(number)
     if text.isdigit() and not (len(text) > 1 and text.startswith("0")):
         return int(text)
     return text
@@ -1573,17 +1691,95 @@ def _safe_filename(value: str) -> str:
     return cleaned or "document"
 
 
-def _pyc_replacements(request: AcceptanceRequest) -> Dict[str, object]:
-    content = (request.content or "").strip()
-    subject = (request.subject or "").strip()
-    if content and subject:
-        content_text = f"{content} tại  {subject}"
+def download_filename(document: AcceptanceGeneratedDocument) -> str:
+    """Human-readable filename returned in Content-Disposition.
+
+    The on-disk name is timestamped to avoid collisions; the download keeps the
+    PYC/BBNT number so a browser/blob download does not lose the document name.
+    The PYC download prefix is ``YC`` (matching the printed form), and a stored
+    prefix such as ``YC-001``/``PYC-001`` is not duplicated.
+    """
+
+    try:
+        metadata = json.loads(document.metadata_json or "{}")
+    except (TypeError, ValueError):
+        metadata = {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+    number = str(metadata.get("number") or "").strip()
+    prefix = "YC" if document.kind == "pyc" else "BBNT"
+    extension = "pdf" if (document.format or "").lower() == "pdf" else "xlsx"
+    if number:
+        body = _number_body(number)
+        stem = f"{prefix}-{body}" if body else prefix
     else:
-        content_text = content or subject or None
+        stem = Path(document.path).stem
+    stem = re.sub(r'[\\/:*?"<>|\r\n]+', "_", stem).strip(" .") or prefix
+    if not stem.lower().endswith("." + extension):
+        stem = f"{stem}.{extension}"
+    return stem
+
+
+def _strip_metadata_label(value: Optional[str], *labels: str) -> str:
+    """Remove a template label the user may have typed into a value field."""
+
+    text = (value or "").strip()
+    for label in labels:
+        text = re.sub(rf"^{re.escape(label)}\s*:\s*", "", text, flags=re.IGNORECASE)
+    return text.strip()
+
+
+def _metadata_line(label: str, value: Optional[str], *aliases: str) -> str:
+    text = _strip_metadata_label(value, label, *aliases)
+    return f"{label}: {text}" if text else f"{label}: "
+
+
+def _metadata_value(
+    request: Any,
+    field: str,
+    metadata: Optional[Mapping[str, Optional[str]]] = None,
+) -> Optional[str]:
+    value = _clean_text(getattr(request, field, None))
+    if value is None and metadata:
+        value = _clean_text(metadata.get(field))
+    return value
+
+
+def _pyc_content_text(content: Optional[str], target: Optional[str]) -> Optional[str]:
+    """Build the printed "Nội dung ... tại vị trí" cell.
+
+    ``target`` is the acceptance location when present, otherwise the subject.
+    Whitespace is normalised and a content that already ends in "tại" is not
+    given a second "tại".
+    """
+
+    content_text = re.sub(r"\s+", " ", (content or "").strip())
+    target_text = re.sub(r"\s+", " ", (target or "").strip())
+    if not content_text:
+        return target_text or None
+    if not target_text:
+        return content_text
+    if content_text.casefold().endswith("tại"):
+        return f"{content_text} {target_text}".strip()
+    return f"{content_text} tại {target_text}".strip()
+
+
+def _pyc_replacements(
+    request: AcceptanceRequest,
+    metadata: Optional[Mapping[str, Optional[str]]] = None,
+) -> Dict[str, object]:
+    location = re.sub(r"\s+", " ", (request.location or "").strip())
+    subject = re.sub(r"\s+", " ", (request.subject or "").strip())
+    content_text = _pyc_content_text(request.content, location or subject)
+    # The form always prints one urgency tick.  Legacy rows with NULL (or an
+    # unknown value) are treated as "Bình thường" instead of showing no tick.
+    urgency = request.urgency if request.urgency in URGENCY_VALUES else "normal"
     return {
-        "C1": f"DỰ ÁN: {request.project_name or ''}",
-        "C2": f"CHỦ ĐẦU TƯ: {request.client or ''}",
-        "C3": f"ĐỊA ĐIỂM: {request.project_location or ''}",
+        "C1": _metadata_line("DỰ ÁN", _metadata_value(request, "project_name", metadata)),
+        "C2": _metadata_line("CHỦ ĐẦU TƯ", _metadata_value(request, "client", metadata)),
+        "C3": _metadata_line(
+            "ĐỊA ĐIỂM", _metadata_value(request, "project_location", metadata)
+        ),
         "B6": _number_value(request.number),
         "F6": request.request_date,
         "B7": request.location or "",
@@ -1593,9 +1789,9 @@ def _pyc_replacements(request: AcceptanceRequest) -> Dict[str, object]:
         "H10": "☑" if request.field == "construction" else "□",
         "I10": "☑" if request.field == "electric" else "□",
         "K10": "☑" if request.field == "mechanical" else "□",
-        "D14": "☑" if request.urgency == "normal" else "□",
-        "D15": "☑" if request.urgency == "urgent" else "□",
-        "D16": "☑" if request.urgency == "very_urgent" else "□",
+        "D14": "☑" if urgency == "normal" else "□",
+        "D15": "☑" if urgency == "urgent" else "□",
+        "D16": "☑" if urgency == "very_urgent" else "□",
         "A20": request.requested_by_name or "",
         "E20": request.supervisor_name or "",
         "H20": request.investor_name or "",
@@ -1674,9 +1870,9 @@ def _bbnt_replacements(record: AcceptanceRecord, request: AcceptanceRequest) -> 
     contractor_org = (contractor[0].organization if contractor else None) or request.contractor_org
 
     values: Dict[str, object] = {
-        "B1": f"DỰ ÁN: {request.project_name or ''}",
-        "B2": f"CHỦ ĐẦU TƯ: {request.client or ''}",
-        "B3": f"ĐỊA ĐIỂM: {request.project_location or ''}",
+        "B1": _metadata_line("DỰ ÁN", request.project_name),
+        "B2": _metadata_line("CHỦ ĐẦU TƯ", request.client),
+        "B3": _metadata_line("ĐỊA ĐIỂM", request.project_location),
         "B5": _number_value(request.number),
         "D5": record.record_date,
         "B6": request.location or "",
@@ -1872,6 +2068,125 @@ def _ensure_pdf_converter(payload: ExportIn) -> None:
         _libreoffice_binary()
 
 
+PDF_PYC_TITLE = "PHIẾU YÊU CẦU NGHIỆM THU CÔNG VIỆC XÂY DỰNG"
+PDF_BBNT_TITLE = "BIÊN BẢN NGHIỆM THU CÔNG VIỆC XÂY DỰNG"
+
+
+def _pdf_page_text(page: Any) -> str:
+    text = page.get_text("text") or ""
+    # Unicode composition and arbitrary line breaks would otherwise prevent a
+    # title match, so normalise both before searching.
+    text = unicodedata.normalize("NFC", text)
+    return re.sub(r"\s+", " ", text).strip().upper()
+
+
+def _select_pdf_pages(pdf_path: Path, kind: str) -> None:
+    """Keep only the PYC/BBNT pages in a LibreOffice-converted workbook PDF.
+
+    LibreOffice prints every workbook sheet, so a PYC export also contains the
+    DM catalogue, BBNT and the hidden PYC copy.  The requested record is located
+    by its printed title; if the titles cannot be found the export fails loudly
+    instead of silently returning the whole workbook PDF.
+    """
+
+    try:
+        import pymupdf  # type: ignore
+    except ImportError as exc:  # pragma: no cover - dependency is installed here
+        raise AcceptanceError(
+            500,
+            "Thiếu PyMuPDF nên không lọc được trang PDF nghiệm thu. "
+            "Cài đặt gói 'pymupdf' trên máy chủ.",
+            "pdf_conversion_failed",
+        ) from exc
+
+    try:
+        document = pymupdf.open(str(pdf_path))
+    except Exception as exc:  # pragma: no cover - defensive
+        raise AcceptanceError(
+            500,
+            "Không đọc được file PDF vừa tạo để lọc trang",
+            "pdf_page_detection_failed",
+        ) from exc
+
+    try:
+        page_texts = [_pdf_page_text(page) for page in document]
+        pyc_pages = [
+            index for index, text in enumerate(page_texts) if PDF_PYC_TITLE in text
+        ]
+        bbnt_pages = [
+            index for index, text in enumerate(page_texts) if PDF_BBNT_TITLE in text
+        ]
+        if not pyc_pages:
+            raise AcceptanceError(
+                500,
+                "Không nhận diện được trang PYC trong PDF (thiếu tiêu đề "
+                f"'{PDF_PYC_TITLE}')",
+                "pdf_page_detection_failed",
+            )
+
+        first_bbnt = bbnt_pages[0] if bbnt_pages else None
+        if kind == "pyc":
+            selected = [
+                index
+                for index in pyc_pages
+                if first_bbnt is None or index < first_bbnt
+            ]
+            if not selected:
+                raise AcceptanceError(
+                    500,
+                    "Không nhận diện được trang PYC đứng trước trang BBNT",
+                    "pdf_page_detection_failed",
+                )
+        elif kind == "bbnt":
+            if first_bbnt is None:
+                raise AcceptanceError(
+                    500,
+                    "Không nhận diện được trang BBNT trong PDF (thiếu tiêu đề "
+                    f"'{PDF_BBNT_TITLE}')",
+                    "pdf_page_detection_failed",
+                )
+            start = next(
+                (index for index in pyc_pages if index < first_bbnt), None
+            )
+            if start is None:
+                raise AcceptanceError(
+                    500,
+                    "Không nhận diện được cặp trang PYC + BBNT trong PDF",
+                    "pdf_page_detection_failed",
+                )
+            end = bbnt_pages[-1]
+            # Extend through BBNT continuation pages.  A following PYC title is
+            # the hidden PYC copy, which must not be included.
+            for index in range(end + 1, len(page_texts)):
+                if PDF_PYC_TITLE in page_texts[index]:
+                    break
+                end = index
+            selected = list(range(start, end + 1))
+        else:  # pragma: no cover - callers only pass pyc/bbnt
+            raise AcceptanceError(
+                422, "Loại export PDF không hợp lệ", "export_kind_invalid"
+            )
+
+        if len(selected) == len(page_texts):
+            return
+
+        filtered = pymupdf.open()
+        try:
+            for index in selected:
+                filtered.insert_pdf(document, from_page=index, to_page=index)
+            temp_path = pdf_path.with_name(f"{pdf_path.name}.{uuid.uuid4().hex}.tmp")
+            try:
+                filtered.save(str(temp_path))
+                os.replace(temp_path, pdf_path)
+            finally:
+                if temp_path.exists():
+                    temp_path.unlink()
+        finally:
+            filtered.close()
+    finally:
+        document.close()
+
+
 def _render_export(result: Mapping[str, Any], payload: ExportIn) -> Dict[str, Any]:
     """Return the requested artifact; PDF preserves the validated workbook."""
 
@@ -1881,6 +2196,7 @@ def _render_export(result: Mapping[str, Any], payload: ExportIn) -> Dict[str, An
     workbook_path = Path(str(result["path"]))
     pdf_path = workbook_path.with_suffix(".pdf")
     _convert_workbook_to_pdf(workbook_path, pdf_path)
+    _select_pdf_pages(pdf_path, str(result.get("kind") or "pyc"))
 
     metadata = dict(result.get("metadata") or {})
     metadata["workbook_path"] = str(workbook_path)
@@ -1942,7 +2258,7 @@ def export_request(
         kind="pyc",
         template=template,
         replacements={
-            "PYC": _pyc_replacements(request),
+            "PYC": _pyc_replacements(request, _project_metadata(db, project_id)),
             "BBNT": _blank_bbnt_replacements(),
         },
         scrub={"PYC (2)": PYC_HIDDEN_SCRUB, "BB LM bt": BBLM_SCRUB},
@@ -1977,7 +2293,7 @@ def export_record(
             kind="pyc",
             template=validate_template(template_path()),
             replacements={
-                "PYC": _pyc_replacements(request),
+                "PYC": _pyc_replacements(request, _project_metadata(db, project_id)),
                 "BBNT": _blank_bbnt_replacements(),
             },
             scrub={"PYC (2)": PYC_HIDDEN_SCRUB, "BB LM bt": BBLM_SCRUB},
@@ -1998,7 +2314,7 @@ def export_record(
             "record_not_confirmed",
         )
     _ensure_pdf_converter(payload)
-    view = _record_request_view(record, request)
+    view = _record_request_view(record, request, db)
     result = _write_export(
         project_id=project_id,
         source_id=record.id,

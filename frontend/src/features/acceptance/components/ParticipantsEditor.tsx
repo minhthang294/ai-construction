@@ -50,7 +50,7 @@ export default function ParticipantsEditor({ items, onChange, disabled = false }
           type="button"
           onClick={add}
           disabled={disabled || items.length >= MAX_PARTICIPANTS}
-          className="rounded border border-teal-700 px-3 py-2 text-sm text-teal-800 disabled:opacity-50"
+          className="min-h-11 rounded border border-teal-700 px-3 py-2 text-sm text-teal-800 disabled:opacity-50"
         >
           + Thêm người
         </button>
@@ -70,7 +70,7 @@ export default function ParticipantsEditor({ items, onChange, disabled = false }
               <label className="block text-sm">
                 Vai trò
                 <select
-                  className="mt-1 w-full rounded border p-2"
+                  className="mt-1 min-h-11 w-full rounded border p-3"
                   value={item.role}
                   disabled={disabled}
                   onChange={(event) =>
@@ -87,7 +87,7 @@ export default function ParticipantsEditor({ items, onChange, disabled = false }
               <label className="block text-sm">
                 Họ tên <span className="text-rose-600">*</span>
                 <input
-                  className="mt-1 w-full rounded border p-2"
+                  className="mt-1 min-h-11 w-full rounded border p-3"
                   value={item.person_name}
                   disabled={disabled}
                   placeholder="Nhập họ tên người tham gia"
@@ -97,7 +97,7 @@ export default function ParticipantsEditor({ items, onChange, disabled = false }
               <label className="block text-sm">
                 Chức vụ
                 <input
-                  className="mt-1 w-full rounded border p-2"
+                  className="mt-1 min-h-11 w-full rounded border p-3"
                   value={item.position ?? ""}
                   disabled={disabled}
                   onChange={(event) => update(index, { position: event.target.value })}
@@ -106,7 +106,7 @@ export default function ParticipantsEditor({ items, onChange, disabled = false }
               <label className="block text-sm">
                 Đơn vị
                 <input
-                  className="mt-1 w-full rounded border p-2"
+                  className="mt-1 min-h-11 w-full rounded border p-3"
                   value={item.organization ?? ""}
                   disabled={disabled}
                   onChange={(event) => update(index, { organization: event.target.value })}
@@ -117,7 +117,7 @@ export default function ParticipantsEditor({ items, onChange, disabled = false }
               type="button"
               onClick={() => remove(index)}
               disabled={disabled}
-              className="text-sm text-rose-700 underline disabled:opacity-50"
+              className="inline-flex min-h-11 items-center text-sm text-rose-700 underline disabled:opacity-50"
             >
               Xóa người này
             </button>

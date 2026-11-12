@@ -14,6 +14,30 @@ export type ManpowerPreset = ManpowerEntry & {
   updated_at: string;
 };
 
+export const MANPOWER_GROUPS = {
+  chief: "Chỉ huy trưởng",
+  technical: "Kỹ thuật",
+  driver: "Lái xe",
+  guard: "Bảo vệ",
+  worker: "Công nhân",
+} as const;
+
+export type ManpowerTeam = {
+  chi_huy_truong: string | null;
+  ky_thuat: string[];
+  lai_xe: number;
+  bao_ve: number;
+  cong_nhan: number;
+};
+
+export const DEFAULT_MANPOWER_TEAM: ManpowerTeam = {
+  chi_huy_truong: null,
+  ky_thuat: [],
+  lai_xe: 0,
+  bao_ve: 0,
+  cong_nhan: 0,
+};
+
 export type Organization = {
   id: string;
   project_id: string;
@@ -48,6 +72,8 @@ export type SiteNoteField = (typeof SITE_NOTE_FIELDS)[number]["key"];
 export type DailyWorkLog = {
   id?: string;
   work_item_id?: string | null;
+  /** Unique catalog name kept when one name maps to several catalog rows. */
+  work_name?: string | null;
   location?: string | null;
   component?: string | null;
   quantity?: number | null;
@@ -86,6 +112,8 @@ export type DailyReportInput = {
   notes: string | null;
   site_notes: SiteNotes;
   manpower: ManpowerEntry[];
+  /** Optional structured projection; old clients may send only `manpower`. */
+  manpower_team?: ManpowerTeam;
   work_logs: DailyWorkLog[];
   next_day_plans: NextDayPlan[];
 };

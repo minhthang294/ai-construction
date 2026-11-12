@@ -7,6 +7,16 @@ import {
   MIN_PAGE_ZOOM,
   stepPageZoom,
 } from "../lib/pageViewport";
+import {
+  BUTTON_SECONDARY,
+  CARD,
+  cx,
+  META_TEXT,
+  PANEL_ALERT,
+  SECTION_TEXT,
+  SECTION_TITLE,
+} from "../lib/ui";
+import { AlertIcon, MinusIcon, PlusIcon, XIcon } from "./icons";
 import PageExtractionPanel from "./PageExtractionPanel";
 
 type Props = {
@@ -74,139 +84,179 @@ export default function PageViewer({
   }, [projectId, documentId, pageNumber]);
 
   return (
-    <section className="rounded border border-gray-200 bg-white p-3 shadow-sm space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h2 className="text-sm font-semibold">Trang {pageNumber}</h2>
-          {page && (
-            <p className="text-[11px] text-gray-600">
-              Phương thức: {page.extraction_method}
-              {page.ocr_confidence != null &&
-                ` · OCR ${(page.ocr_confidence * 100).toFixed(1)}%`}
-              {page.drawing_number && ` · Bản vẽ ${page.drawing_number}`}
-              {page.revision && ` · Rev ${page.revision}`}
-              {page.tables.length > 0 && ` · ${page.tables.length} bảng`}
-            </p>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
+    <section
+      aria-busy={loading}
+      className={cx(CARD, "min-w-0 overflow-hidden")}
+    >
+      <div className="border-b border-slate-200 p-4 sm:p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <h2 className={SECTION_TITLE}>Trang {pageNumber}</h2>
+            {page && (
+              <p className={cx(META_TEXT, "mt-1 [overflow-wrap:anywhere]")}>
+                Phương thức: {page.extraction_method}
+                {page.ocr_confidence != null &&
+                  ` · OCR ${(page.ocr_confidence * 100).toFixed(1)}%`}
+                {page.drawing_number && ` · Bản vẽ ${page.drawing_number}`}
+                {page.revision && ` · Rev ${page.revision}`}
+                {page.tables.length > 0 && ` · ${page.tables.length} bảng`}
+              </p>
+            )}
+          </div>
           <button
             type="button"
-            className="min-h-11 rounded border border-gray-300 px-3 py-2 text-sm disabled:opacity-40"
+            className={cx(BUTTON_SECONDARY, "w-full shrink-0 sm:w-auto")}
+            onClick={onClose}
+          >
+            <XIcon className="h-4 w-4" />
+            {closeLabel}
+          </button>
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            className={cx(BUTTON_SECONDARY, "flex-1 sm:flex-none")}
             onClick={() => onPageChange(pageNumber - 1)}
             disabled={pageNumber <= 1 || loading}
           >
             Trang trước
           </button>
-          <span className="flex min-h-11 items-center text-xs text-gray-600">
+          <span
+            aria-live="polite"
+            className="flex min-h-11 min-w-16 items-center justify-center rounded-lg bg-slate-100 px-3 text-sm font-medium text-slate-700 tabular-nums"
+          >
             {pageNumber}/{Math.max(1, totalPages)}
           </span>
           <button
             type="button"
-            className="min-h-11 rounded border border-gray-300 px-3 py-2 text-sm disabled:opacity-40"
+            className={cx(BUTTON_SECONDARY, "flex-1 sm:flex-none")}
             onClick={() => onPageChange(pageNumber + 1)}
             disabled={pageNumber >= totalPages || loading}
           >
             Trang sau
           </button>
-          <button
-            type="button"
-            className="min-h-11 rounded border border-gray-300 px-3 py-2 text-sm"
-            onClick={onClose}
-          >
-            {closeLabel}
-          </button>
         </div>
       </div>
 
-      {loading && <div className="text-xs text-gray-600">Đang tải trang...</div>}
-      {error && <div className="rounded bg-red-50 p-2 text-xs text-red-800">{error}</div>}
-
-      {page && (
-        <>
-          {page.needs_review && (
-            <div className="rounded bg-amber-50 p-2 text-xs text-amber-900">
-              Trang này cần kiểm tra trực tiếp bản vẽ gốc (OCR thiếu hoặc độ tin cậy thấp).
-            </div>
-          )}
-          {page.warnings.length > 0 && (
-            <ul className="list-disc rounded bg-amber-50 p-2 pl-5 text-xs text-amber-900">
-              {page.warnings.map((warning, index) => (
-                <li key={`${index}-${warning}`}>{warning}</li>
-              ))}
-            </ul>
-          )}
-          {renderUrl ? (
-            <>
-              <div className="flex flex-wrap items-center gap-2 rounded border border-gray-200 bg-gray-50 p-2 text-xs">
-                <button
-                  type="button"
-                  className="min-h-11 min-w-11 rounded border border-gray-300 bg-white px-3 py-2 text-base disabled:opacity-40"
-                  onClick={() => setZoom((current) => stepPageZoom(current, -1))}
-                  disabled={zoom <= MIN_PAGE_ZOOM}
-                  aria-label="Thu nhỏ bản vẽ"
-                >
-                  −
-                </button>
-                <span className="flex min-h-11 min-w-14 items-center justify-center text-sm">
-                  {Math.round(zoom * 100)}%
-                </span>
-                <button
-                  type="button"
-                  className="min-h-11 min-w-11 rounded border border-gray-300 bg-white px-3 py-2 text-base disabled:opacity-40"
-                  onClick={() => setZoom((current) => stepPageZoom(current, 1))}
-                  disabled={zoom >= MAX_PAGE_ZOOM}
-                  aria-label="Phóng to bản vẽ"
-                >
-                  +
-                </button>
-                <button
-                  type="button"
-                  className="min-h-11 rounded border border-gray-300 bg-white px-3 py-2 text-sm disabled:opacity-40"
-                  onClick={() => setZoom(MIN_PAGE_ZOOM)}
-                  disabled={zoom === MIN_PAGE_ZOOM}
-                >
-                  Về 100%
-                </button>
-                <button
-                  type="button"
-                  className="ml-auto min-h-11 rounded border border-gray-300 bg-white px-3 py-2 text-sm"
-                  onClick={onClose}
-                >
-                  {closeLabel}
-                </button>
-              </div>
-              <div className="max-h-[70vh] overflow-auto overscroll-contain rounded border border-gray-200 bg-gray-100">
-                <img
-                  src={renderUrl}
-                  alt={`Trang ${pageNumber} bản vẽ`}
-                  draggable={false}
-                  className="block h-auto max-w-none select-none rounded object-contain"
-                  style={{ width: `${clampPageZoom(zoom) * 100}%` }}
-                />
-              </div>
-            </>
-          ) : (
-            <p className="text-xs text-gray-500">
-              Không có ảnh render cho trang này; chỉ hiển thị text trích xuất.
-            </p>
-          )}
-          <div>
-            <h3 className="text-xs font-semibold text-gray-700">
-              {page.extraction_method === "ocr" ? "Text OCR" : "Text trích xuất"}
-            </h3>
-            <pre className="mt-1 max-h-80 overflow-auto whitespace-pre-wrap rounded bg-gray-50 p-2 text-xs">
-              {page.text || "(trang không có text trích xuất được)"}
-            </pre>
+      <div className="space-y-4 p-4 sm:p-5">
+        {loading && (
+          <div role="status" aria-live="polite" className="space-y-3">
+            <span className="sr-only">Đang tải trang...</span>
+            <div className="h-5 w-40 animate-pulse rounded bg-slate-200 motion-reduce:animate-none" />
+            <div className="h-48 animate-pulse rounded-lg bg-slate-100 motion-reduce:animate-none" />
+            <div className="h-4 w-2/3 animate-pulse rounded bg-slate-200 motion-reduce:animate-none" />
           </div>
-          <PageExtractionPanel
-            key={`${documentId}:${pageNumber}`}
-            projectId={projectId}
-            documentId={documentId}
-            pageNumber={pageNumber}
-          />
-        </>
-      )}
+        )}
+
+        {error && (
+          <div role="alert" className={PANEL_ALERT}>
+            {error}
+          </div>
+        )}
+
+        {page && (
+          <>
+            {page.needs_review && (
+              <div className="flex gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm leading-6 text-amber-950">
+                <AlertIcon className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" />
+                Trang này cần kiểm tra trực tiếp bản vẽ gốc (OCR thiếu hoặc độ tin cậy thấp).
+              </div>
+            )}
+            {page.warnings.length > 0 && (
+              <ul className="list-disc space-y-1 rounded-lg border border-amber-200 bg-amber-50 p-3 pl-8 text-sm leading-6 text-amber-950">
+                {page.warnings.map((warning, index) => (
+                  <li key={`${index}-${warning}`}>{warning}</li>
+                ))}
+              </ul>
+            )}
+
+            {renderUrl ? (
+              <>
+                <div
+                  role="toolbar"
+                  aria-label="Điều khiển xem bản vẽ"
+                  className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2"
+                >
+                  <button
+                    type="button"
+                    className={cx(BUTTON_SECONDARY, "min-w-11 px-3")}
+                    onClick={() => setZoom((current) => stepPageZoom(current, -1))}
+                    disabled={zoom <= MIN_PAGE_ZOOM}
+                    aria-label="Thu nhỏ bản vẽ"
+                  >
+                    <MinusIcon className="h-4 w-4" />
+                  </button>
+                  <span
+                    aria-live="polite"
+                    className="flex min-h-11 min-w-16 items-center justify-center rounded-lg bg-white px-2 text-sm font-medium text-slate-700 tabular-nums"
+                  >
+                    {Math.round(zoom * 100)}%
+                  </span>
+                  <button
+                    type="button"
+                    className={cx(BUTTON_SECONDARY, "min-w-11 px-3")}
+                    onClick={() => setZoom((current) => stepPageZoom(current, 1))}
+                    disabled={zoom >= MAX_PAGE_ZOOM}
+                    aria-label="Phóng to bản vẽ"
+                  >
+                    <PlusIcon className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    className={cx(BUTTON_SECONDARY, "px-3")}
+                    onClick={() => setZoom(MIN_PAGE_ZOOM)}
+                    disabled={zoom === MIN_PAGE_ZOOM}
+                  >
+                    Về 100%
+                  </button>
+                </div>
+                <div
+                  role="region"
+                  aria-label={`Trang ${pageNumber}, cuộn để xem toàn bộ bản vẽ`}
+                  tabIndex={0}
+                  className="max-h-[70vh] overflow-auto overscroll-contain rounded-lg border border-slate-200 bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#405e9b]"
+                >
+                  <img
+                    src={renderUrl}
+                    alt={`Trang ${pageNumber} bản vẽ${page.drawing_number ? ` ${page.drawing_number}` : ""}`}
+                    draggable={false}
+                    className="block h-auto max-w-none select-none rounded object-contain"
+                    style={{ width: `${clampPageZoom(zoom) * 100}%` }}
+                  />
+                </div>
+              </>
+            ) : (
+              <p className={cx(SECTION_TEXT, "rounded-lg bg-slate-50 p-3")}>
+                Không có ảnh render cho trang này; chỉ hiển thị text trích xuất.
+              </p>
+            )}
+
+            <div>
+              <h3 className="text-sm font-semibold text-slate-800">
+                {page.extraction_method === "ocr" ? "Text OCR" : "Text trích xuất"}
+              </h3>
+              <div
+                role="region"
+                aria-label="Text trích xuất của trang"
+                tabIndex={0}
+                className="mt-2 max-h-80 overflow-auto rounded-lg bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#405e9b]"
+              >
+                <pre className="whitespace-pre-wrap p-3 text-xs leading-5 text-slate-800 [overflow-wrap:anywhere]">
+                  {page.text || "(trang không có text trích xuất được)"}
+                </pre>
+              </div>
+            </div>
+
+            <PageExtractionPanel
+              key={`${documentId}:${pageNumber}`}
+              projectId={projectId}
+              documentId={documentId}
+              pageNumber={pageNumber}
+            />
+          </>
+        )}
+      </div>
     </section>
   );
 }

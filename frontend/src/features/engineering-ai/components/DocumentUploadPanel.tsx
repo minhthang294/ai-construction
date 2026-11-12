@@ -1,5 +1,18 @@
 import { useRef, useState } from "react";
 import { uploadDocument } from "../lib/api";
+import {
+  CARD,
+  CARD_PAD,
+  cx,
+  FIELD,
+  HELP_TEXT,
+  LABEL,
+  PANEL_ALERT,
+  SECTION_TEXT,
+  SECTION_TITLE,
+  BUTTON_PRIMARY,
+} from "../lib/ui";
+import { SpinnerIcon, UploadIcon } from "./icons";
 import type { SourceDocument } from "../types";
 
 type Props = {
@@ -60,67 +73,92 @@ export default function DocumentUploadPanel({ projectId, onUploaded }: Props) {
   }
 
   return (
-    <section className="rounded border border-gray-200 bg-white p-3 shadow-sm space-y-3">
-      <div>
-        <h2 className="text-sm font-semibold">Tải hồ sơ PDF</h2>
-        <p className="text-xs text-gray-600">
+    <section
+      aria-busy={busy}
+      className={cx(CARD, CARD_PAD, "space-y-4")}
+    >
+      <div className="max-w-3xl">
+        <h2 className={SECTION_TITLE}>Tải hồ sơ PDF</h2>
+        <p className={cx(SECTION_TEXT, "mt-1")}>
           PDF được lưu private theo công trình. Hệ thống đọc text từng trang; trang scan
           được render và OCR. Không có nội dung nào được ghi vào DB ngoài metadata/text.
         </p>
       </div>
 
-      <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
-        <label className="text-xs font-medium text-gray-700">
-          Loại hồ sơ
-          <select
-            className="mt-1 w-full rounded border border-gray-300 p-2 text-sm"
-            value={type}
-            onChange={(event) => setType(event.target.value)}
-            disabled={busy}
-          >
-            {TYPES.map((item) => (
-              <option key={item.value} value={item.value}>
-                {item.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="flex items-end">
-          <input
-            ref={inputRef}
-            type="file"
-            accept="application/pdf,.pdf"
-            multiple
-            className="hidden"
-            onChange={(event) => handleFiles(event.target.files)}
-          />
-          <button
-            type="button"
-            className="w-full rounded bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 sm:w-auto"
-            onClick={() => inputRef.current?.click()}
-            disabled={busy}
-          >
-            {busy ? "Đang tải..." : "Chọn PDF"}
-          </button>
+      <div className="max-w-3xl space-y-4">
+        <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+          <label className={LABEL}>
+            Loại hồ sơ
+            <select
+              className={FIELD}
+              value={type}
+              onChange={(event) => setType(event.target.value)}
+              disabled={busy}
+            >
+              {TYPES.map((item) => (
+                <option key={item.value} value={item.value}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div>
+            <input
+              ref={inputRef}
+              type="file"
+              accept="application/pdf,.pdf"
+              multiple
+              className="hidden"
+              onChange={(event) => handleFiles(event.target.files)}
+            />
+            <button
+              type="button"
+              className={cx(BUTTON_PRIMARY, "w-full sm:w-auto")}
+              onClick={() => inputRef.current?.click()}
+              disabled={busy}
+              aria-busy={busy}
+            >
+              {busy ? (
+                <SpinnerIcon className="h-4 w-4" />
+              ) : (
+                <UploadIcon className="h-4 w-4" />
+              )}
+              {busy ? "Đang tải..." : "Chọn PDF"}
+            </button>
+          </div>
         </div>
+
+        <label className={LABEL}>
+          Mô tả thay đổi (tuỳ chọn, dùng khi tải revision)
+          <input
+            className={FIELD}
+            value={changeNote}
+            maxLength={2000}
+            placeholder="Ví dụ: Rev B - cập nhật cao độ neo"
+            aria-describedby="eai-change-note-help"
+            onChange={(event) => setChangeNote(event.target.value)}
+            disabled={busy}
+          />
+          <span id="eai-change-note-help" className={cx(HELP_TEXT, "flex justify-between gap-2")}>
+            <span>Giúp kỹ sư phân biệt các lần phát hành.</span>
+            <span className="shrink-0 tabular-nums">{changeNote.length}/2000</span>
+          </span>
+        </label>
+
+        {message && (
+          <div
+            role="status"
+            className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm leading-6 text-emerald-900"
+          >
+            {message}
+          </div>
+        )}
+        {error && (
+          <div role="alert" className={PANEL_ALERT}>
+            {error}
+          </div>
+        )}
       </div>
-
-      <label className="block text-xs font-medium text-gray-700">
-        Mô tả thay đổi (tuỳ chọn, dùng khi tải revision)
-        <input
-          className="mt-1 w-full rounded border border-gray-300 p-2 text-sm"
-          value={changeNote}
-          maxLength={2000}
-          placeholder="Ví dụ: Rev B - cập nhật cao độ neo"
-          onChange={(event) => setChangeNote(event.target.value)}
-          disabled={busy}
-        />
-      </label>
-
-      {message && (
-        <div className="rounded bg-green-50 p-2 text-xs text-green-800">{message}</div>
-      )}
-      {error && <div className="rounded bg-red-50 p-2 text-xs text-red-800">{error}</div>}
     </section>
   );
 }

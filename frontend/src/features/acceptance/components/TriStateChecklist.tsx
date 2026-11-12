@@ -58,7 +58,7 @@ export default function TriStateChecklist({ items, onChange, disabled = false }:
                     disabled={disabled}
                     aria-pressed={selected}
                     onClick={() => setState(index, option.value)}
-                    className={`min-h-10 rounded border px-3 text-sm disabled:opacity-50 ${
+                    className={`min-h-11 min-w-11 rounded border px-3 text-sm disabled:opacity-50 ${
                       selected
                         ? STATE_STYLES[option.value]
                         : "bg-white text-slate-700 border-slate-300"

@@ -103,6 +103,61 @@ class ManpowerPresetIn(ManpowerValues):
     pass
 
 
+class ManpowerTeamIn(BaseModel):
+    """Structured daily manpower team.
+
+    ``chi_huy_truong`` is a single named person, ``ky_thuat`` holds multiple
+    named people, and the remaining roles are numeric counts.  The service
+    stores these as ordinary ``ManpowerEntry`` rows so old reports and exports
+    remain compatible.
+    """
+
+    chi_huy_truong: Optional[str] = Field(default=None, max_length=120)
+    ky_thuat: List[str] = Field(default_factory=list, max_length=50)
+    lai_xe: int = Field(default=0, ge=0)
+    bao_ve: int = Field(default=0, ge=0)
+    cong_nhan: int = Field(default=0, ge=0)
+
+    @field_validator("chi_huy_truong")
+    @classmethod
+    def _strip_chief(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
+
+    @field_validator("ky_thuat")
+    @classmethod
+    def _clean_engineers(cls, value: List[str]) -> List[str]:
+        cleaned: List[str] = []
+        seen: set[str] = set()
+        for item in value:
+            name = " ".join(str(item).split())
+            if not name:
+                continue
+            key = name.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            cleaned.append(name)
+        return cleaned
+
+    @field_validator("lai_xe", "bao_ve", "cong_nhan", mode="before")
+    @classmethod
+    def _reject_boolean_count(cls, value):
+        if isinstance(value, bool):
+            raise ValueError("manpower count must be an integer, not a boolean")
+        return value
+
+
+class ManpowerTeamOut(BaseModel):
+    chi_huy_truong: Optional[str] = None
+    ky_thuat: List[str] = Field(default_factory=list)
+    lai_xe: int = 0
+    bao_ve: int = 0
+    cong_nhan: int = 0
+
+
 class ManpowerEntryOut(UtcOutBase):
     id: str
     group_name: str
@@ -119,6 +174,9 @@ class ManpowerPresetOut(ManpowerEntryOut):
 
 class DailyWorkLogIn(BaseModel):
     work_item_id: Optional[str] = None
+    # Name chosen from the catalog.  Kept separately because one name can map
+    # to several catalog rows; the client clears work_item_id in that case.
+    work_name: Optional[str] = Field(default=None, max_length=500)
     location: Optional[str] = Field(default=None, max_length=255)
     component: Optional[str] = Field(default=None, max_length=255)
     quantity: Optional[float] = None
@@ -127,6 +185,14 @@ class DailyWorkLogIn(BaseModel):
     end_time: Optional[datetime] = None
     status: Optional[str] = Field(default=None, max_length=60)
     notes: Optional[str] = None
+
+    @field_validator("work_name")
+    @classmethod
+    def _strip_work_name(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
 
     @field_validator("start_time", "end_time")
     @classmethod
@@ -143,6 +209,7 @@ class DailyWorkLogIn(BaseModel):
 class DailyWorkLogOut(UtcOutBase):
     id: str
     work_item_id: Optional[str] = None
+    work_name: Optional[str] = None
     location: Optional[str] = None
     component: Optional[str] = None
     quantity: Optional[float] = None
@@ -202,6 +269,9 @@ class DailyReportUpsertIn(BaseModel):
     notes: Optional[str] = None
     site_notes: SiteNotesIn = Field(default_factory=SiteNotesIn)
     manpower: List[ManpowerEntryIn] = Field(default_factory=list)
+    # Optional structured team.  When present, managed role rows in
+    # ``manpower`` are replaced by this team while free-form rows are kept.
+    manpower_team: Optional[ManpowerTeamIn] = None
     work_logs: List[DailyWorkLogIn] = Field(default_factory=list)
     next_day_plans: List[NextDayPlanIn] = Field(default_factory=list)
 
@@ -214,6 +284,8 @@ class DailyReportOut(UtcOutBase):
     notes: Optional[str] = None
     site_notes: SiteNotesOut = Field(default_factory=SiteNotesOut)
     manpower: List[ManpowerEntryOut] = Field(default_factory=list)
+    # Derived from ``manpower`` so old reports need no migration.
+    manpower_team: ManpowerTeamOut = Field(default_factory=ManpowerTeamOut)
     work_logs: List[DailyWorkLogOut] = Field(default_factory=list)
     next_day_plans: List[NextDayPlanOut] = Field(default_factory=list)
     created_at: datetime

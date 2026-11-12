@@ -4,6 +4,42 @@
 
 Acceptance router and frontend page are mounted. Export history and audit use the shared `generated_documents` and `audit_logs` tables; the integrated Alembic migration omits the former module-local duplicate tables. PYC creation fills missing common project fields from `Project`; downloads are limited to acceptance kinds and the project's private export directory. Remaining integration items are recorded in the "Unresolved issues" section below.
 
+## PYC export fixes — 12/11/2026
+
+- **PDF contains only the PYC/BBNT pages.** After LibreOffice converts the validated workbook, `_select_pdf_pages()` in `service.py` uses PyMuPDF to keep:
+  - PYC export: every page whose title is `PHIẾU YÊU CẦU NGHIỆM THU CÔNG VIỆC XÂY DỰNG` before the first `BIÊN BẢN NGHIỆM THU CÔNG VIỆC XÂY DỰNG` page (DM and the hidden `PYC (2)` copy are dropped).
+  - BBNT export: the PYC page(s) plus the BBNT block, from the first PYC page to the last BBNT continuation page (stopping at the next PYC title, i.e. the hidden copy).
+  - Unrecognised pages raise `AcceptanceError(500, ..., code="pdf_page_detection_failed")` instead of silently keeping the whole PDF. The validated `.xlsx` workbook path/hash remain in export metadata.
+- **Download filename.** `download_filename()` now returns `YC-<body>.<xlsx|pdf>` for `kind=pyc` and strips stored prefixes `YC-`, `PYC-`, `BBNT-`, `NT-` before joining. Examples: `YC-001.xlsx`, `YC-32.pdf`, `YC-001.pdf`; no `PYC-YC-001`. The numbered DB prefix configuration is unchanged. The frontend fallback filename uses `YC-` for PYC too.
+- **Cell B6 / B5.** `_number_value()` strips the numbering prefix before writing: `YC-001` and `PYC-001` → `"001"` (string, leading zero preserved), bare `32` → `32` (number). The template label `Số: YC-` therefore prints `Số: YC-001`, not `Số: YC- YC-001`.
+- **Urgency tick.** `_pyc_replacements()` treats `None`/unknown urgency as `normal`, so `D14=☑`, `D15=□`, `D16=□`; `urgent`/`very_urgent` tick their own box. `RequestForm` defaults new PYC to `normal` and maps an edited PYC with `urgency=null` to `normal` while still allowing Gấp/Rất gấp.
+- **E10 content.** `_pyc_content_text()` prints `content tại location` when `location` exists (fallback `subject`), normalises whitespace, avoids a double `tại` when content already ends with it, keeps `content` alone when there is no target, and prints the target alone when content is empty.
+
+Files changed for this round:
+- `backend/app/acceptance/service.py`
+- `backend/tests/acceptance/test_exports.py`
+- `frontend/src/features/acceptance/components/RequestForm.tsx`
+- `frontend/src/features/acceptance/lib/api.ts`
+- `frontend/src/features/acceptance/lib/download.test.ts`
+- `docs/agent-reports/acceptance.md`
+
+Tests:
+- `cd backend && DATABASE_URL="sqlite:////tmp/opencode/acceptance-pyc-fix-$$.db" ../.venv/bin/python -m pytest tests/acceptance -q` → **80 passed** (LibreOffice + PyMuPDF were available, so the PDF page tests ran).
+- `cd frontend && npx vitest run src/features/acceptance` → **16 passed** (3 files).
+- Acceptance feature typecheck (`tsc --noEmit ... src/features/acceptance/index.ts`) → **exit 0**.
+- PDF tests assert PYC = 1 page, BBNT = 2 pages (PYC + BBNT), no `DANH MỤC HỒ SƠ`; the missing-title path is tested separately through `_select_pdf_pages()`.
+
+APIs/models:
+- No new routes; only the `Content-Disposition` filename for `GET .../acceptance-exports/{id}/download` changed.
+- No model/migration changes. The download name still comes from `generated_documents.metadata_json["number"]`.
+
+Dependencies:
+- PDF filtering requires **PyMuPDF** (`import pymupdf`). It is present in the local venv and must be installed in the deployment image. If it is missing, PDF export fails with `pdf_conversion_failed` and an install hint.
+
+New unresolved notes:
+1. If the converted PDF has no extractable title text (for example an image-only workbook), the export now fails with `pdf_page_detection_failed`; there is no OCR fallback by design.
+2. BBNT downloads still derive their number from the linked PYC number (`metadata["number"] = view.number`) as before; only the PYC filename convention was changed in this round.
+
 ## Vòng 2 — Addendum acceptance (11/11/2026)
 
 - **AI separation:** `backend/app/acceptance/` contains no LLM/Vision/Embedding provider import or call, and no reference to the DeepSeek POC `engineering_ai.page_extraction` module or `scripts/deepseek_page_extract.py`. `test_ai_separation.py` statically scans the package and monkeypatches `provider_from_env`, `vision_from_env`, `embeddings_from_env` plus a fake `app.engineering_ai.page_extraction` module to raise; PYC/BBNT create + XLSX/PDF export still succeed. A new record has `result=null` and checklist `unconfirmed`.
@@ -222,7 +258,7 @@ Template isolation:
 ## Dependencies
 
 - Backend: FastAPI, SQLAlchemy, Pydantic v2, pytest, httpx. XLSX export uses only Python stdlib (`zipfile`, XML string editing) — no `openpyxl` at runtime.
-- PDF export: LibreOffice headless (`libreoffice` or `soffice`) plus `subprocess`; not a Python package dependency. Configure with `ACCEPTANCE_LIBREOFFICE`; timeout via `ACCEPTANCE_PDF_TIMEOUT` (default 120s).
+- PDF export: LibreOffice headless (`libreoffice` or `soffice`) plus `subprocess`; not a Python package dependency. Configure with `ACCEPTANCE_LIBREOFFICE`; timeout via `ACCEPTANCE_PDF_TIMEOUT` (default 120s). Page filtering after conversion requires **PyMuPDF** (`pymupdf`).
 - Frontend: React 19, TypeScript, Vite, Tailwind. No additional packages added.
 - Test-only: `openpyxl`, Pillow (for workbook inspection/synthetic fixture). PDF tests skip if LibreOffice is absent.
 

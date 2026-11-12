@@ -1,5 +1,13 @@
 /** Shared types for the PYC/BBNT acceptance feature. */
 
+export type ProjectContext = {
+  id: string;
+  name: string;
+  client?: string | null;
+  location?: string | null;
+  report_title?: string | null;
+};
+
 export type TriState = "yes" | "no" | "unconfirmed";
 export type RequestStatus = "draft" | "submitted";
 export type RecordStatus = "draft" | "confirmed";

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { addDaysISO, fromLocalInputValue, toLocalInputValue } from "./datetime";
+import {
+  addDaysISO,
+  formatISODate,
+  fromLocalInputValue,
+  toLocalInputValue,
+} from "./datetime";
 
 describe("site report dates", () => {
   it("uses Asia/Ho_Chi_Minh for datetime-local, not the machine timezone", () => {
@@ -21,5 +26,12 @@ describe("site report dates", () => {
   it("keeps the local calendar date for leap years", () => {
     expect(addDaysISO("2028-02-28", 1)).toBe("2028-02-29");
     expect(addDaysISO("2028-02-29", 1)).toBe("2028-03-01");
+  });
+
+  it("formats report dates without applying a timezone", () => {
+    expect(formatISODate("2026-11-11")).toBe("11/11/2026");
+    expect(formatISODate("2026-01-02")).toBe("02/01/2026");
+    expect(formatISODate("")).toBe("");
+    expect(formatISODate(null)).toBe("");
   });
 });

@@ -1,2 +1,12 @@
 @import "tailwindcss";
+@theme {
+  --color-teal-50: #eff4fc;
+  --color-teal-100: #dbe6f7;
+  --color-teal-700: #405e9b;
+  --color-teal-800: #304b80;
+  --color-teal-900: #253e6d;
+  --color-red-600: #e5322c;
+}
 body { margin: 0; font-family: system-ui, sans-serif; }
+button, select, input { font: inherit; }
+button:focus-visible, select:focus-visible, input:focus-visible, a:focus-visible { outline: 3px solid #e5322c; outline-offset: 2px; }

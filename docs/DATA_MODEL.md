@@ -10,7 +10,7 @@ Các bảng nghiệp vụ dùng khóa UUID và phạm vi `project_id` khi áp d�
 | DailyReport | project_id, report_date (unique cùng project), status draft/reviewed, notes, site_notes_json tùy chọn, generated snapshot |
 | ManpowerEntry | report_id, group_name, person_name nullable, count nullable, organization_id nullable; `0` khác `null` |
 | ManpowerPreset | project_id, group_name, person_name/count/organization_id tùy chọn; chỉ áp dụng khi người dùng chọn |
-| DailyWorkLog | report_id, work_item_id nullable, location, component, quantity nullable, unit, start/end, status, notes |
+| DailyWorkLog | report_id, work_item_id nullable, work_name nullable (tên công việc duy nhất từ danh mục), location, component, quantity nullable, unit, start/end cũ (không còn nhập trên UI), status, notes |
 | NextDayPlan | report_id, plan_date, work_item_id nullable, description, location, manpower, equipment, dependency |
 | SitePhoto | project_id, report_id nullable, original_path, sha256, capture_time nullable, upload_time, GPS nullable, device nullable, category, location/component/stage nullable, suggested_caption, confirmed_caption |
 | PhotoWorkItemLink | photo_id, work_item_id, unique pair |

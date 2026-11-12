@@ -1,5 +1,6 @@
 export { default as SiteReportPage } from "./pages/SiteReportPage";
 export { default as ManpowerTable } from "./components/ManpowerTable";
+export { default as ManpowerTeamForm } from "./components/ManpowerTeamForm";
 export { default as WorkLogForm } from "./components/WorkLogForm";
 export { default as NextDayPlanForm } from "./components/NextDayPlanForm";
 export { default as PhotoCapture } from "./components/PhotoCapture";

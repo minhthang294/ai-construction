@@ -394,7 +394,9 @@ def test_system_b_is_deterministic_reuses_pyc_and_has_no_ai(harness, monkeypatch
     )
     assert preview.status_code == 200, preview.text
     assert preview.json()["kind"] == "pyc"
-    assert preview.json()["cells"]["PYC"]["B6"] == request["number"]
+    # The template prints the "Số: YC-" label in A6, so B6 carries only the
+    # number body (the stored request number may include its own prefix).
+    assert preview.json()["cells"]["PYC"]["B6"] == request["number"].rsplit("-", 1)[-1]
 
     record_resp = client.post(
         f"{base}/acceptance-records", headers=headers, json={"request_id": request_id}
@@ -439,7 +441,7 @@ def test_system_b_is_deterministic_reuses_pyc_and_has_no_ai(harness, monkeypatch
     content = client.get(exported.json()["download_url"], headers=headers).content
     assert content.startswith(b"PK")
     workbook = openpyxl.load_workbook(BytesIO(content))
-    assert request["number"] in str(workbook["PYC"]["B6"].value)
+    assert workbook["PYC"]["B6"].value == request["number"].rsplit("-", 1)[-1]
     assert "Công trình DOD" in str(workbook["PYC"]["C1"].value)
 
     if shutil.which("libreoffice") or shutil.which("soffice"):

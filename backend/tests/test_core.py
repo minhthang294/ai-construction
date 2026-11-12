@@ -30,6 +30,11 @@ def test_auth_project_scope_and_work_item(tmp_path, monkeypatch):
     project = client.post("/api/v1/projects", headers=admin, json={"name": "Test Project"})
     assert project.status_code == 201
     project_id = project.json()["id"]
+    updated_project = client.patch(f"/api/v1/projects/{project_id}", headers=admin,
+                                   json={"client": "Chủ đầu tư A", "location": "Hà Nội"})
+    assert updated_project.status_code == 200
+    assert updated_project.json()["client"] == "Chủ đầu tư A"
+    assert client.get("/api/v1/projects", headers=admin).json()[0]["location"] == "Hà Nội"
     user = client.post("/api/v1/users", headers=admin, json={"username": "viewer-test", "password": "viewer-password-long", "role": "viewer"})
     assert user.status_code == 201
     viewer_token = client.post("/api/v1/auth/login", json={"username": "viewer-test", "password": "viewer-password-long"}).json()["access_token"]
@@ -37,6 +42,8 @@ def test_auth_project_scope_and_work_item(tmp_path, monkeypatch):
     assert client.get(f"/api/v1/projects/{project_id}/work-items", headers=viewer).status_code == 404
     assert client.post(f"/api/v1/projects/{project_id}/members", headers=admin, params={"user_id": user.json()["id"], "role": "viewer"}).status_code == 201
     assert client.get(f"/api/v1/projects/{project_id}/work-items", headers=viewer).status_code == 200
+    assert client.patch(f"/api/v1/projects/{project_id}", headers=viewer,
+                        json={"client": "Không được phép"}).status_code == 403
     assert client.post(f"/api/v1/projects/{project_id}/work-items", headers=viewer, json={"code": "W1", "name": "Test item"}).status_code == 403
     assert client.post(f"/api/v1/projects/{project_id}/work-items", headers=viewer, json={"code": "W1", "name": "Test item"}).json()["code"] == "http_403"
     created_item = client.post(f"/api/v1/projects/{project_id}/work-items", headers=admin, json={"code": "W1", "name": "Test item"})

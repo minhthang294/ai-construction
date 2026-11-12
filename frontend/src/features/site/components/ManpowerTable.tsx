@@ -33,7 +33,7 @@ export default function ManpowerTable({ entries, onChange, organizations = [] }:
         </div>
         <button
           type="button"
-          className="min-h-11 rounded-lg bg-blue-600 px-4 text-sm font-medium text-white active:bg-blue-700"
+          className="min-h-11 min-w-11 rounded-lg bg-blue-600 px-4 text-sm font-medium text-white active:bg-blue-700"
           onClick={add}
         >
           + Thêm
@@ -94,7 +94,7 @@ export default function ManpowerTable({ entries, onChange, organizations = [] }:
           </div>
           <button
             type="button"
-            className="min-h-9 px-1 text-sm text-red-600"
+            className="min-h-11 min-w-11 px-2 text-sm text-red-600"
             onClick={() => remove(index)}
           >
             Xoá nhóm

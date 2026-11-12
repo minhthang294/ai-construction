@@ -1,7 +1,22 @@
 import { useEffect, useMemo, useState } from "react";
 import { crossReference } from "../lib/api";
-import type { Citation, CrossReferenceResponse, SourceDocument } from "../types";
+import {
+  BADGE,
+  BUTTON_PRIMARY,
+  CARD,
+  CARD_PAD,
+  cx,
+  FIELD,
+  FIELD_INLINE,
+  LABEL,
+  META_TEXT,
+  PANEL_ALERT,
+  SECTION_TEXT,
+  SECTION_TITLE,
+} from "../lib/ui";
+import { AlertIcon, CompareIcon, SpinnerIcon } from "./icons";
 import CitationCard from "./CitationCard";
+import type { Citation, CrossReferenceResponse, SourceDocument } from "../types";
 
 type Props = {
   projectId: string;
@@ -86,18 +101,24 @@ export default function CrossReferencePanel({
 
   if (ready.length === 0) {
     return (
-      <section className="rounded border border-gray-200 bg-white p-3 text-xs text-gray-700 shadow-sm">
-        Cần ít nhất một hồ sơ PDF ở trạng thái ready để đối chiếu hai trang. Chưa có
-        nguồn thì không tạo kết luận kỹ thuật.
+      <section className={cx(CARD, CARD_PAD, "flex gap-3")}>
+        <CompareIcon className="mt-0.5 h-5 w-5 shrink-0 text-slate-400" />
+        <p className={SECTION_TEXT}>
+          Cần ít nhất một hồ sơ PDF ở trạng thái ready để đối chiếu hai trang. Chưa có
+          nguồn thì không tạo kết luận kỹ thuật.
+        </p>
       </section>
     );
   }
 
   return (
-    <section className="space-y-3 rounded border border-gray-200 bg-white p-3 shadow-sm">
-      <div>
-        <h2 className="text-sm font-semibold">Đối chiếu chéo hai trang</h2>
-        <p className="text-xs text-gray-600">
+    <section
+      aria-busy={busy}
+      className={cx(CARD, CARD_PAD, "space-y-4")}
+    >
+      <div className="max-w-3xl">
+        <h2 className={SECTION_TITLE}>Đối chiếu chéo hai trang</h2>
+        <p className={cx(SECTION_TEXT, "mt-1")}>
           Chỉ nêu điểm nghi vấn khi hai câu có cùng chủ đề và giá trị số/đơn vị/cấp
           khác nhau. Kết quả luôn kèm hai citation và không kết luận trang nào đúng
           hay thiết kế sai.
@@ -106,12 +127,14 @@ export default function CrossReferencePanel({
 
       <div className="grid gap-3 md:grid-cols-2">
         <PageSelector
+          id="eai-crossref-first"
           label="Trang thứ nhất"
           documents={ready}
           value={first}
           onChange={(patch) => updatePage(setFirst, first, patch)}
         />
         <PageSelector
+          id="eai-crossref-second"
           label="Trang thứ hai"
           documents={ready}
           value={second}
@@ -119,10 +142,11 @@ export default function CrossReferencePanel({
         />
       </div>
 
-      <label className="block text-xs font-medium text-gray-700">
+      <label className={LABEL} htmlFor="eai-crossref-topic">
         Chủ đề cần đối chiếu (không bắt buộc)
         <input
-          className="mt-1 w-full rounded border border-gray-300 p-2 text-sm"
+          id="eai-crossref-topic"
+          className={FIELD}
           value={topic}
           onChange={(event) => {
             setTopic(event.target.value);
@@ -134,19 +158,27 @@ export default function CrossReferencePanel({
 
       <button
         type="button"
-        className="rounded bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+        className={cx(BUTTON_PRIMARY, "w-full sm:w-auto")}
         onClick={() => void compare()}
         disabled={busy || !first.documentId || !second.documentId}
       >
+        {busy && <SpinnerIcon className="h-4 w-4" />}
         {busy ? "Đang đối chiếu..." : "Đối chiếu hai trang"}
       </button>
 
-      {error && <div className="rounded bg-red-50 p-2 text-xs text-red-800">{error}</div>}
+      {error && (
+        <div role="alert" className={PANEL_ALERT}>
+          {error}
+        </div>
+      )}
 
       {result && (
-        <div className="space-y-3">
-          <div className="rounded bg-amber-50 p-2 text-xs text-amber-950">
-            <p className="font-semibold">Trạng thái: cần kỹ sư kiểm tra</p>
+        <div className="space-y-4">
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm leading-6 text-amber-950">
+            <p className="flex items-center gap-2 font-semibold">
+              <AlertIcon className="h-4 w-4 shrink-0" />
+              Trạng thái: cần kỹ sư kiểm tra
+            </p>
             <p className="mt-1">{result.message}</p>
             <p className="mt-1 font-medium">{result.disclaimer}</p>
             {result.warnings.map((warning, index) => (
@@ -157,8 +189,8 @@ export default function CrossReferencePanel({
           </div>
 
           <div>
-            <h3 className="text-xs font-semibold text-gray-700">Hai trang đã đối chiếu</h3>
-            <div className="mt-1 grid gap-2 md:grid-cols-2">
+            <h3 className="text-sm font-semibold text-slate-800">Hai trang đã đối chiếu</h3>
+            <div className="mt-2 grid gap-2 md:grid-cols-2">
               {result.citations.map((citation, index) => (
                 <CitationCard
                   key={`top-${citation.document_id}-${citation.page_number}-${index}`}
@@ -170,7 +202,7 @@ export default function CrossReferencePanel({
           </div>
 
           {result.suggestions.length === 0 ? (
-            <p className="rounded bg-gray-50 p-2 text-xs text-gray-700">
+            <p className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm leading-6 text-slate-700">
               Không có điểm nghi vấn được tạo. Điều này không có nghĩa hai trang đã đồng
               nhất hoặc hồ sơ đã được duyệt.
             </p>
@@ -178,17 +210,17 @@ export default function CrossReferencePanel({
             result.suggestions.map((suggestion, index) => (
               <article
                 key={`${index}-${suggestion.topic}`}
-                className="space-y-2 rounded border border-amber-200 p-2"
+                className="space-y-3 rounded-lg border border-amber-200 bg-white p-3"
               >
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h3 className="text-xs font-semibold text-amber-950">
+                  <h3 className="text-sm font-semibold text-amber-950">
                     Điểm nghi vấn {index + 1}: {suggestion.topic}
                   </h3>
-                  <span className="rounded bg-amber-100 px-2 py-0.5 text-[11px] text-amber-900">
+                  <span className={cx(BADGE, "border border-amber-200 bg-amber-100 text-amber-900")}>
                     độ khớp văn bản {Math.round(suggestion.confidence * 100)}%
                   </span>
                 </div>
-                <p className="text-xs text-gray-800">{suggestion.observation}</p>
+                <p className="text-sm leading-6 text-slate-800">{suggestion.observation}</p>
                 <div className="grid gap-2 md:grid-cols-2">
                   <CitationCard
                     citation={suggestion.first_citation}
@@ -200,7 +232,7 @@ export default function CrossReferencePanel({
                   />
                 </div>
                 {suggestion.warnings.map((warning, warningIndex) => (
-                  <p key={`${warningIndex}-${warning}`} className="text-[11px] text-red-700">
+                  <p key={`${warningIndex}-${warning}`} className="text-xs leading-5 text-red-700">
                     {warning}
                   </p>
                 ))}
@@ -214,43 +246,55 @@ export default function CrossReferencePanel({
 }
 
 function PageSelector({
+  id,
   label,
   documents,
   value,
   onChange,
 }: {
+  id: string;
   label: string;
   documents: SourceDocument[];
   value: PageChoice;
   onChange: (patch: Partial<PageChoice>) => void;
 }) {
   const selected = documents.find((document) => document.id === value.documentId);
+  const maxPage = Math.max(selected?.page_count ?? 1, 1);
   return (
-    <div className="space-y-1 rounded border border-gray-200 p-2">
-      <p className="text-xs font-semibold text-gray-700">{label}</p>
-      <select
-        className="w-full rounded border border-gray-300 p-2 text-xs"
-        value={value.documentId}
-        onChange={(event) => onChange({ documentId: event.target.value, pageNumber: 1 })}
+    <fieldset className="min-w-0 rounded-lg border border-slate-200 bg-slate-50 p-3">
+      <legend className="px-1 text-sm font-semibold text-slate-800">{label}</legend>
+      <label className="mt-1 block text-sm font-medium text-slate-700" htmlFor={`${id}-document`}>
+        Hồ sơ
+        <select
+          id={`${id}-document`}
+          className={cx(FIELD_INLINE, "mt-1.5 w-full")}
+          value={value.documentId}
+          onChange={(event) => onChange({ documentId: event.target.value, pageNumber: 1 })}
+        >
+          {documents.map((document) => (
+            <option key={document.id} value={document.id}>
+              {document.original_name} (v{document.version}, {document.page_count} trang)
+            </option>
+          ))}
+        </select>
+      </label>
+      <label
+        className="mt-3 flex flex-wrap items-center gap-2 text-sm font-medium text-slate-700"
+        htmlFor={`${id}-page`}
       >
-        {documents.map((document) => (
-          <option key={document.id} value={document.id}>
-            {document.original_name} (v{document.version}, {document.page_count} trang)
-          </option>
-        ))}
-      </select>
-      <label className="flex items-center gap-2 text-xs text-gray-700">
         Trang
         <input
+          id={`${id}-page`}
           type="number"
+          inputMode="numeric"
           min={1}
-          max={Math.max(selected?.page_count ?? 1, 1)}
-          className="w-24 rounded border border-gray-300 p-1"
+          max={maxPage}
+          className={cx(FIELD_INLINE, "w-24")}
           value={value.pageNumber}
           onChange={(event) => onChange({ pageNumber: Number(event.target.value) })}
         />
-        / {Math.max(selected?.page_count ?? 1, 1)}
+        <span className={cx(META_TEXT, "tabular-nums")}>/ {maxPage}</span>
       </label>
-    </div>
+    </fieldset>
   );
 }

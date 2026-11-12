@@ -1,4 +1,18 @@
 import type { SourceDocument } from "../types";
+import {
+  BADGE,
+  BUTTON_SECONDARY,
+  BUTTON_SUCCESS,
+  BUTTON_WARNING,
+  CARD,
+  CARD_PAD,
+  cx,
+  HELP_TEXT,
+  META_TEXT,
+  SECTION_TEXT,
+  SECTION_TITLE,
+} from "../lib/ui";
+import { AlertIcon, CheckIcon, DocumentIcon, ExternalIcon, RefreshIcon } from "./icons";
 
 type Props = {
   documents: SourceDocument[];
@@ -21,12 +35,26 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 const STATUS_STYLES: Record<string, string> = {
-  pending: "bg-amber-100 text-amber-800",
-  running: "bg-blue-100 text-blue-800",
-  ocr_completed: "bg-cyan-100 text-cyan-800",
-  indexing: "bg-indigo-100 text-indigo-800",
-  ready: "bg-green-100 text-green-800",
-  failed: "bg-red-100 text-red-800",
+  pending: "border-amber-200 bg-amber-100 text-amber-900",
+  running: "border-[#405e9b]/20 bg-[#405e9b]/10 text-[#35507f]",
+  ocr_completed: "border-sky-200 bg-sky-100 text-sky-900",
+  indexing: "border-indigo-200 bg-indigo-100 text-indigo-900",
+  ready: "border-emerald-200 bg-emerald-100 text-emerald-900",
+  failed: "border-red-200 bg-red-100 text-red-800",
+};
+
+const DOCUMENT_TYPE_LABELS: Record<string, string> = {
+  drawing: "Bản vẽ",
+  specification: "Thuyết minh",
+  technical_guideline: "Chỉ dẫn kỹ thuật",
+  construction_method: "Biện pháp thi công",
+  standard: "Tiêu chuẩn",
+  material_record: "Hồ sơ vật liệu",
+  test_record: "Hồ sơ thí nghiệm",
+  acceptance_record: "Hồ sơ nghiệm thu",
+  instruction: "Chỉ dẫn khác",
+  report: "Báo cáo",
+  other: "Khác",
 };
 
 function shortHash(value: string): string {
@@ -44,122 +72,162 @@ export default function DocumentList({
   loading,
 }: Props) {
   return (
-    <section className="rounded border border-gray-200 bg-white p-3 shadow-sm space-y-2">
-      <div className="flex items-center justify-between gap-2">
-        <div>
-          <h2 className="text-sm font-semibold">Hồ sơ nguồn</h2>
-          <p className="text-xs text-gray-600">
-            Chỉ hồ sơ <span className="font-medium">ready</span> và phiên bản có hiệu lực
-            được dùng để trả lời.
+    <section className={cx(CARD, "min-w-0 overflow-hidden")} aria-busy={loading}>
+      <div className={cx(CARD_PAD, "flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between")}>
+        <div className="min-w-0">
+          <h2 className={SECTION_TITLE}>Hồ sơ nguồn</h2>
+          <p className={cx(SECTION_TEXT, "mt-1")}>
+            Chỉ hồ sơ <span className="font-medium text-slate-800">ready</span> và phiên
+            bản có hiệu lực được dùng để trả lời.
           </p>
         </div>
         <button
           type="button"
-          className="rounded border border-gray-300 px-3 py-1 text-xs font-medium"
+          className={cx(BUTTON_SECONDARY, "w-full shrink-0 sm:w-auto")}
           onClick={onRefresh}
           disabled={loading}
+          aria-busy={loading}
         >
+          <RefreshIcon className={cx("h-4 w-4", loading && "animate-spin motion-reduce:animate-none")} />
           {loading ? "Đang tải..." : "Làm mới"}
         </button>
       </div>
 
       {documents.length === 0 ? (
-        <div className="rounded bg-gray-50 p-3 text-xs text-gray-600">
-          Chưa có hồ sơ PDF trong công trình này. Khi chưa có nguồn, AI trả lời bằng
-          câu từ chối chuẩn thay vì suy đoán.
+        <div className="border-t border-slate-200 p-4">
+          <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-center">
+            <DocumentIcon className="mx-auto h-9 w-9 text-slate-300" />
+            <p className={cx(META_TEXT, "mx-auto mt-2 max-w-sm")}>
+              Chưa có hồ sơ PDF trong công trình này. Khi chưa có nguồn, AI trả lời bằng
+              câu từ chối chuẩn thay vì suy đoán.
+            </p>
+          </div>
         </div>
       ) : (
-        <ul className="divide-y divide-gray-100">
-          {documents.map((document) => (
-            <li key={document.id}>
-              <button
-                type="button"
-                onClick={() => onSelect(document)}
-                className={`w-full p-2 text-left transition ${
-                  selectedId === document.id ? "bg-blue-50" : "hover:bg-gray-50"
-                }`}
+        <ul className="divide-y divide-slate-200 border-t border-slate-200">
+          {documents.map((document) => {
+            const selected = selectedId === document.id;
+            return (
+              <li
+                key={document.id}
+                className={cx(
+                  "transition-colors",
+                  selected ? "bg-[#405e9b]/5" : "hover:bg-slate-50",
+                )}
               >
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-medium break-all">{document.original_name}</span>
-                  <span className="rounded bg-gray-100 px-2 py-0.5 text-[11px] text-gray-700">
-                    v{document.version}
-                  </span>
-                  {!document.is_current && (
-                    <span className="rounded bg-gray-200 px-2 py-0.5 text-[11px]">
-                      Bản cũ
-                    </span>
-                  )}
-                  <span
-                    className={`rounded px-2 py-0.5 text-[11px] ${
-                      document.is_effective
-                        ? "bg-emerald-100 text-emerald-800"
-                        : "bg-gray-100 text-gray-600"
-                    }`}
-                  >
-                    {document.is_effective ? "Có hiệu lực" : "Chưa hiệu lực"}
-                  </span>
-                  <span
-                    className={`rounded px-2 py-0.5 text-[11px] ${
-                      STATUS_STYLES[document.status] ?? "bg-gray-100 text-gray-700"
-                    }`}
-                  >
-                    {STATUS_LABELS[document.status] ?? document.status}
-                  </span>
-                </div>
-                <div className="mt-1 grid gap-x-3 text-[11px] text-gray-600 sm:grid-cols-3">
-                  <span>Loại: {document.type}</span>
-                  <span>{document.page_count} trang</span>
-                  <span title={document.sha256}>SHA-256: {shortHash(document.sha256)}</span>
-                  {document.drawing_number && <span>Bản vẽ: {document.drawing_number}</span>}
-                  {document.revision && <span>Revision: {document.revision}</span>}
-                  <span>{(document.size_bytes / 1024 / 1024).toFixed(2)} MB</span>
-                  {document.effective_at && (
-                    <span>Hiệu lực: {new Date(document.effective_at).toLocaleString("vi-VN")}</span>
-                  )}
-                </div>
-                {document.change_note && (
-                  <p className="mt-1 text-[11px] text-gray-600">
-                    Ghi chú hiệu lực: {document.change_note}
-                  </p>
-                )}
-                {document.error_message && (
-                  <p className="mt-1 text-[11px] text-red-700">{document.error_message}</p>
-                )}
-                {document.warnings.length > 0 && (
-                  <p className="mt-1 text-[11px] text-amber-700">
-                    {document.warnings.length} cảnh báo trích xuất/OCR
-                  </p>
-                )}
-              </button>
-              <div className="flex justify-end gap-2 pb-2">
-                {!document.is_effective && onConfirmEffective && (
-                  <button
-                    type="button"
-                    className="min-h-11 rounded border border-emerald-400 bg-emerald-50 px-3 py-2 text-xs text-emerald-900"
-                    onClick={() => onConfirmEffective(document)}
-                  >
-                    Xác nhận hiệu lực
-                  </button>
-                )}
-                {document.status === "failed" && onReingest && (
-                  <button
-                    type="button"
-                    className="min-h-11 rounded border border-amber-400 bg-amber-50 px-3 py-2 text-xs text-amber-900"
-                    onClick={() => onReingest(document)}
-                  >
-                    Xử lý lại
-                  </button>
-                )}
                 <button
                   type="button"
-                  className="min-h-11 rounded border border-gray-300 px-3 py-2 text-xs"
-                  onClick={() => onOpenOriginal(document)}
+                  onClick={() => onSelect(document)}
+                  aria-pressed={selected}
+                  className="w-full p-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#405e9b]"
                 >
-                  Mở PDF gốc
+                  <span className="block text-sm font-semibold text-slate-900 [overflow-wrap:anywhere]">
+                    {document.original_name}
+                  </span>
+                  <span className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                    <span className={cx(BADGE, "border border-slate-200 bg-slate-100 text-slate-700")}>
+                      v{document.version}
+                    </span>
+                    {!document.is_current && (
+                      <span className={cx(BADGE, "border border-slate-200 bg-slate-200 text-slate-700")}>
+                        Bản cũ
+                      </span>
+                    )}
+                    <span
+                      className={cx(
+                        BADGE,
+                        document.is_effective
+                          ? "border border-emerald-200 bg-emerald-100 text-emerald-900"
+                          : "border border-slate-200 bg-slate-100 text-slate-600",
+                      )}
+                    >
+                      {document.is_effective ? "Có hiệu lực" : "Chưa hiệu lực"}
+                    </span>
+                    <span
+                      className={cx(
+                        BADGE,
+                        STATUS_STYLES[document.status] ??
+                          "border border-slate-200 bg-slate-100 text-slate-700",
+                      )}
+                    >
+                      <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true" />
+                      {STATUS_LABELS[document.status] ?? document.status}
+                    </span>
+                  </span>
+
+                  <span className="mt-2 grid gap-x-4 gap-y-1 text-xs leading-5 text-slate-600 sm:grid-cols-2">
+                    <span>
+                      <span className="text-slate-500">Loại: </span>
+                      {DOCUMENT_TYPE_LABELS[document.type] ?? document.type}
+                    </span>
+                    <span>{document.page_count} trang</span>
+                    <span className="font-mono tabular-nums" title={document.sha256}>
+                      <span className="font-sans text-slate-500">SHA-256: </span>
+                      {shortHash(document.sha256)}
+                    </span>
+                    {document.drawing_number && <span>Bản vẽ: {document.drawing_number}</span>}
+                    {document.revision && <span>Revision: {document.revision}</span>}
+                    <span>{(document.size_bytes / 1024 / 1024).toFixed(2)} MB</span>
+                    {document.effective_at && (
+                      <span>
+                        Hiệu lực: {new Date(document.effective_at).toLocaleString("vi-VN")}
+                      </span>
+                    )}
+                  </span>
+
+                  {document.change_note && (
+                    <span className={cx(HELP_TEXT, "block")}>
+                      Ghi chú hiệu lực: {document.change_note}
+                    </span>
+                  )}
+                  {document.error_message && (
+                    <span className="mt-1 flex items-start gap-1.5 text-xs leading-5 text-red-700">
+                      <AlertIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      <span className="[overflow-wrap:anywhere]">{document.error_message}</span>
+                    </span>
+                  )}
+                  {document.warnings.length > 0 && (
+                    <span className="mt-1 flex items-start gap-1.5 text-xs leading-5 text-amber-800">
+                      <AlertIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      {document.warnings.length} cảnh báo trích xuất/OCR
+                    </span>
+                  )}
                 </button>
-              </div>
-            </li>
-          ))}
+
+                <div className="flex flex-col-reverse gap-2 border-t border-slate-100 px-3 py-2.5 sm:flex-row sm:flex-wrap sm:justify-end">
+                  {!document.is_effective && onConfirmEffective && (
+                    <button
+                      type="button"
+                      className={cx(BUTTON_SUCCESS, "w-full sm:w-auto")}
+                      onClick={() => onConfirmEffective(document)}
+                    >
+                      <CheckIcon className="h-4 w-4" />
+                      Xác nhận hiệu lực
+                    </button>
+                  )}
+                  {document.status === "failed" && onReingest && (
+                    <button
+                      type="button"
+                      className={cx(BUTTON_WARNING, "w-full sm:w-auto")}
+                      onClick={() => onReingest(document)}
+                    >
+                      <RefreshIcon className="h-4 w-4" />
+                      Xử lý lại
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className={cx(BUTTON_SECONDARY, "w-full sm:w-auto")}
+                    onClick={() => onOpenOriginal(document)}
+                    disabled={!document.original_url}
+                  >
+                    <ExternalIcon className="h-4 w-4" />
+                    Mở PDF gốc
+                  </button>
+                </div>
+              </li>
+            );
+          })}
         </ul>
       )}
     </section>

@@ -1,17 +1,23 @@
 import { useEffect, useState } from "react";
 import { getDailyReportByDate } from "../lib/api";
 import { shouldMarkSaved } from "../lib/formGuard";
+import {
+  mergeProjectMetadata,
+  projectMetadataDefaults,
+} from "../lib/projectPrefill";
 import type {
   AcceptanceRequest,
   FieldKind,
   LinkedDailyReport,
   ParticipantProfile,
+  ProjectContext,
   RequestInput,
   Urgency,
 } from "../types";
 
 type Props = {
   projectId: string;
+  project?: ProjectContext | null;
   initial?: AcceptanceRequest | null;
   dailyReport?: LinkedDailyReport | null;
   profiles?: ParticipantProfile[];
@@ -61,7 +67,7 @@ const BLANK: FormState = {
   content: "",
   subject: "",
   field: "",
-  urgency: "",
+  urgency: "normal",
   requested_by_name: "",
   supervisor_name: "",
   investor_name: "",
@@ -71,32 +77,40 @@ const BLANK: FormState = {
   notes: "",
 };
 
-function toForm(request?: AcceptanceRequest | null): FormState {
-  if (!request) return { ...BLANK };
-  return {
-    number: request.number ?? "",
-    daily_report_id: request.daily_report_id ?? "",
-    requested_by_profile_id: request.requested_by_profile_id ?? "",
-    supervisor_profile_id: request.supervisor_profile_id ?? "",
-    investor_profile_id: request.investor_profile_id ?? "",
-    project_name: request.project_name ?? "",
-    client: request.client ?? "",
-    project_location: request.project_location ?? "",
-    location: request.location ?? "",
-    request_date: request.request_date ?? "",
-    inspection_time: request.inspection_time ?? "",
-    content: request.content ?? "",
-    subject: request.subject ?? "",
-    field: request.field ?? "",
-    urgency: request.urgency ?? "",
-    requested_by_name: request.requested_by_name ?? "",
-    supervisor_name: request.supervisor_name ?? "",
-    investor_name: request.investor_name ?? "",
-    contractor_org: request.contractor_org ?? "",
-    supervisor_org: request.supervisor_org ?? "",
-    investor_org: request.investor_org ?? "",
-    notes: request.notes ?? "",
-  };
+function toForm(
+  request?: AcceptanceRequest | null,
+  project?: ProjectContext | null,
+): FormState {
+  if (!request) {
+    return { ...BLANK, ...projectMetadataDefaults(project) };
+  }
+  return mergeProjectMetadata(
+    {
+      number: request.number ?? "",
+      daily_report_id: request.daily_report_id ?? "",
+      requested_by_profile_id: request.requested_by_profile_id ?? "",
+      supervisor_profile_id: request.supervisor_profile_id ?? "",
+      investor_profile_id: request.investor_profile_id ?? "",
+      project_name: request.project_name ?? "",
+      client: request.client ?? "",
+      project_location: request.project_location ?? "",
+      location: request.location ?? "",
+      request_date: request.request_date ?? "",
+      inspection_time: request.inspection_time ?? "",
+      content: request.content ?? "",
+      subject: request.subject ?? "",
+      field: request.field ?? "",
+      urgency: request.urgency ?? "normal",
+      requested_by_name: request.requested_by_name ?? "",
+      supervisor_name: request.supervisor_name ?? "",
+      investor_name: request.investor_name ?? "",
+      contractor_org: request.contractor_org ?? "",
+      supervisor_org: request.supervisor_org ?? "",
+      investor_org: request.investor_org ?? request.client ?? "",
+      notes: request.notes ?? "",
+    },
+    project,
+  );
 }
 
 function nullable(value: string): string | null {
@@ -106,6 +120,7 @@ function nullable(value: string): string | null {
 
 export default function RequestForm({
   projectId,
+  project,
   initial,
   dailyReport,
   profiles = [],
@@ -114,7 +129,7 @@ export default function RequestForm({
   onDirtyChange,
   submitting = false,
 }: Props) {
-  const [form, setForm] = useState<FormState>(() => toForm(initial));
+  const [form, setForm] = useState<FormState>(() => toForm(initial, project));
   const [error, setError] = useState<string | null>(null);
   const [dailyReportDate, setDailyReportDate] = useState(dailyReport?.report_date ?? "");
   const [linkedReport, setLinkedReport] = useState<LinkedDailyReport | null>(
@@ -124,13 +139,13 @@ export default function RequestForm({
   const [lookupBusy, setLookupBusy] = useState(false);
 
   useEffect(() => {
-    setForm(toForm(initial));
+    setForm(toForm(initial, project));
     setLinkedReport(dailyReport ?? null);
     setDailyReportDate(dailyReport?.report_date ?? "");
     setReportMessage(null);
     setError(null);
     onDirtyChange?.(false);
-  }, [initial?.id]);
+  }, [initial?.id, project?.id]);
 
   useEffect(() => {
     if (!dailyReport) return;
@@ -226,6 +241,10 @@ export default function RequestForm({
       <h2 className="text-lg font-semibold">
         {initial ? `Sửa PYC ${initial.number}` : "Tạo PYC nháp"}
       </h2>
+      <p className="rounded bg-slate-50 p-2 text-xs text-slate-600">
+        Tên công trình, Chủ đầu tư và Địa điểm được điền sẵn từ Thiết lập công
+        trình; chỉ sửa khi PYC này cần giá trị khác.
+      </p>
 
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="block text-sm">
@@ -337,7 +356,7 @@ export default function RequestForm({
                 {linkedReport.notes && <p className="mt-1">{linkedReport.notes}</p>}
                 <div className="mt-2 flex flex-wrap gap-3">
                   <a
-                    className="text-teal-800 underline"
+                    className="inline-flex min-h-11 items-center text-teal-800 underline"
                     href={`/api/v1/projects/${projectId}/daily-reports/${linkedReport.report_date}`}
                     target="_blank"
                     rel="noreferrer"
@@ -346,7 +365,7 @@ export default function RequestForm({
                   </a>
                   <button
                     type="button"
-                    className="text-rose-700 underline"
+                    className="inline-flex min-h-11 items-center text-rose-700 underline"
                     onClick={clearDailyReport}
                   >
                     Bỏ liên kết

@@ -4,6 +4,15 @@ import {
   isExtractionInScope,
   isStaleExtractionResponse,
 } from "../lib/pageExtractionGuard";
+import {
+  BADGE,
+  BUTTON_DANGER,
+  BUTTON_SUCCESS,
+  cx,
+  META_TEXT,
+  PANEL_ALERT,
+} from "../lib/ui";
+import { AlertIcon, CheckIcon, XIcon } from "./icons";
 import type { PageExtractionRecord } from "../types";
 
 type Props = {
@@ -19,9 +28,9 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 const STATUS_STYLE: Record<string, string> = {
-  proposed: "bg-amber-100 text-amber-900",
-  verified: "bg-green-100 text-green-800",
-  rejected: "bg-red-100 text-red-800",
+  proposed: "border-amber-200 bg-amber-100 text-amber-900",
+  verified: "border-emerald-200 bg-emerald-100 text-emerald-900",
+  rejected: "border-red-200 bg-red-100 text-red-800",
 };
 
 export default function PageExtractionPanel({
@@ -128,51 +137,70 @@ export default function PageExtractionPanel({
 
   return (
     <section
-      className="space-y-2 rounded border border-purple-200 bg-purple-50/40 p-2"
       aria-busy={loading || busy}
+      className="space-y-3 rounded-lg border border-[#405e9b]/20 bg-[#405e9b]/5 p-3"
     >
       <div>
-        <h3 className="text-xs font-semibold text-purple-950">
+        <h3 className="text-sm font-semibold text-[#2f487a]">
           Trích xuất AI cho trang (POC)
         </h3>
-        <p className="text-[11px] text-purple-900">
+        <p className="mt-1 text-xs leading-5 text-slate-700">
           Dữ liệu do AI trích xuất, <strong>chưa phải dữ liệu đã xác minh</strong>. Luôn
           đối chiếu trang gốc; không tự động xác nhận.
         </p>
       </div>
 
       {loading && (
-        <p className="text-[11px] text-gray-600">Đang tải extraction của trang...</p>
+        <p role="status" className="text-xs leading-5 text-slate-600">
+          Đang tải extraction của trang...
+        </p>
       )}
-      {error && <div className="rounded bg-red-50 p-2 text-xs text-red-800">{error}</div>}
+      {error && (
+        <div role="alert" className={PANEL_ALERT}>
+          {error}
+        </div>
+      )}
       {!loading && !error && rows.length === 0 && (
-        <p className="text-[11px] text-gray-600">Chưa có extraction AI cho trang này.</p>
+        <p className="text-xs leading-5 text-slate-600">
+          Chưa có extraction AI cho trang này.
+        </p>
       )}
 
       {rows.map((row) => (
-        <article key={row.id} className="space-y-2 rounded border border-purple-200 bg-white p-2">
-          <div className="flex flex-wrap items-center gap-2 text-[11px]">
-            <span className={`rounded px-2 py-0.5 ${STATUS_STYLE[row.status] ?? "bg-gray-100"}`}>
+        <article
+          key={row.id}
+          className="space-y-3 rounded-lg border border-slate-200 bg-white p-3"
+        >
+          <div className="flex flex-wrap items-center gap-2 text-xs leading-5">
+            <span
+              className={cx(
+                BADGE,
+                STATUS_STYLE[row.status] ??
+                  "border border-slate-200 bg-slate-100 text-slate-700",
+              )}
+            >
               {STATUS_LABEL[row.status] ?? row.status}
             </span>
-            <span className="text-gray-600">
+            <span className="text-slate-600">
               {row.model} · {row.prompt_version} · {row.mode}
             </span>
             {row.confidence != null && (
-              <span className="text-gray-600">
+              <span className="text-slate-600">
                 confidence {Math.round(row.confidence * 100)}%
               </span>
             )}
             {row.page_sha256 && (
-              <span className="text-gray-500" title={row.page_sha256}>
+              <span className="font-mono text-slate-500" title={row.page_sha256}>
                 sha {row.page_sha256.slice(0, 10)}…
               </span>
             )}
           </div>
 
-          <p className="text-xs font-medium">{row.extraction.summary || "(không có summary)"}</p>
+          <p className="text-sm font-medium leading-6 text-slate-900">
+            {row.extraction.summary || "(không có summary)"}
+          </p>
           {(row.extraction.title || row.extraction.drawing_number || row.extraction.revision) && (
-            <p className="text-[11px] text-gray-600">
+            <p className={cx(META_TEXT, "[overflow-wrap:anywhere]")}>
               {row.extraction.title || ""}
               {row.extraction.drawing_number ? ` · ${row.extraction.drawing_number}` : ""}
               {row.extraction.revision ? ` · Rev ${row.extraction.revision}` : ""}
@@ -180,7 +208,7 @@ export default function PageExtractionPanel({
           )}
 
           {(row.extraction.key_values ?? []).length > 0 && (
-            <ul className="list-disc space-y-1 pl-5 text-[11px] text-gray-800">
+            <ul className="list-disc space-y-1 pl-5 text-sm leading-6 text-slate-800">
               {(row.extraction.key_values ?? []).map((item, index) => (
                 <li key={`${index}-${item.name}-${item.value}`}>
                   <span className="font-medium">{item.name}</span>: {item.value}
@@ -192,34 +220,39 @@ export default function PageExtractionPanel({
           )}
 
           {row.warnings.length > 0 && (
-            <ul className="list-disc space-y-1 pl-5 text-[11px] text-amber-800">
+            <ul className="space-y-1 rounded-lg bg-amber-50 p-2 text-xs leading-5 text-amber-900">
               {row.warnings.map((warning, index) => (
-                <li key={`${index}-${warning}`}>{warning}</li>
+                <li key={`${index}-${warning}`} className="flex items-start gap-1.5">
+                  <AlertIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  {warning}
+                </li>
               ))}
             </ul>
           )}
 
           {row.status === "proposed" ? (
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-col-reverse gap-2 sm:flex-row">
               <button
                 type="button"
-                className="min-h-11 min-w-28 rounded bg-green-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-                onClick={() => void decide(row, "verified")}
-                disabled={busy || loading}
-              >
-                Xác nhận
-              </button>
-              <button
-                type="button"
-                className="min-h-11 min-w-28 rounded bg-red-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                className={cx(BUTTON_DANGER, "w-full sm:w-auto")}
                 onClick={() => void decide(row, "rejected")}
                 disabled={busy || loading}
               >
+                <XIcon className="h-4 w-4" />
                 Từ chối
+              </button>
+              <button
+                type="button"
+                className={cx(BUTTON_SUCCESS, "w-full sm:w-auto")}
+                onClick={() => void decide(row, "verified")}
+                disabled={busy || loading}
+              >
+                <CheckIcon className="h-4 w-4" />
+                Xác nhận
               </button>
             </div>
           ) : (
-            <p className="text-[11px] text-gray-600">
+            <p className="text-xs leading-5 text-slate-600">
               {row.verify_note ? `Ghi chú: ${row.verify_note}` : "Không có ghi chú xác nhận."}
             </p>
           )}

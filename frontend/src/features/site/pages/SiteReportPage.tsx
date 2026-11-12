@@ -15,11 +15,12 @@ import {
   getDailyReport,
   getOrganizations,
   getWorkItems,
+  listManpowerPresets,
   listPhotos,
   patchPhoto,
   saveDailyReport,
 } from "../lib/api";
-import { presetToManpowerEntry } from "../lib/manpower";
+import { applyManpowerPreset, normalizePersonName } from "../lib/manpowerTeam";
 import { addDaysISO } from "../lib/datetime";
 import {
   decideViewSource,
@@ -33,7 +34,7 @@ import {
   reportContentKey,
   selectDraftForLoad,
 } from "../lib/reportReconnect";
-import ManpowerTable from "../components/ManpowerTable";
+import ManpowerTeamForm from "../components/ManpowerTeamForm";
 import WorkLogForm from "../components/WorkLogForm";
 import NextDayPlanForm from "../components/NextDayPlanForm";
 import PhotoCapture from "../components/PhotoCapture";
@@ -48,6 +49,7 @@ import type {
   DailyReportInput,
   DailyWorkLog,
   ManpowerEntry,
+  ManpowerPreset,
   NextDayPlan,
   Organization,
   PhotoFilters,
@@ -102,6 +104,7 @@ export default function SiteReportPage({
   const [photoFilters, setPhotoFilters] = useState<PhotoFilters>(EMPTY_PHOTO_FILTERS);
   const [workItems, setWorkItems] = useState<WorkItem[]>([]);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
+  const [manpowerContacts, setManpowerContacts] = useState<ManpowerPreset[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -124,7 +127,11 @@ export default function SiteReportPage({
       status,
       notes: notes.trim() ? notes : null,
       site_notes: siteNotes,
-      manpower,
+      // Normalize names only at the API/draft boundary, never while typing.
+      manpower: manpower.map((entry) => ({
+        ...entry,
+        person_name: normalizePersonName(entry.person_name),
+      })),
       work_logs: workLogs,
       next_day_plans: plans,
     }),
@@ -220,6 +227,7 @@ export default function SiteReportPage({
         setPhotos(cached.photos as SitePhoto[]);
         setWorkItems(cached.workItems as WorkItem[]);
         setOrganizations([]);
+        setManpowerContacts([]);
         setMessage(
           `Đang dùng bản offline. ${offlineDataLabel(cached.cachedAt)}.`,
         );
@@ -251,6 +259,13 @@ export default function SiteReportPage({
           if (!cancelled) setOrganizations(orgs);
         } catch {
           if (!cancelled) setOrganizations([]);
+        }
+
+        try {
+          const contacts = await listManpowerPresets(projectId);
+          if (!cancelled) setManpowerContacts(contacts);
+        } catch {
+          if (!cancelled) setManpowerContacts([]);
         }
 
         try {
@@ -406,6 +421,14 @@ export default function SiteReportPage({
       });
     } catch {
       // IndexedDB may be unavailable (private mode); server save still works.
+    }
+  }
+
+  async function refreshManpowerContacts() {
+    try {
+      setManpowerContacts(await listManpowerPresets(projectId));
+    } catch {
+      // Keep the current suggestions when the directory cannot be refreshed.
     }
   }
 
@@ -587,6 +610,8 @@ export default function SiteReportPage({
         }
       }
       setSaveFeedback("Đã lưu báo cáo.");
+      // The backend copies named Chỉ huy trưởng/Kỹ thuật into the directory.
+      void refreshManpowerContacts();
     } catch (error) {
       const isValidationError = error instanceof ApiError && error.status < 500;
       if (isValidationError) {
@@ -762,19 +787,26 @@ export default function SiteReportPage({
 
       <SiteNotesForm notes={siteNotes} onChange={setSiteNotes} />
 
-      <ManpowerTable
+      <ManpowerTeamForm
         entries={manpower}
         onChange={setManpower}
+        contacts={manpowerContacts}
         organizations={organizations}
       />
       <ManpowerPresets
         projectId={projectId}
         organizations={organizations}
         onUse={(preset) =>
-          setManpower((current) => [...current, presetToManpowerEntry(preset)])
+          setManpower((current) => applyManpowerPreset(current, preset))
         }
+        onChanged={setManpowerContacts}
       />
-      <WorkLogForm entries={workLogs} onChange={setWorkLogs} workItems={workItems} />
+      <WorkLogForm
+        entries={workLogs}
+        onChange={setWorkLogs}
+        workItems={workItems}
+        reportDate={date}
+      />
       <NextDayPlanForm
         entries={plans}
         onChange={setPlans}

@@ -27,6 +27,13 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from .manpower import (
+    canonical_role,
+    manpower_team_from_entries,
+    named_contacts_from_entries,
+    split_team_and_legacy,
+    team_to_manpower_values,
+)
 from .models import (
     DailyReport,
     DailyWorkLog,
@@ -244,6 +251,27 @@ def _join_distinct(parts: Iterable[Optional[str]], separator: str = " - ") -> st
     return separator.join(values)
 
 
+def _work_log_label(item: Dict[str, Any]) -> Optional[str]:
+    """Render ``Tên công việc tại Vị trí`` for report exports.
+
+    ``work_item_name`` is already resolved from the catalog id first and falls
+    back to the stored ``work_name``.  Location wins over component; when only
+    one side exists the label stays as before.
+    """
+
+    name = item.get("work_item_name") or item.get("work_name")
+    location = item.get("location")
+    component = item.get("component")
+    place = location or component
+    if name and place:
+        return f"{name} tại {place}"
+    if name:
+        return str(name)
+    if place:
+        return str(place)
+    return None
+
+
 def empty_site_notes() -> Dict[str, Optional[str]]:
     return {field: None for field in SITE_NOTE_FIELDS}
 
@@ -387,6 +415,87 @@ def get_report(db: Session, project_id: str, report_date: date) -> Optional[Dail
     return _report_query(db, project_id, report_date)
 
 
+def _manpower_row_values(item: Any) -> Dict[str, Any]:
+    return {
+        "group_name": item.group_name,
+        "person_name": item.person_name,
+        "count": item.count,
+        "organization_id": item.organization_id,
+    }
+
+
+def _resolve_manpower_rows(payload: DailyReportUpsertIn) -> List[Dict[str, Any]]:
+    """Keep free-form rows and project the optional structured team.
+
+    A request using the old ``manpower[]`` shape is stored exactly as before.
+    When ``manpower_team`` is present, managed role rows are rebuilt from the
+    team and any unknown/free-form rows are preserved in their original order.
+    """
+
+    if payload.manpower_team is None:
+        return [_manpower_row_values(item) for item in payload.manpower]
+    legacy, _managed = split_team_and_legacy(payload.manpower)
+    return [
+        *(_manpower_row_values(item) for item in legacy),
+        *team_to_manpower_values(payload.manpower_team),
+    ]
+
+
+def _sync_named_manpower_contacts(
+    db: Session, project_id: str, rows: List[Dict[str, Any]]
+) -> None:
+    """Copy named Chỉ huy trưởng / Kỹ thuật rows into the preset directory.
+
+    The directory is additive: renamed or removed people are not deleted from
+    it automatically.  Matching is role + name, accent-insensitive on the role
+    and case-insensitive on the name, so repeated report saves stay idempotent.
+    """
+
+    contacts = named_contacts_from_entries(rows)
+    if not contacts:
+        return
+
+    presets = list(
+        db.execute(
+            select(ManpowerPreset).where(ManpowerPreset.project_id == project_id)
+        ).scalars().all()
+    )
+    by_key: Dict[tuple[str, str], ManpowerPreset] = {}
+    for preset in presets:
+        role = canonical_role(preset.group_name)
+        name = (preset.person_name or "").strip()
+        if role and name:
+            by_key.setdefault((role, name.casefold()), preset)
+
+    for contact in contacts:
+        key = (contact["role"], contact["person_name"].casefold())
+        preset = by_key.get(key)
+        if preset is None:
+            preset = ManpowerPreset(
+                project_id=project_id,
+                group_name=contact["group_name"],
+                person_name=contact["person_name"],
+                count=1,
+                organization_id=None,
+            )
+            db.add(preset)
+            by_key[key] = preset
+            continue
+
+        changed = False
+        if preset.group_name != contact["group_name"]:
+            preset.group_name = contact["group_name"]
+            changed = True
+        if preset.person_name != contact["person_name"]:
+            preset.person_name = contact["person_name"]
+            changed = True
+        if preset.count != 1:
+            preset.count = 1
+            changed = True
+        if changed:
+            preset.updated_at = _now()
+
+
 def upsert_report(
     db: Session,
     project_id: str,
@@ -408,8 +517,9 @@ def upsert_report(
             *(item.work_item_id for item in payload.next_day_plans),
         ],
     )
+    manpower_rows = _resolve_manpower_rows(payload)
     validate_organization_refs(
-        db, project_id, [item.organization_id for item in payload.manpower]
+        db, project_id, [row["organization_id"] for row in manpower_rows]
     )
 
     report = _report_query(db, project_id, report_date)
@@ -433,23 +543,25 @@ def upsert_report(
         db.delete(entry)
     db.flush()
 
-    for item in payload.manpower:
+    for row in manpower_rows:
         db.add(
             ManpowerEntry(
                 report_id=report.id,
                 project_id=project_id,
-                group_name=item.group_name,
-                person_name=item.person_name,
-                count=item.count,  # preserves 0 vs None
-                organization_id=item.organization_id,
+                group_name=row["group_name"],
+                person_name=row["person_name"],
+                count=row["count"],  # preserves 0 vs None
+                organization_id=row["organization_id"],
             )
         )
+    _sync_named_manpower_contacts(db, project_id, manpower_rows)
     for item in payload.work_logs:
         db.add(
             DailyWorkLog(
                 report_id=report.id,
                 project_id=project_id,
                 work_item_id=item.work_item_id,
+                work_name=item.work_name,
                 location=item.location,
                 component=item.component,
                 quantity=item.quantity,
@@ -1053,7 +1165,13 @@ def build_report_snapshot(db: Session, report: DailyReport) -> Dict[str, Any]:
         {
             "id": item.id,
             "work_item_id": item.work_item_id,
-            "work_item_name": resolved_names.get(item.work_item_id) if item.work_item_id else None,
+            "work_name": item.work_name,
+            # Prefer the name resolved from the catalog id; fall back to the
+            # unique name stored with the report (catalog rows may share names).
+            "work_item_name": (
+                resolved_names.get(item.work_item_id) if item.work_item_id else None
+            )
+            or item.work_name,
             "location": item.location,
             "component": item.component,
             "quantity": item.quantity,
@@ -1115,6 +1233,7 @@ def build_report_snapshot(db: Session, report: DailyReport) -> Dict[str, Any]:
         "site_notes": site_notes,
         "report_updated_at": _iso_utc(report.updated_at),
         "manpower": manpower,
+        "manpower_team": manpower_team_from_entries(manpower_entries),
         "manpower_summary": manpower_zero_null_summary(manpower_entries),
         "work_logs": work_log_items,
         "next_day_plans": plan_items,
@@ -1170,13 +1289,7 @@ def render_zalo_text(snapshot: Dict[str, Any]) -> str:
     lines.append("2. Công việc thực hiện")
     if snapshot["work_logs"]:
         for item in snapshot["work_logs"]:
-            label = _join_distinct(
-                [
-                    item.get("work_item_name"),
-                    item.get("location"),
-                    item.get("component"),
-                ]
-            )
+            label = _work_log_label(item)
             line = f"- {label or 'Chưa ghi nhận'}"
             if item["quantity"] is not None:
                 quantity = f"{item['quantity']} {item.get('unit') or ''}".strip()

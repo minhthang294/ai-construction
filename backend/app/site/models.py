@@ -102,6 +102,10 @@ class DailyWorkLog(Base):
     report_id: Mapped[str] = mapped_column(String(36), ForeignKey("daily_reports.id", ondelete="CASCADE"), nullable=False, index=True)
     project_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     work_item_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+    # Chosen catalog name.  The catalog can contain several rows sharing one
+    # name, so the report stores the unique display name even when the row
+    # itself is no longer referenced by id.
+    work_name: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     location: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     component: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     quantity: Mapped[Optional[float]] = mapped_column(Float, nullable=True)

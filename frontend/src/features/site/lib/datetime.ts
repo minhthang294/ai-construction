@@ -22,6 +22,14 @@ export function fromLocalInputValue(value: string): string | null {
   return date.toISOString();
 }
 
+/** Format an ISO calendar date (`YYYY-MM-DD`) as Vietnamese `DD/MM/YYYY`. */
+export function formatISODate(value?: string | null): string {
+  if (!value) return "";
+  const parts = value.split("-");
+  if (parts.length !== 3 || parts.some((part) => !part)) return value;
+  return `${parts[2]}/${parts[1]}/${parts[0]}`;
+}
+
 /** Add days to a `YYYY-MM-DD` date without drifting through UTC. */
 export function addDaysISO(value: string, days: number): string {
   const parts = value.split("-").map(Number);

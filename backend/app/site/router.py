@@ -34,6 +34,7 @@ from .dependencies import (
     require_project_member,
     require_site_editor,
 )
+from .manpower import manpower_team_from_entries
 from .models import GeneratedDocument, SitePhoto
 from .schemas import (
     DailyReportOut,
@@ -44,6 +45,7 @@ from .schemas import (
     ManpowerEntryOut,
     ManpowerPresetIn,
     ManpowerPresetOut,
+    ManpowerTeamOut,
     NextDayPlanOut,
     PhotoOut,
     PhotoPatchIn,
@@ -123,6 +125,9 @@ def _to_report_out(report, db: Session) -> DailyReportOut:
         notes=report.notes,
         site_notes=SiteNotesOut.model_validate(site_notes_from_report(report)),
         manpower=manpower,
+        manpower_team=ManpowerTeamOut.model_validate(
+            manpower_team_from_entries(report.manpower_entries)
+        ),
         work_logs=work_logs,
         next_day_plans=plans,
         created_at=report.created_at,

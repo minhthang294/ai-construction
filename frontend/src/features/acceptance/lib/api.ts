@@ -8,6 +8,7 @@ import type {
   ParticipantProfile,
   ParticipantProfileInput,
   PreviewPayload,
+  ProjectContext,
   RecordInput,
   RequestInput,
   WorkItemAcceptanceHistory,
@@ -15,6 +16,19 @@ import type {
 } from "../types";
 
 const API_BASE = (import.meta as any)?.env?.VITE_API_BASE ?? "/api/v1";
+
+function authHeaders(init?: RequestInit): Headers {
+  let token: string | null = null;
+  try {
+    token =
+      typeof localStorage === "undefined" ? null : localStorage.getItem("access_token");
+  } catch {
+    token = null;
+  }
+  const headers = new Headers(init?.headers);
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  return headers;
+}
 
 export class AcceptanceApiError extends Error {
   status: number;
@@ -42,10 +56,58 @@ async function readError(response: Response): Promise<AcceptanceApiError> {
 }
 
 export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
-  const token = localStorage.getItem("access_token");
-  const headers = new Headers(init?.headers);
-  if (token) headers.set("Authorization", `Bearer ${token}`);
-  return fetch(`${API_BASE}${path}`, { ...init, headers });
+  return fetch(`${API_BASE}${path}`, { ...init, headers: authHeaders(init) });
+}
+
+function resolveApiUrl(url: string, apiBase: string = API_BASE): string {
+  if (/^https?:/i.test(url)) return url;
+  if (/^https?:/i.test(apiBase)) return new URL(url, apiBase).toString();
+  if (url.startsWith("/")) return url;
+  return `${apiBase}/${url.replace(/^\/+/, "")}`;
+}
+
+/**
+ * Only send the bearer token to this app or the configured API origin.
+ *
+ * A server-provided absolute URL must never receive the admin token by
+ * accident; relative URLs resolve against the page/API as before.
+ */
+export function isTrustedApiUrl(
+  url: string,
+  apiBase: string = API_BASE,
+  pageOrigin: string = typeof window === "undefined"
+    ? ""
+    : window.location.origin,
+): boolean {
+  const resolved = resolveApiUrl(url, apiBase);
+  const origin = pageOrigin || "http://localhost";
+  let targetOrigin: string;
+  try {
+    targetOrigin = new URL(resolved, origin).origin;
+  } catch {
+    return false;
+  }
+  const allowed = new Set([new URL(origin).origin]);
+  if (/^https?:/i.test(apiBase)) {
+    try {
+      allowed.add(new URL(apiBase).origin);
+    } catch {
+      return false;
+    }
+  }
+  return allowed.has(targetOrigin);
+}
+
+/** Fetch a server-provided URL (already includes `/api/v1`). */
+export async function apiFetchUrl(url: string, init?: RequestInit): Promise<Response> {
+  if (!isTrustedApiUrl(url)) {
+    throw new AcceptanceApiError(
+      400,
+      "Đường dẫn tải file không cùng nguồn với API; đã chặn gửi token.",
+      "download_origin_invalid",
+    );
+  }
+  return fetch(resolveApiUrl(url), { ...init, headers: authHeaders(init) });
 }
 
 async function jsonRequest<T>(path: string, init: RequestInit): Promise<T> {
@@ -60,6 +122,22 @@ function jsonInit(method: string, body: unknown): RequestInit {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   };
+}
+
+/**
+ * Project setup values reused by PYC/BBNT headers.
+ *
+ * The core API exposes them through `GET /projects` (including client and
+ * location); the acceptance module deliberately does not duplicate project
+ * storage or edit shared core.
+ */
+export async function getProjectContext(
+  projectId: string,
+): Promise<ProjectContext | null> {
+  const response = await apiFetch("/projects", { method: "GET" });
+  if (!response.ok) throw await readError(response);
+  const projects = (await response.json()) as ProjectContext[];
+  return projects.find((project) => project.id === projectId) ?? null;
 }
 
 export function listRequests(projectId: string): Promise<AcceptanceRequest[]> {
@@ -316,4 +394,79 @@ export function listRecordExports(
 export function exportDownloadUrl(exported: AcceptanceExport): string {
   if (exported.download_url) return exported.download_url;
   return `${API_BASE}/projects/${exported.project_id}/acceptance-exports/${exported.id}/download`;
+}
+
+function decodeFilename(value: string): string {
+  let text = value.trim();
+  if (text.startsWith('"') && text.endsWith('"')) text = text.slice(1, -1);
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
+}
+
+/** Keep the server-provided name; blob downloads need it explicitly. */
+export function filenameFromContentDisposition(
+  header: string | null,
+  fallback: string,
+): string {
+  if (!header) return fallback;
+
+  const extended = /filename\*\s*=\s*([^;]+)/i.exec(header);
+  if (extended) {
+    const raw = extended[1].trim();
+    const encoded = raw.includes("''") ? raw.split("''", 2)[1] : raw;
+    const decoded = decodeFilename(encoded);
+    if (decoded) return decoded;
+  }
+
+  const quoted = /filename\s*=\s*"([^"]*)"/i.exec(header);
+  if (quoted?.[1]) return decodeFilename(quoted[1]);
+
+  const plain = /filename\s*=\s*([^;]+)/i.exec(header);
+  if (plain?.[1]) return decodeFilename(plain[1]);
+
+  return fallback;
+}
+
+export function fallbackExportFilename(exported: AcceptanceExport): string {
+  const prefix = exported.kind === "pyc" ? "YC" : "BBNT";
+  const extension = exported.format === "pdf" ? "pdf" : "xlsx";
+  return `${prefix}-${exported.id.slice(0, 8)}.${extension}`;
+}
+
+export function downloadFilenameFromResponse(
+  response: Pick<Response, "headers">,
+  exported: AcceptanceExport,
+): string {
+  return filenameFromContentDisposition(
+    response.headers.get("Content-Disposition"),
+    fallbackExportFilename(exported),
+  );
+}
+
+/**
+ * Download an authenticated export through fetch + blob.
+ *
+ * A plain `<a href>` cannot attach the bearer token, which caused admin PYC
+ * downloads to fail.  The filename comes from Content-Disposition so both PYC
+ * and BBNT keep their server-side name.  Revocation is deferred because some
+ * mobile browsers abort the download if the blob URL disappears immediately.
+ */
+export async function downloadExport(exported: AcceptanceExport): Promise<string> {
+  const response = await apiFetchUrl(exportDownloadUrl(exported));
+  if (!response.ok) throw await readError(response);
+  const blob = await response.blob();
+  const filename = downloadFilenameFromResponse(response, exported);
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.rel = "noopener";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return filename;
 }

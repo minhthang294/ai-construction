@@ -111,9 +111,9 @@ def test_export_zalo_contains_zero_null_and_never_auto_sends(client):
     assert "- Khó khăn: Mưa chiều" in preview
     assert "- An toàn: Đủ PPE" in preview
     assert "Sự cố" not in preview
-    assert "- Work item 1 - Span 1 - Concrete: 2.5 m3 (Hoàn thành)" in preview
+    assert "- Work item 1 tại Span 1: 2.5 m3 (Hoàn thành)" in preview
     # A missing quantity must stay absent, not become an invented number.
-    assert "- Work item 1 - Span 2 - Formwork (Đang làm)" in preview
+    assert "- Work item 1 tại Span 2 (Đang làm)" in preview
     assert "chưa rõ KL" not in preview
     # All plans share one date: it belongs in the heading, not each item.
     plan_section = preview.split("3. Dự kiến công việc", 1)[1].split(

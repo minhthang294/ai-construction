@@ -11,9 +11,10 @@ import {
   createRecord,
   createRecordRevision,
   createRequest,
-  exportDownloadUrl,
+  downloadExport,
   exportRecord,
   exportRequest,
+  getProjectContext,
   getRequestDailyReport,
   listParticipantProfiles,
   listRecords,
@@ -23,6 +24,7 @@ import {
   updateRecord,
   updateRequest,
 } from "../lib/api";
+import { projectMetadataDefaults } from "../lib/projectPrefill";
 import { confirmRecord } from "../lib/api";
 import type {
   AcceptanceExport,
@@ -33,6 +35,7 @@ import type {
   ParticipantInput,
   ParticipantProfile,
   PreviewPayload,
+  ProjectContext,
   RecordInput,
   RequestInput,
   ResultState,
@@ -57,6 +60,10 @@ type RecordDraft = {
   id?: string;
   request_id: string;
   request_number?: string;
+  project_name: string;
+  client: string;
+  project_location: string;
+  location: string;
   number?: string | null;
   revision: number;
   stale: boolean;
@@ -83,11 +90,20 @@ function today(): string {
   }).format(new Date());
 }
 
-function draftFor(record: AcceptanceRecord, request?: AcceptanceRequest): RecordDraft {
+function draftFor(
+  record: AcceptanceRecord,
+  request?: AcceptanceRequest,
+  project?: ProjectContext | null,
+): RecordDraft {
+  const metadata = projectMetadataDefaults(project);
   return {
     id: record.id,
     request_id: record.request_id,
     request_number: request?.number,
+    project_name: request?.project_name || metadata.project_name,
+    client: request?.client || metadata.client,
+    project_location: request?.project_location || metadata.project_location,
+    location: request?.location ?? "",
     number: record.number,
     revision: record.revision,
     stale: record.stale,
@@ -118,10 +134,18 @@ function draftFor(record: AcceptanceRecord, request?: AcceptanceRequest): Record
   };
 }
 
-function newDraft(request: AcceptanceRequest): RecordDraft {
+function newDraft(
+  request: AcceptanceRequest,
+  project?: ProjectContext | null,
+): RecordDraft {
+  const metadata = projectMetadataDefaults(project);
   return {
     request_id: request.id,
     request_number: request.number,
+    project_name: request.project_name || metadata.project_name,
+    client: request.client || metadata.client,
+    project_location: request.project_location || metadata.project_location,
+    location: request.location ?? "",
     number: null,
     revision: 1,
     stale: false,
@@ -188,6 +212,7 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
     Record<string, LinkedDailyReport | null>
   >({});
   const [profiles, setProfiles] = useState<ParticipantProfile[]>([]);
+  const [projectContext, setProjectContext] = useState<ProjectContext | null>(null);
   const [preview, setPreview] = useState<PreviewPayload | null>(null);
   const [requestDirty, setRequestDirty] = useState(false);
   const [recordDirty, setRecordDirty] = useState(false);
@@ -222,15 +247,17 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
     let active = true;
     (async () => {
       try {
-        const [requestList, recordList, profileList] = await Promise.all([
+        const [requestList, recordList, profileList, project] = await Promise.all([
           listRequests(projectId),
           listRecords(projectId),
           listParticipantProfiles(projectId),
+          getProjectContext(projectId).catch(() => null),
         ]);
         if (!active) return;
         setRequests(requestList);
         setRecords(recordList);
         setProfiles(profileList);
+        setProjectContext(project);
       } catch (cause) {
         if (active) setError(errorMessage(cause));
       }
@@ -239,6 +266,7 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
     setEditingRequest(null);
     setLastExport(null);
     setPreview(null);
+    setProjectContext(null);
     setRequestDirty(false);
     setRecordDirty(false);
     return () => {
@@ -394,7 +422,7 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
     }
     setPreview(null);
     setTab("records");
-    loadDraft(draftFor(record, request));
+    loadDraft(draftFor(record, request, projectContext));
   }
 
   async function saveRequest(input: RequestInput): Promise<boolean> {
@@ -439,9 +467,9 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
       if (existing.status === "confirmed") {
         setMessage("BBNT đã được xác nhận và chỉ được xem/xuất.");
       }
-      loadDraft(draftFor(existing, request));
+      loadDraft(draftFor(existing, request, projectContext));
     } else {
-      loadDraft(newDraft(request));
+      loadDraft(newDraft(request, projectContext));
     }
   }
 
@@ -460,7 +488,7 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
       }
       const { requestList, recordList } = await refresh();
       const request = requestList.find((item) => item.id === saved.request_id);
-      loadDraft(draftFor(saved, request));
+      loadDraft(draftFor(saved, request, projectContext));
       setRecords(recordList);
       setMessage(
         saved.status === "confirmed"
@@ -485,7 +513,7 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
       });
       const { requestList, recordList } = await refresh();
       const request = requestList.find((item) => item.id === confirmed.request_id);
-      loadDraft(draftFor(confirmed, request));
+      loadDraft(draftFor(confirmed, request, projectContext));
       setRecords(recordList);
       setConfirming(false);
       setMessage("Đã ghi nhận xác nhận của người có quyền.");
@@ -550,7 +578,7 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
       const revised = await createRecordRevision(projectId, draft.id);
       const { requestList, recordList } = await refresh();
       const request = requestList.find((item) => item.id === revised.request_id);
-      loadDraft(draftFor(revised, request));
+      loadDraft(draftFor(revised, request, projectContext));
       setRecords(recordList);
       setPreview(null);
       setMessage(`Đã tạo revision ${revised.revision}; bản cũ được giữ nguyên.`);
@@ -576,6 +604,19 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
           ? `Đã tạo ${format.toUpperCase()} BBNT. Bản xuất dùng dữ liệu đã được con người xác nhận.`
           : `Đã tạo ${format.toUpperCase()} PYC từ BBNT; sheet BBNT được để trống an toàn.`,
       );
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDownloadExport(exported: AcceptanceExport) {
+    setBusy(true);
+    setError(null);
+    try {
+      const filename = await downloadExport(exported);
+      setMessage(`Đã tải ${filename}.`);
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
@@ -616,9 +657,14 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
       {lastExport && (
         <div className="rounded bg-white p-3 text-sm shadow-sm">
           File đã tạo:{" "}
-          <a className="text-teal-700 underline" href={exportDownloadUrl(lastExport)}>
+          <button
+            type="button"
+            className="inline-flex min-h-11 items-center text-teal-700 underline disabled:opacity-50"
+            disabled={busy}
+            onClick={() => void handleDownloadExport(lastExport)}
+          >
             tải {lastExport.kind.toUpperCase()} (.{lastExport.format})
-          </a>{" "}
+          </button>{" "}
           <span className="text-slate-500">sha256 {lastExport.sha256.slice(0, 12)}…</span>
         </div>
       )}
@@ -648,6 +694,7 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
             <div className="rounded-xl bg-white p-4 shadow-sm">
               <RequestForm
                 projectId={projectId}
+                project={projectContext}
                 initial={selectedRequest}
                 dailyReport={
                   selectedRequest
@@ -798,13 +845,35 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
                 </div>
               )}
 
+              <dl className="grid gap-2 rounded bg-slate-50 p-3 text-sm sm:grid-cols-2">
+                <div>
+                  <dt className="text-slate-500">Tên công trình</dt>
+                  <dd className="font-medium">{draft.project_name || "—"}</dd>
+                </div>
+                <div>
+                  <dt className="text-slate-500">Chủ đầu tư</dt>
+                  <dd className="font-medium">{draft.client || "—"}</dd>
+                </div>
+                <div>
+                  <dt className="text-slate-500">Địa điểm công trình</dt>
+                  <dd className="font-medium">{draft.project_location || "—"}</dd>
+                </div>
+                <div>
+                  <dt className="text-slate-500">Vị trí nghiệm thu</dt>
+                  <dd className="font-medium">{draft.location || "—"}</dd>
+                </div>
+              </dl>
+              <p className="text-xs text-slate-500">
+                Thông tin công trình được lấy lại từ PYC/Thiết lập công trình; không cần nhập lại.
+              </p>
+
               {reportLinks[draft.request_id] && (
                 <div className="rounded bg-teal-50 p-2 text-sm text-teal-900">
                   Báo cáo ngày liên kết:{" "}
                   {reportLinks[draft.request_id]?.report_date} (
                   {reportLinks[draft.request_id]?.status}) —{" "}
                   <a
-                    className="underline"
+                    className="inline-flex min-h-11 items-center underline"
                     href={`/api/v1/projects/${projectId}/daily-reports/${reportLinks[draft.request_id]?.report_date}`}
                     target="_blank"
                     rel="noreferrer"

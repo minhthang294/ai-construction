@@ -14,6 +14,7 @@ type Props = {
   projectId: string;
   organizations: Organization[];
   onUse: (preset: ManpowerPreset) => void;
+  onChanged?: (presets: ManpowerPreset[]) => void;
 };
 
 type Draft = {
@@ -60,13 +61,13 @@ function PresetFields({
   return (
     <div className="space-y-2">
       <input
-        className="min-h-10 w-full rounded-lg border border-gray-300 px-3 text-sm"
-        placeholder="Nhóm / nhà thầu *"
+        className="min-h-11 w-full rounded-lg border border-gray-300 px-3 text-sm"
+        placeholder="Vai trò / nhóm (VD: Chỉ huy trưởng) *"
         value={draft.group_name}
         onChange={(event) => onChange({ ...draft, group_name: event.target.value })}
       />
       <input
-        className="min-h-10 w-full rounded-lg border border-gray-300 px-3 text-sm"
+        className="min-h-11 w-full rounded-lg border border-gray-300 px-3 text-sm"
         placeholder="Họ tên (tuỳ chọn)"
         value={draft.person_name}
         onChange={(event) => onChange({ ...draft, person_name: event.target.value })}
@@ -77,13 +78,13 @@ function PresetFields({
           inputMode="numeric"
           min={0}
           step={1}
-          className="min-h-10 w-full rounded-lg border border-gray-300 px-3 text-sm"
+          className="min-h-11 w-full rounded-lg border border-gray-300 px-3 text-sm"
           placeholder="Số lượng (trống = chưa rõ)"
           value={draft.count_text}
           onChange={(event) => onChange({ ...draft, count_text: event.target.value })}
         />
         <select
-          className="min-h-10 w-full rounded-lg border border-gray-300 bg-white px-2 text-sm"
+          className="min-h-11 w-full rounded-lg border border-gray-300 bg-white px-2 text-sm"
           value={draft.organization_id}
           onChange={(event) =>
             onChange({ ...draft, organization_id: event.target.value })
@@ -101,7 +102,12 @@ function PresetFields({
   );
 }
 
-export default function ManpowerPresets({ projectId, organizations, onUse }: Props) {
+export default function ManpowerPresets({
+  projectId,
+  organizations,
+  onUse,
+  onChanged,
+}: Props) {
   const [presets, setPresets] = useState<ManpowerPreset[]>([]);
   const [createDraft, setCreateDraft] = useState<Draft>(EMPTY_DRAFT);
   const [editId, setEditId] = useState<string | null>(null);
@@ -111,7 +117,9 @@ export default function ManpowerPresets({ projectId, organizations, onUse }: Pro
 
   async function load() {
     try {
-      setPresets(await listManpowerPresets(projectId));
+      const rows = await listManpowerPresets(projectId);
+      setPresets(rows);
+      onChanged?.(rows);
     } catch {
       setPresets([]);
     }
@@ -135,7 +143,11 @@ export default function ManpowerPresets({ projectId, organizations, onUse }: Pro
     setMessage(null);
     try {
       const created = await createManpowerPreset(projectId, toPayload(createDraft));
-      setPresets((current) => [...current, created]);
+      setPresets((current) => {
+        const next = [...current, created];
+        onChanged?.(next);
+        return next;
+      });
       setCreateDraft(EMPTY_DRAFT);
       setMessage("Đã lưu mẫu nhân lực.");
     } catch (error) {
@@ -158,9 +170,11 @@ export default function ManpowerPresets({ projectId, organizations, onUse }: Pro
         presetId,
         toPayload(editDraft),
       );
-      setPresets((current) =>
-        current.map((item) => (item.id === presetId ? updated : item)),
-      );
+      setPresets((current) => {
+        const next = current.map((item) => (item.id === presetId ? updated : item));
+        onChanged?.(next);
+        return next;
+      });
       setEditId(null);
       setMessage("Đã cập nhật mẫu.");
     } catch (error) {
@@ -176,7 +190,11 @@ export default function ManpowerPresets({ projectId, organizations, onUse }: Pro
     setMessage(null);
     try {
       await deleteManpowerPreset(projectId, preset.id);
-      setPresets((current) => current.filter((item) => item.id !== preset.id));
+      setPresets((current) => {
+        const next = current.filter((item) => item.id !== preset.id);
+        onChanged?.(next);
+        return next;
+      });
       setMessage("Đã xoá mẫu.");
     } catch (error) {
       setMessage(errorMessage(error));
@@ -192,11 +210,12 @@ export default function ManpowerPresets({ projectId, organizations, onUse }: Pro
 
   return (
     <details className="rounded-xl bg-white p-3 shadow-sm">
-      <summary className="cursor-pointer text-lg font-semibold">
-        Mẫu nhân lực ({presets.length})
+      <summary className="min-h-11 cursor-pointer py-2 text-lg font-semibold">
+        Danh bạ nhân lực ({presets.length})
       </summary>
       <p className="mt-1 text-xs text-gray-500">
-        Mẫu chỉ được thêm khi người dùng bấm “Dùng”; số 0 và “chưa rõ” được giữ nguyên.
+        Tên Chỉ huy trưởng/Kỹ thuật được tự lưu vào danh bạ khi lưu báo cáo. Bấm
+        “Dùng” để điền đúng vai trò; số 0 và “chưa rõ” của dòng cũ được giữ nguyên.
       </p>
 
       <div className="mt-3 space-y-3">
@@ -215,7 +234,7 @@ export default function ManpowerPresets({ projectId, organizations, onUse }: Pro
                 <div className="flex gap-2">
                   <button
                     type="button"
-                    className="min-h-9 flex-1 rounded-lg bg-green-700 px-3 text-xs font-medium text-white disabled:opacity-50"
+                    className="min-h-11 min-w-11 flex-1 rounded-lg bg-green-700 px-3 text-xs font-medium text-white disabled:opacity-50"
                     disabled={busy}
                     onClick={() => void handleUpdate(preset.id)}
                   >
@@ -223,7 +242,7 @@ export default function ManpowerPresets({ projectId, organizations, onUse }: Pro
                   </button>
                   <button
                     type="button"
-                    className="min-h-9 rounded-lg border border-gray-300 px-3 text-xs"
+                    className="min-h-11 min-w-11 rounded-lg border border-gray-300 px-3 text-xs"
                     onClick={() => setEditId(null)}
                   >
                     Huỷ
@@ -246,7 +265,7 @@ export default function ManpowerPresets({ projectId, organizations, onUse }: Pro
                   </div>
                   <button
                     type="button"
-                    className="min-h-9 shrink-0 rounded-lg bg-blue-600 px-3 text-xs font-medium text-white"
+                    className="min-h-11 min-w-11 shrink-0 rounded-lg bg-blue-600 px-3 text-xs font-medium text-white"
                     onClick={() => onUse(preset)}
                   >
                     Dùng
@@ -255,7 +274,7 @@ export default function ManpowerPresets({ projectId, organizations, onUse }: Pro
                 <div className="flex gap-2">
                   <button
                     type="button"
-                    className="min-h-8 rounded border border-gray-300 px-3 text-xs"
+                    className="min-h-11 min-w-11 rounded border border-gray-300 px-3 text-xs"
                     onClick={() => {
                       setEditId(preset.id);
                       setEditDraft(draftFromPreset(preset));
@@ -265,7 +284,7 @@ export default function ManpowerPresets({ projectId, organizations, onUse }: Pro
                   </button>
                   <button
                     type="button"
-                    className="min-h-8 rounded border border-red-300 px-3 text-xs text-red-700"
+                    className="min-h-11 min-w-11 rounded border border-red-300 px-3 text-xs text-red-700"
                     disabled={busy}
                     onClick={() => void handleDelete(preset)}
                   >
@@ -277,7 +296,7 @@ export default function ManpowerPresets({ projectId, organizations, onUse }: Pro
           </div>
         ))}
         {presets.length === 0 && (
-          <p className="text-xs text-gray-500">Chưa có mẫu nhân lực.</p>
+          <p className="text-xs text-gray-500">Chưa có nhân lực trong danh bạ.</p>
         )}
 
         <div className="rounded-lg border border-dashed border-gray-300 p-2">
@@ -289,7 +308,7 @@ export default function ManpowerPresets({ projectId, organizations, onUse }: Pro
           />
           <button
             type="button"
-            className="mt-2 min-h-9 w-full rounded-lg bg-gray-800 px-3 text-xs font-medium text-white disabled:opacity-50"
+            className="mt-2 min-h-11 min-w-11 w-full rounded-lg bg-gray-800 px-3 text-xs font-medium text-white disabled:opacity-50"
             disabled={busy}
             onClick={() => void handleCreate()}
           >

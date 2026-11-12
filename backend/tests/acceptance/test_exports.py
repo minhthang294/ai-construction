@@ -108,7 +108,7 @@ def test_pyc_export_replaces_validated_cells_and_preserves_formatting(
     assert ws["B7"].value == "Phân đoạn 1 - Cầu chính"
     assert ws["B10"].value.date() == date(2026, 11, 11)
     assert ws["D10"].value == "15h00"
-    assert ws["E10"].value == "Nội dung nghiệm thu thử nghiệm tại  Đối tượng nghiệm thu thử nghiệm"
+    assert ws["E10"].value == "Nội dung nghiệm thu thử nghiệm tại Phân đoạn 1 - Cầu chính"
     assert ws["H10"].value == "☑"
     assert ws["I10"].value == "□"
     assert ws["K10"].value == "□"
@@ -187,12 +187,116 @@ def test_pyc_export_has_no_old_defaults_when_fields_missing(client, template_pat
     ws = openpyxl.load_workbook(path)["PYC"]
     for coord in ("A20", "E20", "H20", "B7", "B10", "D10", "E10", "F6"):
         assert ws[coord].value in (None, ""), coord
-    assert ws["D14"].value == "□"
+    # A missing/NULL urgency is printed as "Bình thường" (one tick).
+    assert ws["D14"].value == "☑"
     assert ws["D15"].value == "□"
     assert ws["D16"].value == "□"
     assert ws["H10"].value == "□"
     assert ws["I10"].value == "□"
     assert ws["K10"].value == "□"
+
+
+def test_download_preserves_pyc_and_bbnt_filenames(client, template_path):
+    request = create_request(client)
+    exported_pyc = _export(client, request, "pyc")
+    download_pyc = client.get(exported_pyc["download_url"])
+    assert download_pyc.status_code == 200
+    assert 'filename="YC-32.xlsx"' in download_pyc.headers["content-disposition"]
+
+    record = create_record(client, request["id"])
+    confirmed = client.post(
+        f"/api/v1/projects/p1/acceptance-records/{record['id']}/confirm",
+        json={"result": "approved"},
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    exported_bbnt = _export(client, confirmed.json(), "bbnt")
+    download_bbnt = client.get(exported_bbnt["download_url"])
+    assert download_bbnt.status_code == 200
+    assert 'filename="BBNT-32.xlsx"' in download_bbnt.headers["content-disposition"]
+
+
+def test_download_filename_strips_stored_number_prefix(client, template_path, tmp_path):
+    request = create_request(client, number="YC-001")
+    exported = _export(client, request, "pyc")
+    download = client.get(exported["download_url"])
+    assert download.status_code == 200
+    assert 'filename="YC-001.xlsx"' in download.headers["content-disposition"]
+
+    path = _download(client, exported, tmp_path)
+    ws = openpyxl.load_workbook(path)["PYC"]
+    # The template's A6 label already prints "Số: YC-"; B6 is only the body.
+    assert ws["B6"].value == "001"
+
+    prefixed = create_request(client, number="PYC-002")
+    exported_prefixed = _export(client, prefixed, "pyc")
+    download_prefixed = client.get(exported_prefixed["download_url"])
+    assert 'filename="YC-002.xlsx"' in download_prefixed.headers["content-disposition"]
+    ws_prefixed = openpyxl.load_workbook(
+        _download(client, exported_prefixed, tmp_path)
+    )["PYC"]
+    assert ws_prefixed["B6"].value == "002"
+
+
+def test_pyc_urgency_none_defaults_to_normal_and_ticks_correct_box(
+    client, template_path, tmp_path
+):
+    cases = [
+        (None, ("☑", "□", "□")),
+        ("urgent", ("□", "☑", "□")),
+        ("very_urgent", ("□", "□", "☑")),
+    ]
+    for index, (urgency, expected) in enumerate(cases):
+        request = create_request(client, number=f"4{index:02d}", urgency=urgency)
+        exported = _export(client, request, "pyc")
+        ws = openpyxl.load_workbook(_download(client, exported, tmp_path))["PYC"]
+        assert (ws["D14"].value, ws["D15"].value, ws["D16"].value) == expected
+
+
+def test_pyc_content_uses_location_when_present_else_subject(
+    client, template_path, tmp_path
+):
+    content = "Sơn chống tia UV phạm vi dán sợi cọc"
+    cases = [
+        # number, subject, location, expected E10
+        ("50", None, "Cọc F11, F24, F35", f"{content} tại Cọc F11, F24, F35"),
+        ("51", "Đối tượng nghiệm thu A", None, f"{content} tại Đối tượng nghiệm thu A"),
+        (
+            "52",
+            "Đối tượng nghiệm thu B",
+            "Cọc F11, F24, F35",
+            f"{content} tại Cọc F11, F24, F35",
+        ),
+        (
+            "53",
+            None,
+            "Cọc F11",
+            f"{content} tại Cọc F11",
+        ),
+    ]
+    for number, subject, location, expected in cases:
+        request = create_request(
+            client,
+            number=number,
+            content=content,
+            subject=subject,
+            location=location,
+        )
+        exported = _export(client, request, "pyc")
+        ws = openpyxl.load_workbook(_download(client, exported, tmp_path))["PYC"]
+        assert ws["E10"].value == expected
+
+
+def test_pyc_content_does_not_duplicate_trailing_tai(client, template_path, tmp_path):
+    request = create_request(
+        client,
+        number="54",
+        content="Sơn chống tia UV tại",
+        subject=None,
+        location="Cọc F11",
+    )
+    exported = _export(client, request, "pyc")
+    ws = openpyxl.load_workbook(_download(client, exported, tmp_path))["PYC"]
+    assert ws["E10"].value == "Sơn chống tia UV tại Cọc F11"
 
 
 def test_bbnt_export_requires_human_confirmation(client, tmp_path):
@@ -324,6 +428,98 @@ def test_record_pyc_export_resets_bbnt_sheet_to_a_blank_safe_state(
 
 def _libreoffice_available() -> bool:
     return bool(shutil.which("libreoffice") or shutil.which("soffice"))
+
+
+def _pdf_page_texts(path):
+    pymupdf = pytest.importorskip("pymupdf")
+    with pymupdf.open(str(path)) as document:
+        return [
+            re.sub(r"\s+", " ", page.get_text("text") or "").upper()
+            for page in document
+        ]
+
+
+def _download_pdf(client, exported, tmp_path, expected_filename=None):
+    download = client.get(exported["download_url"])
+    assert download.status_code == 200
+    assert download.content.startswith(b"%PDF")
+    if expected_filename:
+        assert (
+            f'filename="{expected_filename}"'
+            in download.headers["content-disposition"]
+        )
+    path = tmp_path / "export.pdf"
+    path.write_bytes(download.content)
+    return path
+
+
+def test_pdf_page_detection_failure_is_reported(tmp_path):
+    pymupdf = pytest.importorskip("pymupdf")
+    from app.acceptance.errors import AcceptanceError
+    from app.acceptance.service import _select_pdf_pages
+
+    path = tmp_path / "no-titles.pdf"
+    document = pymupdf.open()
+    document.new_page()
+    document.save(str(path))
+    document.close()
+
+    with pytest.raises(AcceptanceError) as excinfo:
+        _select_pdf_pages(path, "pyc")
+    assert excinfo.value.code == "pdf_page_detection_failed"
+
+
+@pytest.mark.skipif(not _libreoffice_available(), reason="LibreOffice headless is not installed")
+def test_pyc_pdf_contains_only_the_pyc_page(client, template_path, tmp_path):
+    request = create_request(client)
+    response = client.post(
+        f"/api/v1/projects/p1/acceptance-requests/{request['id']}/exports",
+        json={"kind": "pyc", "format": "pdf"},
+    )
+    assert response.status_code == 201, response.text
+    path = _download_pdf(client, response.json(), tmp_path, "YC-32.pdf")
+    texts = _pdf_page_texts(path)
+
+    assert len(texts) == 1
+    assert "PHIẾU YÊU CẦU NGHIỆM THU CÔNG VIỆC XÂY DỰNG" in texts[0]
+    assert all("DANH MỤC HỒ SƠ" not in text for text in texts)
+    assert all("BIÊN BẢN NGHIỆM THU" not in text for text in texts)
+
+
+@pytest.mark.skipif(not _libreoffice_available(), reason="LibreOffice headless is not installed")
+def test_bbnt_pdf_contains_only_pyc_and_bbnt_pages(client, template_path, tmp_path):
+    request = create_request(client)
+    record = create_record(client, request["id"])
+    confirmed = client.post(
+        f"/api/v1/projects/p1/acceptance-records/{record['id']}/confirm",
+        json={"result": "approved"},
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    response = client.post(
+        f"/api/v1/projects/p1/acceptance-records/{record['id']}/exports",
+        json={"kind": "bbnt", "format": "pdf"},
+    )
+    assert response.status_code == 201, response.text
+    path = _download_pdf(client, response.json(), tmp_path)
+    texts = _pdf_page_texts(path)
+
+    assert len(texts) == 2
+    assert "PHIẾU YÊU CẦU NGHIỆM THU CÔNG VIỆC XÂY DỰNG" in texts[0]
+    assert "BIÊN BẢN NGHIỆM THU CÔNG VIỆC XÂY DỰNG" in texts[1]
+    assert all("DANH MỤC HỒ SƠ" not in text for text in texts)
+
+
+@pytest.mark.skipif(not _libreoffice_available(), reason="LibreOffice headless is not installed")
+def test_pyc_pdf_download_filename_uses_yc_prefix(client, template_path, tmp_path):
+    request = create_request(client, number="YC-001")
+    response = client.post(
+        f"/api/v1/projects/p1/acceptance-requests/{request['id']}/exports",
+        json={"kind": "pyc", "format": "pdf"},
+    )
+    assert response.status_code == 201, response.text
+    download = client.get(response.json()["download_url"])
+    assert download.status_code == 200
+    assert 'filename="YC-001.pdf"' in download.headers["content-disposition"]
 
 
 @pytest.mark.skipif(not _libreoffice_available(), reason="LibreOffice headless is not installed")

@@ -43,6 +43,13 @@ class ProjectOut(ProjectIn):
     status: str
 
 
+class ProjectPatch(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    client: str | None = Field(default=None, max_length=255)
+    location: str | None = Field(default=None, max_length=255)
+    report_title: str | None = Field(default=None, max_length=255)
+
+
 class WorkItemIn(BaseModel):
     code: str = Field(min_length=1, max_length=120)
     name: str = Field(min_length=1, max_length=500)
@@ -172,6 +179,24 @@ def list_projects(db: Session = Depends(get_db)):
     if actor.role != "admin":
         query = query.join(ProjectMember).where(ProjectMember.user_id == actor.id)
     return db.scalars(query.order_by(Project.created_at.desc())).all()
+
+
+@router.patch("/projects/{project_id}", response_model=ProjectOut)
+def update_project(project_id: str, payload: ProjectPatch, db: Session = Depends(get_db)):
+    actor = require_project_role(project_id, {"project_manager"})
+    project = db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(404, "Project not found")
+    changes = payload.model_dump(exclude_unset=True)
+    if not changes or changes.get("name") is None and "name" in changes:
+        raise HTTPException(422, "A valid project change is required")
+    before = {key: getattr(project, key) for key in changes}
+    for key, value in changes.items():
+        setattr(project, key, value)
+    db.add(AuditLog(project_id=project_id, actor_id=actor.id, action="update", entity="Project", entity_id=project.id,
+                    detail=json.dumps({"before": before, "after": changes}, ensure_ascii=False)))
+    db.commit()
+    return project
 
 
 @router.post("/projects/{project_id}/members", status_code=201)

@@ -60,6 +60,7 @@ from .service import (
     create_record_revision,
     create_request,
     delete_profile,
+    download_filename,
     export_record,
     export_request,
     get_export,
@@ -565,7 +566,7 @@ def download_acceptance_export(
     if not path.resolve().is_relative_to(project_root) or not path.is_file():
         raise HTTPException(status_code=404, detail="File export không còn trên máy chủ")
     mime = mimetypes.guess_type(path.name)[0] or "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    response = FileResponse(path, media_type=mime, filename=path.name)
+    response = FileResponse(path, media_type=mime, filename=download_filename(document))
     response.headers["Cache-Control"] = "private, no-store"
     response.headers["X-Content-Type-Options"] = "nosniff"
     return response

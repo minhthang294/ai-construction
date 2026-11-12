@@ -10,7 +10,7 @@ Prefix `/api/v1`. JSON UTF-8. Auth Bearer; mọi request project-scoped kiểm m
 | `POST/GET /projects/{p}/work-items` | Danh mục công việc, import có preview trước khi lưu |
 | `PATCH /projects/{p}/work-items/{id}` | Sửa tên/vị trí/cấu kiện/trạng thái công việc; ghi audit |
 | `POST/GET /projects/{p}/organizations` và `/personnel` | Danh sách đơn vị và nhân sự theo công trình; nhân sự chỉ tham chiếu đơn vị cùng công trình |
-| `PUT/GET /projects/{p}/daily-reports/{date}` | Bản nháp báo cáo, gồm `manpower[]`, `work_logs[]`, `next_day_plans[]`, `notes`, `site_notes`; upsert idempotent |
+| `PUT/GET /projects/{p}/daily-reports/{date}` | Bản nháp báo cáo, gồm `manpower[]`, `work_logs[]` (`work_item_id?`, `work_name?`, `location`, `component`, số lượng/trạng thái/ghi chú), `next_day_plans[]`, `notes`, `site_notes`; không còn giờ bắt đầu/kết thúc trên UI; upsert idempotent |
 | `GET/POST /projects/{p}/manpower-presets` và `PUT/DELETE /projects/{p}/manpower-presets/{id}` | Preset nhóm nhân lực theo công trình, chỉ dùng khi người dùng chọn |
 | `POST/GET /projects/{p}/photos` | Multipart upload nhiều ảnh; metadata location/component/stage và lọc `date`, `location`, `component`, `stage` |
 | `GET /projects/{p}/photos/{id}/original` | Stream file sau kiểm quyền |
@@ -35,7 +35,7 @@ Prefix `/api/v1`. JSON UTF-8. Auth Bearer; mọi request project-scoped kiểm m
 | `POST /projects/{p}/acceptance-records/{id}/revisions` | Tạo revision BBNT mới, giữ bản cũ |
 | `GET /projects/{p}/work-items/{id}/acceptance-history` | Lịch sử PYC/BBNT theo work item |
 | `POST /projects/{p}/acceptance-records/{id}/confirm` | Người có quyền xác nhận, ghi audit |
-| `POST /projects/{p}/acceptance-records/{id}/exports` | Excel sao chép template PYC/BBNT, PDF nếu renderer có sẵn |
+| `POST /projects/{p}/acceptance-records/{id}/exports` | Excel sao chép template PYC/BBNT; PDF PYC chỉ giữ trang PYC, PDF BBNT chỉ giữ PYC + BBNT; tên tải PYC dạng `YC-<số phiếu>.pdf` |
 | `GET/POST /projects/{p}/acceptance-participants` | Danh mục người tham gia theo vai trò; `PUT/DELETE .../{id}` |
 
 `DailyReport.status`: `draft|reviewed`; `AcceptanceChecklist.state`: `yes|no|unconfirmed`; `AcceptanceRecord.result`: `approved|conditional|rejected|null`. `null` là chưa có quyết định. `PhotoEvidence` chỉ dùng ảnh với caption/category đã được người dùng xác nhận. Citation gồm `document_id`, `document_name`, `version`, `page_number`, `drawing_number?`, `revision?`, `quote`, `url`, `ocr_confidence?`.

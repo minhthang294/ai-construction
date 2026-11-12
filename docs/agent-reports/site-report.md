@@ -1,8 +1,15 @@
 # Site Report Agent Report
 
-Cập nhật: 12/11/2026. Phạm vi chính: `backend/app/site/`, `frontend/src/features/site/`, test tương ứng và file báo cáo này. Ngoại lệ vòng 5 do coordinator giao trực tiếp: chỉ `frontend/src/app/App.tsx` + `frontend/src/app/ChangePasswordDialog.tsx` cho UI đổi mật khẩu. Không sửa `backend/app/core`, `backend/app/models`, migration, module agent khác, Excel nguồn.
+Cập nhật: 12/11/2026 (vòng 6: nhập tên nhân lực, công việc hôm nay, `work_name`). Phạm vi chính: `backend/app/site/`, `frontend/src/features/site/`, test tương ứng và file báo cáo này. Ngoại lệ vòng 5 do coordinator giao trực tiếp: chỉ `frontend/src/app/App.tsx` + `frontend/src/app/ChangePasswordDialog.tsx` cho UI đổi mật khẩu. Không sửa `backend/app/core`, `backend/app/models`, migration, module agent khác, Excel nguồn.
 
 ## Chức năng đã hoàn thành
+
+### Vòng 6 — nhập tên nhân lực, công việc hôm nay, `work_name`
+- **Sửa lỗi mất dấu cách khi nhập tên**: `splitManpowerTeam` và `teamToManpowerEntries` giữ nguyên text đang gõ (kể cả dấu cách cuối). Helper `normalizePersonName` chỉ `trim` + gộp khoảng trắng khi `onBlur` hoặc trước khi gửi API/draft (`buildBody` trong `SiteReportPage`). Add/remove Kỹ thuật, preset, dedupe vẫn dùng key đã chuẩn hoá nên không bị trùng tên.
+- **Khối “Công việc thực hiện hôm nay”**: bỏ hoàn toàn input `datetime-local`; `WorkLogForm` nhận prop `reportDate` và hiển thị `Ngày báo cáo: DD/MM/YYYY`. Mỗi dòng: select công việc, input Vị trí tự do, nút xoá; số lượng/ĐVT/component/trạng thái/ghi chú nằm trong mục “Chi tiết” thu gọn. Trạng thái mặc định `done`, nút “+ Thêm công việc”, empty state rõ ràng. Không tự động ghi đè vị trí/component khi chọn công việc.
+- **Danh mục công việc**: helper thuần `frontend/src/features/site/lib/workItems.ts` gom 41 dòng danh mục thành 7 tên duy nhất và nhóm theo Đục phá / Xử lý bề mặt / Vệ sinh-kết dính / Khoan cấy / Lắp đặt-bơm vữa / Khác. `work_name` ngoài danh mục vẫn được thêm option để hiển thị.
+- **`work_name`**: thêm cột nullable `String(500)` vào `DailyWorkLog` (model/schema/upsert), type frontend và `reportReconnect` normalise. Chọn một tên duy nhất ⇒ `work_name` = tên, `work_item_id = null`; dữ liệu cũ có `work_item_id` giữ nguyên nếu người dùng không đổi select. Snapshot/export resolve `work_item_name` từ `work_item_id` trước, fallback `work_name`.
+- **Xuất báo cáo**: dòng công việc trong Zalo/PDF/DOCX dùng dạng `Tên công việc tại Vị trí`; nếu không có vị trí thì dùng component. Không đổi định dạng mục nhân lực/kế hoạch.
 
 ### Báo cáo ngày
 - `PUT/GET /projects/{p}/daily-reports/{date}` upsert idempotent theo `project_id + report_date`.
@@ -112,6 +119,8 @@ Backend:
 - `backend/tests/site_report/test_access_integration.py` (mới)
 - `backend/tests/site_report/test_zalo_format.py` (mới)
 - `backend/tests/site_report/test_presets.py` (mới)
+- `backend/tests/site_report/test_manpower_team.py` (mới, vòng 5)
+- `backend/tests/site_report/test_work_names.py` (mới, vòng 6)
 
 Frontend:
 - `frontend/src/features/site/types.ts`
@@ -129,8 +138,13 @@ Frontend:
 - `frontend/src/features/site/lib/datetime.ts`
 - `frontend/src/features/site/lib/datetime.test.ts`
 - `frontend/src/features/site/lib/offlineDb.test.ts`
+- `frontend/src/features/site/lib/manpowerTeam.ts` (mới)
+- `frontend/src/features/site/lib/manpowerTeam.test.ts` (mới)
+- `frontend/src/features/site/lib/workItems.ts` (mới, vòng 6)
+- `frontend/src/features/site/lib/workItems.test.ts` (mới, vòng 6)
 - `frontend/src/features/site/hooks/useOfflineSync.ts`
 - `frontend/src/features/site/components/ManpowerTable.tsx`
+- `frontend/src/features/site/components/ManpowerTeamForm.tsx` (mới, vòng 5)
 - `frontend/src/features/site/components/WorkLogForm.tsx`
 - `frontend/src/features/site/components/NextDayPlanForm.tsx`
 - `frontend/src/features/site/components/PhotoCapture.tsx`
@@ -197,6 +211,7 @@ Các thay đổi dưới đây đã có trong `backend/app/site/models.py` nhưn
 | `site_photos` | `component VARCHAR(255)` | NULL, index `ix_site_photos_component` |
 | `site_photos` | `stage VARCHAR(80)` | NULL, index `ix_site_photos_stage` |
 | `manpower_presets` | bảng mới: `id VARCHAR(36) PK`, `project_id VARCHAR(36) NOT NULL` (index `ix_manpower_presets_project_id`), `group_name VARCHAR(120) NOT NULL`, `person_name VARCHAR(120) NULL`, `count INTEGER NULL`, `organization_id VARCHAR(36) NULL`, `created_at DATETIME NOT NULL`, `updated_at DATETIME NOT NULL` | — |
+| `daily_work_logs` | `work_name VARCHAR(500)` | NULL |
 
 `organization_id` tham chiếu logic tới `organizations.id` trong cùng project (service validate; không thêm FK cross-module nếu Codex muốn tránh vòng migration). Original photo path/SHA không đổi; không có cột binary mới.
 
@@ -205,9 +220,9 @@ Các thay đổi dưới đây đã có trong `backend/app/site/models.py` nhưn
 Backend:
 ```bash
 cd backend
-DATABASE_URL="sqlite:////tmp/opencode/site-coord-$$.db" \
+DATABASE_URL="sqlite:////tmp/opencode/site-report-workname-$$.db" \
   ../.venv/bin/python -m pytest tests/site_report -q
-# 51 passed
+# 60 passed
 ```
 Bao phủ:
 - `0` vs `null` qua PUT/GET, snapshot và Zalo.
@@ -239,13 +254,15 @@ Bao phủ:
 - `organization_id` của manpower report và preset phải thuộc đúng project.
 - Lọc ảnh theo `work_item_id` qua bảng liên kết; project khác trả rỗng, work item không tồn tại trả rỗng.
 - Normalize lịch sử nghiệm thu từ nhiều shape (`requests`/array/`data`), giữ revision/stale/warnings, ghép BBNT theo request, fallback không tự tạo PYC/BBNT.
+- Vòng 6: PUT work log có `work_name` + `location` nhưng không có `work_item_id` → response giữ `work_name`; snapshot có `work_item_name` fallback `work_name`; Zalo có `Tên tại Vị trí`.
+- Vòng 6: work log cũ có `work_item_id` vẫn resolve tên từ danh mục và xuất `Work item 1 tại ...`; work log không có location dùng component.
 
 Toàn bộ test site + core hiện có:
 ```bash
 cd backend
-DATABASE_URL="sqlite:////tmp/opencode/site-coord-$$.db" \
+DATABASE_URL="sqlite:////tmp/opencode/site-report-combined-$$.db" \
   ../.venv/bin/python -m pytest tests/site_report tests/test_core.py -q
-# 52 passed (51 site + 1 core)
+# 62 passed (60 site + 2 core)
 ```
 
 Lưu ý test harness liên agent: chạy `pytest -q` cho toàn repo hiện có thể lỗi collection vì `tests/engineering_ai/conftest.py` import `app.core.database` trước khi `tests/test_core.py` kịp đặt `DATABASE_URL`, làm engine shared trỏ về DB mặc định. Không được xoá/reset `data/app.db`. Luôn đặt `DATABASE_URL` tạm dưới `/tmp/opencode` trước khi chạy test/migration, ví dụ:
@@ -253,16 +270,17 @@ Lưu ý test harness liên agent: chạy `pytest -q` cho toàn repo hiện có t
 DATABASE_URL="sqlite:////tmp/opencode/site-report-check-$$.db" \
   ../.venv/bin/python -m pytest tests/site_report tests/test_core.py -q
 ```
-Kết quả đã chạy với DB tạm: 52 passed.
+Kết quả đã chạy với DB tạm: 62 passed.
 
 Frontend (Vitest, chạy từ `frontend/`):
 ```bash
 cd frontend
-npm test
-# 7 test files, 34 tests passed
-npm run build
-# tsc -b && vite build: OK
+npx vitest run src/features/site
+# 9 test files, 58 tests passed
+npx tsc --noEmit -p tsconfig.json
+# OK
 ```
+Không chạy full `npm run build` trong vòng này để tránh tranh chấp với coordinator; coordinator chạy full gate.
 - `summarizeManpower` / `parseManpowerCount` giữ `0` khác `null`.
 - `addDaysISO` xử lý cuối tháng/năm nhuận không lệch UTC.
 - `datetime-local` luôn hiểu/hiển thị theo Asia/Ho_Chi_Minh (UTC+7), không phụ thuộc timezone thiết bị.
@@ -274,10 +292,15 @@ npm run build
 - Test acceptance history: normalize payload, lọc theo work item, ghép record theo request, payload rỗng/không hợp lệ trả rỗng.
 - Cache snapshot: key theo project+date, chọn bản mới nhất đúng scope, không trả cache project/ngày khác; fallback chỉ khi server lỗi và có cache.
 - Nhãn thời gian cache hiển thị theo Asia/Ho_Chi_Minh; payload không hợp lệ không làm hỏng luồng.
+- Vòng 6: gom 41 dòng danh mục → 7 tên duy nhất; nhóm đúng 6 loại; giữ option `work_name` ngoài danh mục.
+- Vòng 6: `formatWorkLogLabel` trả `Tên tại Vị trí`, fallback component, một phía thì giữ nguyên.
+- Vòng 6: `teamToManpowerEntries`/`splitManpowerTeam` giữ nguyên dấu cách đang gõ; `normalizePersonName` chỉ trim/gộp khoảng trắng; dedupe Kỹ thuật vẫn đúng.
+- Vòng 6: `formatISODate` hiển thị `DD/MM/YYYY` không lệch timezone.
 
 Typecheck/build:
-- `npm run build` chạy `tsc -b` + `vite build`: **thành công**.
-- Chưa chạy E2E trình duyệt; chỉ unit test logic và build production. UI đổi mật khẩu chưa được kiểm thử E2E trên thiết bị thật.
+- `npx tsc --noEmit -p tsconfig.json`: **OK**.
+- Không chạy full `npm run build` theo yêu cầu coordinator.
+- Chưa chạy E2E trình duyệt; UI nhập công việc/nhân lực mới được kiểm tra bằng unit test logic và typecheck. UI đổi mật khẩu chưa được kiểm thử E2E trên thiết bị thật.
 
 ## Phụ thuộc
 
@@ -324,6 +347,9 @@ Biến môi trường:
 18. **Multi-tab/upgrade**: DB_VERSION đã tăng lên 2 để thêm store `views`; nếu tab cũ đang mở giữ kết nối cũ, upgrade IndexedDB có thể bị chặn. Cần kiểm tra đóng/mở nhiều tab.
 19. **Service worker**: giữ cache shell hiện tại (`site-assistant-shell-v2`), không cache `/api/`; chưa cần đổi version trong vòng này. Test service-worker hiện có xác nhận API request không được respondWith.
 20. **Đổi mật khẩu**: backend đã có `POST /auth/change-password` và thu hồi token; UI mới được typecheck/build, chưa E2E trên trình duyệt/điện thoại thật. Cần kiểm tra luồng đổi thành công → tự về login, lỗi mật khẩu hiện tại và mất mạng.
+21. **Migration `work_name`**: đã thêm migration Alembic `a7c3e9f2b641` (sau `e2f6a1c9d430`) cho cột `daily_work_logs.work_name VARCHAR(500) NULL`; đã áp dụng vào `data/app.db`. Test dùng `Base.metadata.create_all` nên không phụ thuộc migration.
+22. **Nhóm danh mục công việc**: phân loại dựa trên từ khoá tên (đục / tẩy gỉ / vệ sinh-keo-epoxy / khoan-cấy / lắp đặt-bơm vữa). Nếu danh mục thật đổi tên theo cách không còn từ khoá, cần cập nhật `workItems.ts` và test tương ứng.
+23. **UI WorkLogForm**: đã kiểm tra bằng helper test + typecheck, chưa có test render (RTL) hoặc E2E trên thiết bị thật cho thao tác chọn công việc, nhập vị trí và mở/đóng “Chi tiết”. Trường `start_time`/`end_time` cũ vẫn được giữ nguyên trong dữ liệu nhưng không còn nhập từ UI.
 
 ## Hướng dẫn chạy
 
@@ -343,11 +369,12 @@ DATABASE_URL="sqlite:////tmp/opencode/site-coord-$$.db" \
   ../.venv/bin/python -m pytest tests/site_report tests/test_core.py -q
 ```
 
-Frontend test/build:
+Frontend test/typecheck:
 ```bash
 cd frontend
-npm test
-npm run build
+npx vitest run src/features/site
+npx tsc --noEmit -p tsconfig.json
+# Full `npm run build` do coordinator chạy.
 ```
 
 Kiểm tra thủ công sau khi Codex mount router + app shell:
@@ -363,3 +390,6 @@ Kiểm tra thủ công sau khi Codex mount router + app shell:
 10. Chuyển báo cáo sang “Đã duyệt”, lưu, xuất Zalo/PDF/DOCX/ZIP.
 11. Xác nhận Zalo chỉ hiện nội dung + nút sao chép/chia sẻ; không có hành vi gửi tự động. Trên thiết bị có Web Share, bấm “Chia sẻ…” phải mở hộp thoại hệ thống; huỷ không gửi.
 12. Có work item trong work log/kế hoạch: panel lịch sử nghiệm thu hiển thị PYC/BBNT read-only. Khi endpoint history chưa có, fallback danh sách PYC/BBNT phải không làm lỗi trang; empty/404 hiển thị “Chưa có PYC/BBNT”. Nút “Mở Nghiệm thu” cần app shell truyền `onOpenAcceptance`.
+13. Nhập “Chỉ huy trưởng” và tên Kỹ thuật có dấu cách ở giữa/cuối: dấu cách phải giữ nguyên khi đang gõ; rời ô (blur) tên được trim/gộp khoảng trắng; thêm/xoá Kỹ thuật và dùng preset vẫn đúng.
+14. Khối “Công việc thực hiện hôm nay”: không còn ô giờ bắt đầu/kết thúc; hiển thị “Ngày báo cáo: DD/MM/YYYY”; select chỉ có 7 tên duy nhất chia nhóm; chọn công việc không tự ghi đè Vị trí/component; mở “Chi tiết” thấy số lượng/ĐVT/trạng thái/ghi chú; thêm/xoá dòng và empty state hoạt động.
+15. Lưu work log chọn theo tên (không có `work_item_id`), xuất Zalo/PDF/DOCX/ZIP: dòng công việc có dạng `Tên tại Vị trí`; báo cáo cũ có `work_item_id` vẫn hiển thị đúng tên danh mục.

@@ -54,6 +54,7 @@ function normalise(value: DailyReportInput | DailyReport) {
     })),
     work_logs: value.work_logs.map((entry) => ({
       work_item_id: entry.work_item_id ?? null,
+      work_name: entry.work_name ?? null,
       location: entry.location ?? null,
       component: entry.component ?? null,
       quantity: entry.quantity ?? null,
