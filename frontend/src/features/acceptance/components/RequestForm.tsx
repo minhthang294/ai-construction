@@ -1,10 +1,17 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { getDailyReportByDate } from "../lib/api";
 import { shouldMarkSaved } from "../lib/formGuard";
 import {
   mergeProjectMetadata,
   projectMetadataDefaults,
 } from "../lib/projectPrefill";
+import {
+  buildWorkItemOptions,
+  findWorkItemOption,
+  resolveWorkItemSelection,
+  withCurrentWorkItem,
+  workItemNameKey,
+} from "../lib/workItemOptions";
 import type {
   AcceptanceRequest,
   FieldKind,
@@ -13,6 +20,7 @@ import type {
   ProjectContext,
   RequestInput,
   Urgency,
+  WorkItemSummary,
 } from "../types";
 
 type Props = {
@@ -21,6 +29,8 @@ type Props = {
   initial?: AcceptanceRequest | null;
   dailyReport?: LinkedDailyReport | null;
   profiles?: ParticipantProfile[];
+  /** Project work-item catalog; empty/error simply keeps free-text input. */
+  workItems?: WorkItemSummary[];
   onSubmit: (input: RequestInput) => Promise<boolean | void> | boolean | void;
   onCancel?: () => void;
   onDirtyChange?: (dirty: boolean) => void;
@@ -29,6 +39,7 @@ type Props = {
 
 type FormState = {
   number: string;
+  work_item_id: string;
   daily_report_id: string;
   requested_by_profile_id: string;
   supervisor_profile_id: string;
@@ -54,6 +65,7 @@ type FormState = {
 
 const BLANK: FormState = {
   number: "",
+  work_item_id: "",
   daily_report_id: "",
   requested_by_profile_id: "",
   supervisor_profile_id: "",
@@ -87,6 +99,7 @@ function toForm(
   return mergeProjectMetadata(
     {
       number: request.number ?? "",
+      work_item_id: request.work_item_id ?? "",
       daily_report_id: request.daily_report_id ?? "",
       requested_by_profile_id: request.requested_by_profile_id ?? "",
       supervisor_profile_id: request.supervisor_profile_id ?? "",
@@ -124,6 +137,7 @@ export default function RequestForm({
   initial,
   dailyReport,
   profiles = [],
+  workItems = [],
   onSubmit,
   onCancel,
   onDirtyChange,
@@ -137,6 +151,15 @@ export default function RequestForm({
   );
   const [reportMessage, setReportMessage] = useState<string | null>(null);
   const [lookupBusy, setLookupBusy] = useState(false);
+
+  // One option per unique name; a repeated name deliberately has no id.
+  const workItemOptions = useMemo(() => buildWorkItemOptions(workItems), [workItems]);
+  const contentOptions = useMemo(
+    () => withCurrentWorkItem(workItemOptions, form.content),
+    [workItemOptions, form.content],
+  );
+  const selectedWorkItemName =
+    findWorkItemOption(contentOptions, form.content)?.name ?? "";
 
   useEffect(() => {
     setForm(toForm(initial, project));
@@ -195,11 +218,47 @@ export default function RequestForm({
     setForm((previous) => ({ ...previous, [key]: value }));
   }
 
+  function chooseWorkItem(name: string) {
+    setForm((previous) => {
+      const resolved = resolveWorkItemSelection(
+        withCurrentWorkItem(workItemOptions, previous.content),
+        name,
+        previous.content,
+      );
+      return {
+        ...previous,
+        content: resolved.content,
+        work_item_id: resolved.work_item_id ?? "",
+      };
+    });
+    onDirtyChange?.(true);
+  }
+
+  /**
+   * Free-text editing stays allowed. Changing the text away from the selected
+   * catalog name drops the link so the PYC is not attached to a wrong row.
+   */
+  function changeContent(value: string) {
+    setForm((previous) => {
+      const linked = previous.work_item_id
+        ? workItemOptions.find((option) => option.id === previous.work_item_id)
+        : null;
+      const reference = linked?.name ?? previous.content;
+      const sameName = workItemNameKey(value) === workItemNameKey(reference);
+      return {
+        ...previous,
+        content: value,
+        work_item_id: sameName ? previous.work_item_id : "",
+      };
+    });
+  }
+
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     setError(null);
     const payload: RequestInput = {
       number: form.number.trim() || null,
+      work_item_id: nullable(form.work_item_id),
       daily_report_id: nullable(form.daily_report_id),
       requested_by_profile_id: nullable(form.requested_by_profile_id),
       supervisor_profile_id: nullable(form.supervisor_profile_id),
@@ -383,15 +442,44 @@ export default function RequestForm({
         </p>
       </fieldset>
 
-      <label className="block text-sm">
-        Nội dung nghiệm thu
-        <textarea
-          className="mt-1 w-full rounded border p-3"
-          rows={3}
-          value={form.content}
-          onChange={(event) => set("content", event.target.value)}
-        />
-      </label>
+      <div className="rounded border border-slate-200 p-3">
+        <label className="block text-sm font-medium">
+          Chọn công việc
+          <select
+            className="mt-1 w-full rounded border p-3"
+            value={selectedWorkItemName}
+            onChange={(event) => chooseWorkItem(event.target.value)}
+          >
+            {selectedWorkItemName === "" && (
+              <option value="">Chọn công việc từ danh mục…</option>
+            )}
+            {contentOptions.map((option) => (
+              <option key={option.name} value={option.name}>
+                {option.name}
+                {option.id === null ? " (nhiều hạng mục)" : ""}
+              </option>
+            ))}
+          </select>
+          <span className="mt-1 block text-xs text-slate-500">
+            Chọn từ danh mục để điền nhanh, có thể sửa lại bên dưới.
+          </span>
+        </label>
+        <label className="mt-3 block text-sm">
+          Nội dung nghiệm thu
+          <textarea
+            className="mt-1 w-full rounded border p-3"
+            rows={3}
+            value={form.content}
+            onChange={(event) => changeContent(event.target.value)}
+          />
+        </label>
+        {workItems.length === 0 && (
+          <p className="mt-2 rounded bg-amber-50 p-2 text-xs text-amber-900">
+            Danh mục công việc chưa có hoặc chưa tải được; vẫn có thể nhập tay nội
+            dung nghiệm thu và lưu PYC.
+          </p>
+        )}
+      </div>
       <label className="block text-sm">
         Đối tượng nghiệm thu
         <textarea

@@ -88,8 +88,8 @@ scripts/verify_all.sh
 
 Kết quả hiện tại:
 
-- Backend: **213 passed**
-- Frontend: **88 passed**
+- Backend: **218 passed**
+- Frontend: **98 passed**
 - Production build: pass
 - Migration head: `e2f6a1c9d430`
 

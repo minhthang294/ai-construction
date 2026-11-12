@@ -66,6 +66,15 @@ export function decideViewSource(
   return cached ? "cache" : "empty";
 }
 
+/**
+ * Work items, organizations and manpower contacts are project catalogs, not
+ * report data. They are safe to fetch whenever the server is reachable, even
+ * when the selected day has no daily report yet (GET returns 404 -> null).
+ */
+export function shouldLoadCatalogs(serverFailed: boolean): boolean {
+  return !serverFailed;
+}
+
 const DATE_TIME = new Intl.DateTimeFormat("vi-VN", {
   timeZone: "Asia/Ho_Chi_Minh",
   day: "2-digit",

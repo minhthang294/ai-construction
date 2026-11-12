@@ -94,9 +94,9 @@ Nguyên tắc: chỉ dùng DeepSeek V4.1 Flash; OCR vẫn là baseline; không g
 | Cache offline báo cáo/ảnh metadata | site-report-agent | xong: 34 frontend test pass |
 | Admin, project thật, upload 2 PDF, ingest OCR | điều phối viên | xong: 133 + 108 trang ready; 42 work item |
 | Import 20 trang extraction POC vào DB | điều phối viên | xong: 20 proposed (594 KV bản vẽ + 75 KV thuyết minh) |
-| Full gate, backup, hướng dẫn vận hành | điều phối viên | xong: 213 backend, 88 frontend, build pass; backup final2 510 MB; `docs/OPERATIONS.md` |
+| Full gate, backup, hướng dẫn vận hành | điều phối viên | xong: 218 backend, 98 frontend, build pass; backup final2 510 MB; `docs/OPERATIONS.md` |
 
-Cổng xác minh hiện tại: backend **213 passed**, frontend **88 passed**, build pass; migration head `e2f6a1c9d430`; extraction 241/241 trang.
+Cổng xác minh hiện tại: backend **218 passed**, frontend **98 passed**, build pass; migration head `e2f6a1c9d430`; extraction 241/241 trang.
 
 ## 10. Vòng 5 — AI provider, đổi mật khẩu, extraction toàn bộ
 
@@ -109,23 +109,34 @@ Cổng xác minh hiện tại: backend **213 passed**, frontend **88 passed**, b
 | Extraction toàn bộ 221 trang còn lại | điều phối viên | xong: 241/241 trang, 7.664 key values, 4.303 warnings, tất cả proposed |
 | Import extraction còn lại + full gate + backup | điều phối viên | xong gate 213 backend + 88 frontend; backup final2 |
 
-Cổng xác minh hiện tại: backend **213 passed**, frontend **88 passed**, build pass.
+Cổng xác minh hiện tại: backend **218 passed**, frontend **98 passed**, build pass.
 
 ## 11. Vòng 6 — sửa lỗi PYC và báo cáo hiện trường
 
 | Việc | Chủ sở hữu | Trạng thái |
 | --- | --- | --- |
-| PDF PYC chỉ còn trang PYC; PDF BBNT chỉ còn PYC + BBNT; lọc bằng PyMuPDF | acceptance-agent | xong: 80 acceptance test pass; PDF thật YC-001 còn 1 trang |
+| PDF PYC chỉ còn trang PYC; PDF BBNT chỉ còn trang BBNT; lọc bằng PyMuPDF | acceptance-agent | xong: 80 acceptance test pass; PDF thật YC-001 còn 1 trang |
 | Tên tải PYC `YC-<số phiếu>.pdf`; bỏ prefix lặp ở B6 | acceptance-agent | xong: `YC-001.pdf`, B6=`001`; test `YC-32.pdf`, `YC-32.xlsx` |
 | Mức độ yêu cầu mặc định `normal` khi null; E10 `nội dung tại vị trí` | acceptance-agent | xong: D14 ☑; E10 dùng location, fallback subject |
 | Sửa nhập dấu cách tên Chỉ huy trưởng/Kỹ thuật | site-report-agent | xong: giữ raw khi gõ, normalize khi blur/API |
 | Danh sách công việc unique + vị trí tự điền + bỏ giờ | site-report-agent | xong: 41 dòng → 7 tên; thêm `work_name`; báo cáo dùng ngày báo cáo |
-| Migration `work_name` + full gate | điều phối viên | xong: migration `a7c3e9f2b641`, backend **213 passed**, frontend **88 passed**, build pass |
-| Kiểm PDF thật trên bản sao DB | điều phối viên | xong: YC-001.pdf 1 trang, BBNT 2 trang, có tick Bình thường và “tại Cọc F11, F24, F35” |
+| Migration `work_name` + full gate | điều phối viên | xong: migration `a7c3e9f2b641`, backend **218 passed**, frontend **98 passed**, build pass |
+| Kiểm PDF thật trên bản sao DB | điều phối viên | xong: YC-001.pdf 1 trang, BBNT 1 trang, có tick Bình thường và “tại Cọc F11, F24, F35” |
 
-Cổng xác minh hiện tại: backend **213 passed**, frontend **88 passed**, build pass; migration head `a7c3e9f2b641` đã áp dụng vào `data/app.db`.
+Cổng xác minh hiện tại: backend **218 passed**, frontend **98 passed**, build pass; migration head `a7c3e9f2b641` đã áp dụng vào `data/app.db`.
 
-## 12. Cổng xác minh
+## 12. Vòng 7 — chọn công việc cho PYC và nạp danh mục ngày mới
+
+| Việc | Chủ sở hữu | Trạng thái |
+| --- | --- | --- |
+| PYC: dropdown chọn công việc từ danh mục, tự điền nội dung; giữ sửa tay và nội dung cũ ngoài danh mục | acceptance-agent | xong: 25 frontend test acceptance, typecheck pass |
+| PYC: 41 dòng danh mục → 7 tên duy nhất; tên trùng nhiều hạng mục thì không gắn work_item_id | acceptance-agent | xong: helper + test `workItemOptions` |
+| Báo cáo ngày: nạp work-items/organizations/manpower-presets khi ngày chưa có báo cáo (404) | site-report-agent | xong: helper `shouldLoadCatalogs` + test, 59 site frontend test pass |
+| Full gate | điều phối viên | xong: backend **213 passed**, frontend **98 passed**, build pass |
+
+Cổng xác minh hiện tại: backend **213 passed**, frontend **98 passed**, build pass; migration head `a7c3e9f2b641`.
+
+## 13. Cổng xác minh
 
 ```bash
 scripts/verify_all.sh

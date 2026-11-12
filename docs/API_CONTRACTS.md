@@ -29,13 +29,15 @@ Prefix `/api/v1`. JSON UTF-8. Auth Bearer; mọi request project-scoped kiểm m
 | `POST /projects/{p}/ai/daily-report-drafts` | Soạn bản nháp từ dữ liệu báo cáo đã ghi, chỉ ra trường còn thiếu; không tạo số liệu |
 | `POST /projects/{p}/ai/inspection-checklists` | Gợi ý checklist có citation tài liệu; không điền trạng thái nghiệm thu |
 | `POST/GET /projects/{p}/acceptance-requests` | PYC nháp và lịch sử, liên kết work item/daily report cùng công trình |
+| `DELETE /projects/{p}/acceptance-requests/{id}` | Xoá PYC; PYC có BBNT yêu cầu `?force=true` và xoá kèm BBNT/lịch sử export |
 | `GET/PUT /projects/{p}/acceptance-numbering` | Cấu hình prefix/start/width/reset policy cho PYC/BBNT |
 | `POST /projects/{p}/acceptance-requests/{id}/preview` | Preview dữ liệu điền template trước khi xuất |
+| `GET /projects/{p}/acceptance-requests/{id}/preview-image` | Ảnh PNG của trang PYC đã điền, không tạo lịch sử export |
 | `POST/GET /projects/{p}/acceptance-records` | BBNT nháp và checklist |
 | `POST /projects/{p}/acceptance-records/{id}/revisions` | Tạo revision BBNT mới, giữ bản cũ |
 | `GET /projects/{p}/work-items/{id}/acceptance-history` | Lịch sử PYC/BBNT theo work item |
 | `POST /projects/{p}/acceptance-records/{id}/confirm` | Người có quyền xác nhận, ghi audit |
-| `POST /projects/{p}/acceptance-records/{id}/exports` | Excel sao chép template PYC/BBNT; PDF PYC chỉ giữ trang PYC, PDF BBNT chỉ giữ PYC + BBNT; tên tải PYC dạng `YC-<số phiếu>.pdf` |
+| `POST /projects/{p}/acceptance-records/{id}/exports` | Excel sao chép template PYC/BBNT; PDF PYC chỉ giữ trang PYC, PDF BBNT chỉ giữ trang BBNT; tên tải PYC dạng `YC-<số phiếu>.pdf` |
 | `GET/POST /projects/{p}/acceptance-participants` | Danh mục người tham gia theo vai trò; `PUT/DELETE .../{id}` |
 
 `DailyReport.status`: `draft|reviewed`; `AcceptanceChecklist.state`: `yes|no|unconfirmed`; `AcceptanceRecord.result`: `approved|conditional|rejected|null`. `null` là chưa có quyết định. `PhotoEvidence` chỉ dùng ảnh với caption/category đã được người dùng xác nhận. Citation gồm `document_id`, `document_name`, `version`, `page_number`, `drawing_number?`, `revision?`, `quote`, `url`, `ocr_confidence?`.

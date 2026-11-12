@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import unicodedata
 import uuid
 from datetime import date, datetime, timezone
@@ -1038,6 +1039,90 @@ def update_request(
     return request
 
 
+def _delete_export_artifacts(
+    db: Session, project_id: str, source_ids: Sequence[str]
+) -> None:
+    """Remove export history and files for deleted PYC/BBNT source ids.
+
+    The generated document rows point at a source document that is about to
+    disappear; leaving them behind produces dead download links.  Export files
+    live in a per-source directory, so remove that directory after deleting
+    the rows.  Paths outside the storage root are never touched.
+    """
+
+    if not source_ids:
+        return
+    documents = list(
+        db.scalars(
+            select(AcceptanceGeneratedDocument).where(
+                AcceptanceGeneratedDocument.project_id == project_id,
+                AcceptanceGeneratedDocument.source_id.in_(source_ids),
+                AcceptanceGeneratedDocument.kind.in_(("pyc", "bbnt")),
+            )
+        ).all()
+    )
+    for document in documents:
+        db.delete(document)
+    db.flush()
+
+    root = storage_root().resolve()
+    for source_id in source_ids:
+        directory = storage_root() / "projects" / project_id / "exports" / source_id
+        try:
+            resolved = directory.resolve()
+        except OSError:  # pragma: no cover - defensive for broken symlinks
+            continue
+        if resolved.is_relative_to(root):
+            shutil.rmtree(resolved, ignore_errors=True)
+
+
+def delete_request(
+    db: Session,
+    project_id: str,
+    request_id: str,
+    actor_id: Optional[str],
+    *,
+    force: bool = False,
+) -> None:
+    """Delete a PYC and, when explicitly forced, its BBNT records.
+
+    A PYC with BBNT history is never deleted silently: the caller must pass
+    ``force=True`` after warning that the linked BBNT records and exports will
+    also be removed.
+    """
+
+    request = get_request(db, project_id, request_id)
+    if request is None:
+        raise AcceptanceError(404, "Không tìm thấy PYC trong công trình", "request_not_found")
+
+    records = list(request.records)
+    if records and not force:
+        raise AcceptanceError(
+            409,
+            f"PYC đã có {len(records)} BBNT; xác nhận xoá cả BBNT liên quan",
+            "request_has_records",
+        )
+
+    source_ids = [request.id, *(record.id for record in records)]
+    _audit(
+        db,
+        project_id=project_id,
+        actor_id=actor_id,
+        action="delete",
+        entity="AcceptanceRequest",
+        entity_id=request.id,
+        detail={
+            "number": request.number,
+            "status": request.status,
+            "records_deleted": len(records),
+            "forced": bool(force),
+        },
+    )
+    _delete_export_artifacts(db, project_id, source_ids)
+    db.delete(request)
+    db.commit()
+
+
 def _replace_participants(db: Session, record: AcceptanceRecord, items: Sequence[ParticipantIn]) -> None:
     role_counts: Dict[str, int] = {}
     for item in items:
@@ -1506,6 +1591,72 @@ def preview_request(
     }
 
 
+def preview_request_image(
+    db: Session, project_id: str, request_id: str
+) -> bytes:
+    """Render the filled PYC form as a PNG preview.
+
+    The workbook is built in a temporary directory with the same validated
+    cell replacements as a real export, converted by LibreOffice, reduced to
+    the PYC page, and rendered to PNG.  Nothing is persisted as an export
+    history entry and the temporary workbook/PDF is removed afterwards.
+    """
+
+    request = get_request(db, project_id, request_id)
+    if request is None:
+        raise AcceptanceError(404, "Không tìm thấy PYC trong công trình", "request_not_found")
+    _libreoffice_binary()
+
+    with tempfile.TemporaryDirectory(prefix="acceptance-preview-") as raw_dir:
+        workdir = Path(raw_dir)
+        workbook_path = workdir / "preview.xlsx"
+        pdf_path = workdir / "preview.pdf"
+        copy_and_fill(
+            validate_template(template_path()),
+            workbook_path,
+            {
+                "PYC": _pyc_replacements(
+                    request, _project_metadata(db, project_id)
+                ),
+                "BBNT": _blank_bbnt_replacements(),
+            },
+            {"PYC (2)": PYC_HIDDEN_SCRUB, "BB LM bt": BBLM_SCRUB},
+        )
+        _convert_workbook_to_pdf(workbook_path, pdf_path)
+        _select_pdf_pages(pdf_path, "pyc")
+
+        try:
+            import pymupdf  # type: ignore
+        except ImportError as exc:  # pragma: no cover - dependency is installed here
+            raise AcceptanceError(
+                500,
+                "Thiếu PyMuPDF nên không tạo được ảnh xem trước PYC.",
+                "pdf_conversion_failed",
+            ) from exc
+
+        try:
+            document = pymupdf.open(str(pdf_path))
+            try:
+                if document.page_count < 1:
+                    raise AcceptanceError(
+                        500,
+                        "PDF xem trước PYC không có trang nào",
+                        "pdf_page_detection_failed",
+                    )
+                pixmap = document[0].get_pixmap(dpi=150, alpha=False)
+                return pixmap.tobytes("png")
+            finally:
+                document.close()
+        except AcceptanceError:
+            raise
+        except Exception as exc:  # pragma: no cover - defensive
+            raise AcceptanceError(
+                500,
+                "Không tạo được ảnh xem trước PYC",
+                "pdf_conversion_failed",
+            ) from exc
+
+
 def preview_record(
     db: Session, project_id: str, record_id: str
 ) -> Dict[str, Any]:
@@ -1746,11 +1897,11 @@ def _metadata_value(
 
 
 def _pyc_content_text(content: Optional[str], target: Optional[str]) -> Optional[str]:
-    """Build the printed "Nội dung ... tại vị trí" cell.
+    """Build the printed "Nội dung ... tại đối tượng" cell.
 
-    ``target`` is the acceptance location when present, otherwise the subject.
-    Whitespace is normalised and a content that already ends in "tại" is not
-    given a second "tại".
+    ``target`` is the acceptance subject (Đối tượng nghiệm thu).  Whitespace is
+    normalised and a content that already ends in "tại" is not given a second
+    "tại".
     """
 
     content_text = re.sub(r"\s+", " ", (content or "").strip())
@@ -1770,7 +1921,7 @@ def _pyc_replacements(
 ) -> Dict[str, object]:
     location = re.sub(r"\s+", " ", (request.location or "").strip())
     subject = re.sub(r"\s+", " ", (request.subject or "").strip())
-    content_text = _pyc_content_text(request.content, location or subject)
+    content_text = _pyc_content_text(request.content, subject)
     # The form always prints one urgency tick.  Legacy rows with NULL (or an
     # unknown value) are treated as "Bình thường" instead of showing no tick.
     urgency = request.urgency if request.urgency in URGENCY_VALUES else "normal"
@@ -2081,7 +2232,7 @@ def _pdf_page_text(page: Any) -> str:
 
 
 def _select_pdf_pages(pdf_path: Path, kind: str) -> None:
-    """Keep only the PYC/BBNT pages in a LibreOffice-converted workbook PDF.
+    """Keep only the requested form pages in a LibreOffice-converted PDF.
 
     LibreOffice prints every workbook sheet, so a PYC export also contains the
     DM catalogue, BBNT and the hidden PYC copy.  The requested record is located
@@ -2145,15 +2296,7 @@ def _select_pdf_pages(pdf_path: Path, kind: str) -> None:
                     f"'{PDF_BBNT_TITLE}')",
                     "pdf_page_detection_failed",
                 )
-            start = next(
-                (index for index in pyc_pages if index < first_bbnt), None
-            )
-            if start is None:
-                raise AcceptanceError(
-                    500,
-                    "Không nhận diện được cặp trang PYC + BBNT trong PDF",
-                    "pdf_page_detection_failed",
-                )
+            start = first_bbnt
             end = bbnt_pages[-1]
             # Extend through BBNT continuation pages.  A following PYC title is
             # the hidden PYC copy, which must not be included.

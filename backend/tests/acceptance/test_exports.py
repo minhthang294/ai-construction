@@ -108,7 +108,7 @@ def test_pyc_export_replaces_validated_cells_and_preserves_formatting(
     assert ws["B7"].value == "Phân đoạn 1 - Cầu chính"
     assert ws["B10"].value.date() == date(2026, 11, 11)
     assert ws["D10"].value == "15h00"
-    assert ws["E10"].value == "Nội dung nghiệm thu thử nghiệm tại Phân đoạn 1 - Cầu chính"
+    assert ws["E10"].value == "Nội dung nghiệm thu thử nghiệm tại Đối tượng nghiệm thu thử nghiệm"
     assert ws["H10"].value == "☑"
     assert ws["I10"].value == "□"
     assert ws["K10"].value == "□"
@@ -252,25 +252,25 @@ def test_pyc_urgency_none_defaults_to_normal_and_ticks_correct_box(
         assert (ws["D14"].value, ws["D15"].value, ws["D16"].value) == expected
 
 
-def test_pyc_content_uses_location_when_present_else_subject(
+def test_pyc_content_uses_subject_only(
     client, template_path, tmp_path
 ):
     content = "Sơn chống tia UV phạm vi dán sợi cọc"
     cases = [
         # number, subject, location, expected E10
-        ("50", None, "Cọc F11, F24, F35", f"{content} tại Cọc F11, F24, F35"),
+        ("50", None, "Cọc F11, F24, F35", content),
         ("51", "Đối tượng nghiệm thu A", None, f"{content} tại Đối tượng nghiệm thu A"),
         (
             "52",
             "Đối tượng nghiệm thu B",
             "Cọc F11, F24, F35",
-            f"{content} tại Cọc F11, F24, F35",
+            f"{content} tại Đối tượng nghiệm thu B",
         ),
         (
             "53",
             None,
             "Cọc F11",
-            f"{content} tại Cọc F11",
+            content,
         ),
     ]
     for number, subject, location, expected in cases:
@@ -291,8 +291,8 @@ def test_pyc_content_does_not_duplicate_trailing_tai(client, template_path, tmp_
         client,
         number="54",
         content="Sơn chống tia UV tại",
-        subject=None,
-        location="Cọc F11",
+        subject="Cọc F11",
+        location=None,
     )
     exported = _export(client, request, "pyc")
     ws = openpyxl.load_workbook(_download(client, exported, tmp_path))["PYC"]
@@ -487,7 +487,7 @@ def test_pyc_pdf_contains_only_the_pyc_page(client, template_path, tmp_path):
 
 
 @pytest.mark.skipif(not _libreoffice_available(), reason="LibreOffice headless is not installed")
-def test_bbnt_pdf_contains_only_pyc_and_bbnt_pages(client, template_path, tmp_path):
+def test_bbnt_pdf_contains_only_the_bbnt_page(client, template_path, tmp_path):
     request = create_request(client)
     record = create_record(client, request["id"])
     confirmed = client.post(
@@ -503,9 +503,9 @@ def test_bbnt_pdf_contains_only_pyc_and_bbnt_pages(client, template_path, tmp_pa
     path = _download_pdf(client, response.json(), tmp_path)
     texts = _pdf_page_texts(path)
 
-    assert len(texts) == 2
-    assert "PHIẾU YÊU CẦU NGHIỆM THU CÔNG VIỆC XÂY DỰNG" in texts[0]
-    assert "BIÊN BẢN NGHIỆM THU CÔNG VIỆC XÂY DỰNG" in texts[1]
+    assert len(texts) == 1
+    assert "BIÊN BẢN NGHIỆM THU CÔNG VIỆC XÂY DỰNG" in texts[0]
+    assert "PHIẾU YÊU CẦU NGHIỆM THU CÔNG VIỆC XÂY DỰNG" not in texts[0]
     assert all("DANH MỤC HỒ SƠ" not in text for text in texts)
 
 
@@ -646,3 +646,37 @@ def test_invalid_template_is_reported(client, tmp_path, monkeypatch):
     )
     assert response.status_code == 500
     assert response.json()["code"] == "template_invalid"
+
+
+def test_delete_request_removes_export_history_and_files(client):
+    request = create_request(client, number="70")
+    exported = _export(client, request, "pyc")
+
+    with client.SessionLocal() as db:
+        document = db.get(AcceptanceGeneratedDocument, exported["id"])
+        assert document is not None
+        export_path = Path(document.path)
+        assert export_path.is_file()
+
+    deleted = client.delete(
+        f"/api/v1/projects/p1/acceptance-requests/{request['id']}"
+    )
+    assert deleted.status_code == 204, deleted.text
+    assert not export_path.exists()
+    assert client.get("/api/v1/projects/p1/acceptance-exports").json() == []
+
+
+@pytest.mark.skipif(not _libreoffice_available(), reason="LibreOffice headless is not installed")
+def test_pyc_preview_image_is_png_without_export_history(client):
+    request = create_request(client, number="71")
+    response = client.get(
+        f"/api/v1/projects/p1/acceptance-requests/{request['id']}/preview-image"
+    )
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"] == "image/png"
+    assert response.content.startswith(b"\x89PNG")
+    assert len(response.content) > 1000
+    # Preview must not create a persistent export/document row.
+    assert client.get(
+        f"/api/v1/projects/p1/acceptance-requests/{request['id']}/exports"
+    ).json() == []

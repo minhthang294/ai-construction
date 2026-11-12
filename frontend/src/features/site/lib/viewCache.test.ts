@@ -4,6 +4,7 @@ import {
   makeViewCacheRecord,
   offlineDataLabel,
   selectCachedView,
+  shouldLoadCatalogs,
   viewCacheKey,
   type ViewCacheRecord,
 } from "./viewCache";
@@ -50,6 +51,12 @@ describe("offline view cache", () => {
     expect(decideViewSource(true, cached)).toBe("cache");
     expect(decideViewSource(true, undefined)).toBe("empty");
     expect(decideViewSource(false, cached)).toBe("server");
+  });
+
+  it("loads catalogs whenever the server is reachable", () => {
+    // Regression: a day without a report still needs the work item dropdown.
+    expect(shouldLoadCatalogs(false)).toBe(true);
+    expect(shouldLoadCatalogs(true)).toBe(false);
   });
 
   it("labels the cached timestamp in Vietnamese", () => {

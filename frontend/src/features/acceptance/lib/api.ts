@@ -172,6 +172,33 @@ export function updateRequest(
   );
 }
 
+/** Delete a PYC; force also removes its linked BBNT records and exports. */
+export async function deleteRequest(
+  projectId: string,
+  requestId: string,
+  force = false,
+): Promise<void> {
+  const query = force ? "?force=true" : "";
+  const response = await apiFetch(
+    `/projects/${projectId}/acceptance-requests/${requestId}${query}`,
+    { method: "DELETE" },
+  );
+  if (!response.ok) throw await readError(response);
+}
+
+/** Render the filled PYC form to an authenticated PNG preview. */
+export async function fetchRequestPreviewImage(
+  projectId: string,
+  requestId: string,
+): Promise<string> {
+  const response = await apiFetch(
+    `/projects/${projectId}/acceptance-requests/${requestId}/preview-image`,
+    { method: "GET" },
+  );
+  if (!response.ok) throw await readError(response);
+  return URL.createObjectURL(await response.blob());
+}
+
 /** Read the daily report linked to a PYC, if any. */
 export function getRequestDailyReport(
   projectId: string,

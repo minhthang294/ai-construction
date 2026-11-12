@@ -4,16 +4,51 @@
 
 Acceptance router and frontend page are mounted. Export history and audit use the shared `generated_documents` and `audit_logs` tables; the integrated Alembic migration omits the former module-local duplicate tables. PYC creation fills missing common project fields from `Project`; downloads are limited to acceptance kinds and the project's private export directory. Remaining integration items are recorded in the "Unresolved issues" section below.
 
+## Vòng 3 — Chọn công việc cho nội dung PYC (12/11/2026)
+
+- **Mục tiêu:** form tạo/sửa PYC cho chọn công việc từ danh mục core thay vì chỉ gõ tay, nhưng vẫn giữ nguyên nội dung PYC cũ ngoài danh mục.
+- **Nguồn danh mục:** `listWorkItems()` (`GET /projects/{project_id}/work-items`) đã có trong `lib/api.ts`; `AcceptancePage` tải bằng một effect riêng, không đưa vào `Promise.all` chính. Nếu API lỗi/rỗng, trang vẫn tải PYC/BBNT bình thường và form hiện cảnh báo nhỏ, cho nhập tay và lưu.
+- **Helper thuần:** `lib/workItemOptions.ts`
+  - `buildWorkItemOptions()` gom theo tên đã chuẩn hoá khoảng trắng + case, giữ thứ tự xuất hiện đầu tiên và casing danh mục.
+  - Tên chỉ có đúng 1 id → option `{id, name}`; tên trùng nhiều id → `{id: null, name}` để không gắn nhầm hạng mục.
+  - `withCurrentWorkItem()` thêm nội dung PYC hiện tại vào danh sách chọn nếu ngoài danh mục (ví dụ "Sơn chống tia UV phạm vi dán sợi cọc").
+  - `resolveWorkItemSelection()` trả `{content, work_item_id}`; lựa chọn rỗng/ngoài danh mục giữ nguyên nội dung đang có và bỏ liên kết.
+  - `findWorkItemOption()` / `workItemNameKey()` dùng cho lookup và so sánh khi sửa tay.
+- **RequestForm:**
+  - `FormState`/`BLANK`/`toForm()` thêm `work_item_id`; payload submit gửi `work_item_id` (backend đã hỗ trợ).
+  - Select "Chọn công việc" đặt ngay trên textarea "Nội dung nghiệm thu", kèm nhãn "Chọn từ danh mục để điền nhanh, có thể sửa lại bên dưới."
+  - Chọn tên duy nhất → điền `content`, lưu `work_item_id`; chọn tên trùng → điền `content`, `work_item_id=null`.
+  - Sửa tay textarea khác tên đã chọn → tự bỏ `work_item_id`; sửa khoảng trắng/case của đúng tên đó thì giữ liên kết.
+  - Tên ngoài danh mục vẫn hiện trong select dưới dạng lựa chọn hiện tại và luôn hiển thị trong textarea.
+- **Quyết định nhỏ:** không import helper của module site để tránh phụ thuộc chéo; logic unique-name được viết lại thuần trong acceptance. Option của tên trùng được ghi chú "(nhiều hạng mục)" trên UI. Không thêm cột/migration backend.
+
+Files changed this round:
+- `frontend/src/features/acceptance/lib/workItemOptions.ts` (mới)
+- `frontend/src/features/acceptance/lib/workItemOptions.test.ts` (mới)
+- `frontend/src/features/acceptance/components/RequestForm.tsx`
+- `frontend/src/features/acceptance/pages/AcceptancePage.tsx`
+- `docs/agent-reports/acceptance.md`
+
+Tests:
+- `cd frontend && npx vitest run src/features/acceptance` → **25 passed** (4 files).
+- `cd frontend && npx tsc --noEmit -p tsconfig.json` → **exit 0**.
+- Bộ test mới phủ: 41 dòng → 7 option; tên duy nhất giữ id; tên trùng id null; chuẩn hoá khoảng trắng/case; nội dung cũ ngoài danh mục vẫn hiển thị/giữ nguyên; xoá lựa chọn không xoá nội dung đã nhập.
+
+Còn lại:
+- Chưa chạy full `npm run build`/backend gate theo yêu cầu coordinator.
+- Nếu sau này backend trả catalog phân trang hoặc hơn một trang, dropdown chỉ thấy trang đầu; hiện API trả toàn bộ danh mục dự án.
+- Chưa có test component React cho tương tác select/textarea (repo chưa có React Testing Library); hành vi thuần đã được test ở helper.
+
 ## PYC export fixes — 12/11/2026
 
 - **PDF contains only the PYC/BBNT pages.** After LibreOffice converts the validated workbook, `_select_pdf_pages()` in `service.py` uses PyMuPDF to keep:
   - PYC export: every page whose title is `PHIẾU YÊU CẦU NGHIỆM THU CÔNG VIỆC XÂY DỰNG` before the first `BIÊN BẢN NGHIỆM THU CÔNG VIỆC XÂY DỰNG` page (DM and the hidden `PYC (2)` copy are dropped).
-  - BBNT export: the PYC page(s) plus the BBNT block, from the first PYC page to the last BBNT continuation page (stopping at the next PYC title, i.e. the hidden copy).
+  - BBNT export: only the BBNT block, from the first BBNT title through its continuation pages (stopping at the next PYC title, i.e. the hidden copy). The PYC page is no longer included.
   - Unrecognised pages raise `AcceptanceError(500, ..., code="pdf_page_detection_failed")` instead of silently keeping the whole PDF. The validated `.xlsx` workbook path/hash remain in export metadata.
 - **Download filename.** `download_filename()` now returns `YC-<body>.<xlsx|pdf>` for `kind=pyc` and strips stored prefixes `YC-`, `PYC-`, `BBNT-`, `NT-` before joining. Examples: `YC-001.xlsx`, `YC-32.pdf`, `YC-001.pdf`; no `PYC-YC-001`. The numbered DB prefix configuration is unchanged. The frontend fallback filename uses `YC-` for PYC too.
 - **Cell B6 / B5.** `_number_value()` strips the numbering prefix before writing: `YC-001` and `PYC-001` → `"001"` (string, leading zero preserved), bare `32` → `32` (number). The template label `Số: YC-` therefore prints `Số: YC-001`, not `Số: YC- YC-001`.
 - **Urgency tick.** `_pyc_replacements()` treats `None`/unknown urgency as `normal`, so `D14=☑`, `D15=□`, `D16=□`; `urgent`/`very_urgent` tick their own box. `RequestForm` defaults new PYC to `normal` and maps an edited PYC with `urgency=null` to `normal` while still allowing Gấp/Rất gấp.
-- **E10 content.** `_pyc_content_text()` prints `content tại location` when `location` exists (fallback `subject`), normalises whitespace, avoids a double `tại` when content already ends with it, keeps `content` alone when there is no target, and prints the target alone when content is empty.
+- **E10 content.** `_pyc_content_text()` prints `content tại subject` (Đối tượng nghiệm thu); it normalises whitespace, avoids a double `tại` when content already ends with it, keeps `content` alone when there is no subject, and prints the subject alone when content is empty.
 
 Files changed for this round:
 - `backend/app/acceptance/service.py`
@@ -27,7 +62,7 @@ Tests:
 - `cd backend && DATABASE_URL="sqlite:////tmp/opencode/acceptance-pyc-fix-$$.db" ../.venv/bin/python -m pytest tests/acceptance -q` → **80 passed** (LibreOffice + PyMuPDF were available, so the PDF page tests ran).
 - `cd frontend && npx vitest run src/features/acceptance` → **16 passed** (3 files).
 - Acceptance feature typecheck (`tsc --noEmit ... src/features/acceptance/index.ts`) → **exit 0**.
-- PDF tests assert PYC = 1 page, BBNT = 2 pages (PYC + BBNT), no `DANH MỤC HỒ SƠ`; the missing-title path is tested separately through `_select_pdf_pages()`.
+- PDF tests assert PYC = 1 page, BBNT = 1 page (no PYC page), no `DANH MỤC HỒ SƠ`; the missing-title path is tested separately through `_select_pdf_pages()`.
 
 APIs/models:
 - No new routes; only the `Content-Disposition` filename for `GET .../acceptance-exports/{id}/download` changed.
@@ -261,6 +296,15 @@ Template isolation:
 - PDF export: LibreOffice headless (`libreoffice` or `soffice`) plus `subprocess`; not a Python package dependency. Configure with `ACCEPTANCE_LIBREOFFICE`; timeout via `ACCEPTANCE_PDF_TIMEOUT` (default 120s). Page filtering after conversion requires **PyMuPDF** (`pymupdf`).
 - Frontend: React 19, TypeScript, Vite, Tailwind. No additional packages added.
 - Test-only: `openpyxl`, Pillow (for workbook inspection/synthetic fixture). PDF tests skip if LibreOffice is absent.
+
+## Vòng 8 — xoá PYC, ảnh xem trước, PDF BBNT một trang
+
+- **Xoá PYC:** thêm `DELETE /projects/{p}/acceptance-requests/{id}` (editor). PYC không có BBNT xoá trực tiếp; PYC có BBNT trả `409 request_has_records` trừ khi `?force=true`. Khi force, BBNT liên quan, participants/checklist và lịch sử export được xoá; file export trong thư mục riêng của source cũng bị dọn. Audit ghi lại `records_deleted` và `forced`.
+- **Ảnh xem trước PYC:** thêm `GET /projects/{p}/acceptance-requests/{id}/preview-image` trả PNG. Endpoint dựng workbook tạm bằng đúng `copy_and_fill`, convert LibreOffice, lọc trang PYC, render PNG 150 dpi; không tạo bản ghi export/history. Frontend fetch có Bearer token và hiển thị `<img>` thay cho JSON; BBNT preview vẫn giữ dạng cells.
+- **PDF BBNT:** `_select_pdf_pages(kind="bbnt")` chỉ giữ trang BBNT và các trang continuation, không còn kèm trang PYC.
+- **E10:** `content + " tại " + subject`; nếu subject trống thì chỉ in content.
+
+Files: `backend/app/acceptance/service.py`, `backend/app/acceptance/router.py`, `frontend/src/features/acceptance/lib/api.ts`, `frontend/src/features/acceptance/pages/AcceptancePage.tsx`, `backend/tests/acceptance/test_requests.py`, `backend/tests/acceptance/test_exports.py`.
 
 ## Unresolved issues / requests to Codex
 

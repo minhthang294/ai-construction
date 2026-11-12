@@ -11,14 +11,17 @@ import {
   createRecord,
   createRecordRevision,
   createRequest,
+  deleteRequest,
   downloadExport,
   exportRecord,
   exportRequest,
+  fetchRequestPreviewImage,
   getProjectContext,
   getRequestDailyReport,
   listParticipantProfiles,
   listRecords,
   listRequests,
+  listWorkItems,
   previewRecord,
   previewRequest,
   updateRecord,
@@ -39,6 +42,7 @@ import type {
   RecordInput,
   RequestInput,
   ResultState,
+  WorkItemSummary,
   YesNo,
 } from "../types";
 import { emptyChecklist } from "../types";
@@ -212,8 +216,11 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
     Record<string, LinkedDailyReport | null>
   >({});
   const [profiles, setProfiles] = useState<ParticipantProfile[]>([]);
+  const [workItems, setWorkItems] = useState<WorkItemSummary[]>([]);
   const [projectContext, setProjectContext] = useState<ProjectContext | null>(null);
   const [preview, setPreview] = useState<PreviewPayload | null>(null);
+  const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
+  const [previewBusy, setPreviewBusy] = useState(false);
   const [requestDirty, setRequestDirty] = useState(false);
   const [recordDirty, setRecordDirty] = useState(false);
   const onDirtyChangeRef = useRef(onDirtyChange);
@@ -226,6 +233,16 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
   useEffect(() => {
     onDirtyChangeRef.current?.(requestDirty || recordDirty);
   }, [requestDirty, recordDirty]);
+
+  useEffect(() => {
+    if (!previewImageUrl) return;
+    return () => URL.revokeObjectURL(previewImageUrl);
+  }, [previewImageUrl]);
+
+  function closePreview() {
+    setPreview(null);
+    setPreviewImageUrl(null);
+  }
 
   useEffect(() => {
     return () => {
@@ -265,10 +282,27 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
     setDraft(null);
     setEditingRequest(null);
     setLastExport(null);
-    setPreview(null);
+    closePreview();
     setProjectContext(null);
     setRequestDirty(false);
     setRecordDirty(false);
+    return () => {
+      active = false;
+    };
+  }, [projectId]);
+
+  useEffect(() => {
+    let active = true;
+    setWorkItems([]);
+    // Keep this separate from the main Promise.all: a failing work-item
+    // catalog must not block PYC/BBNT loading.
+    listWorkItems(projectId)
+      .then((items) => {
+        if (active) setWorkItems(items);
+      })
+      .catch(() => {
+        if (active) setWorkItems([]);
+      });
     return () => {
       active = false;
     };
@@ -334,7 +368,7 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
       setDraft(null);
       setRecordDirty(false);
     }
-    setPreview(null);
+    closePreview();
     setTab(next);
   }
 
@@ -365,7 +399,7 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
       setRecordDirty(false);
     }
     setRequestDirty(false);
-    setPreview(null);
+    closePreview();
     setTab("requests");
     setEditingRequest(request);
   }
@@ -390,7 +424,7 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
       setDraft(null);
       setRecordDirty(false);
     }
-    setPreview(null);
+    closePreview();
     setTab("requests");
     setRequestDirty(false);
     setEditingRequest(request);
@@ -420,7 +454,7 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
       setEditingRequest(null);
       setRequestDirty(false);
     }
-    setPreview(null);
+    closePreview();
     setTab("records");
     loadDraft(draftFor(record, request, projectContext));
   }
@@ -543,10 +577,25 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
 
   async function handlePreviewRequest(request: AcceptanceRequest) {
     setError(null);
+    setPreviewBusy(true);
+    closePreview();
     try {
-      setPreview(await previewRequest(projectId, request.id));
+      const data = await previewRequest(projectId, request.id);
+      setPreview(data);
+      try {
+        const imageUrl = await fetchRequestPreviewImage(projectId, request.id);
+        setPreviewImageUrl(imageUrl);
+      } catch (cause) {
+        setError(
+          cause instanceof Error
+            ? cause.message
+            : "Không tạo được ảnh xem trước PYC.",
+        );
+      }
     } catch (cause) {
       setError(errorMessage(cause));
+    } finally {
+      setPreviewBusy(false);
     }
   }
 
@@ -556,10 +605,49 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
       return;
     }
     setError(null);
+    closePreview();
     try {
       setPreview(await previewRecord(projectId, draft.id));
     } catch (cause) {
       setError(errorMessage(cause));
+    }
+  }
+
+  async function handleDeleteRequest(request: AcceptanceRequest) {
+    if (busy) return;
+    const record = recordFor(request.id);
+    const warning = record
+      ? `PYC ${request.number} đã có BBNT (${record.status}). Xoá PYC sẽ xoá luôn BBNT liên quan và lịch sử xuất file. Không thể hoàn tác. Tiếp tục?`
+      : request.status === "submitted"
+        ? `PYC ${request.number} đã gửi. Xoá phiếu này và lịch sử xuất file? Không thể hoàn tác.`
+        : `Xoá PYC ${request.number}? Không thể hoàn tác.`;
+    if (!window.confirm(warning)) return;
+
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      await deleteRequest(projectId, request.id, Boolean(record));
+      if (
+        editingRequest &&
+        editingRequest !== "new" &&
+        editingRequest.id === request.id
+      ) {
+        setEditingRequest(null);
+        setRequestDirty(false);
+      }
+      if (draft?.request_id === request.id) {
+        setDraft(null);
+        setRecordDirty(false);
+        setConfirming(false);
+      }
+      closePreview();
+      await refresh();
+      setMessage(`Đã xoá PYC ${request.number}.`);
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -580,7 +668,7 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
       const request = requestList.find((item) => item.id === revised.request_id);
       loadDraft(draftFor(revised, request, projectContext));
       setRecords(recordList);
-      setPreview(null);
+      closePreview();
       setMessage(`Đã tạo revision ${revised.revision}; bản cũ được giữ nguyên.`);
     } catch (cause) {
       setError(errorMessage(cause));
@@ -673,7 +761,7 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
         <section className="rounded-xl bg-white p-3 shadow-sm">
           <div className="flex items-center justify-between">
             <h2 className="font-semibold">Xem trước {preview.kind.toUpperCase()}</h2>
-            <button type="button" className="text-sm underline" onClick={() => setPreview(null)}>
+            <button type="button" className="text-sm underline" onClick={closePreview}>
               Đóng
             </button>
           </div>
@@ -682,9 +770,31 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
               {warning}
             </p>
           ))}
-          <pre className="mt-2 max-h-64 overflow-auto rounded bg-slate-50 p-2 text-xs">
-            {JSON.stringify(preview.cells, null, 2)}
-          </pre>
+          {preview.kind === "pyc" ? (
+            previewImageUrl ? (
+              <div className="mt-2 space-y-2">
+                <img
+                  src={previewImageUrl}
+                  alt="Ảnh xem trước phiếu yêu cầu nghiệm thu"
+                  className="w-full rounded border border-slate-200 bg-white shadow-sm"
+                />
+                <p className="text-xs text-slate-500">
+                  Ảnh được tạo từ mẫu Excel đã điền dữ liệu; bản chính thức chỉ
+                  được tạo khi bấm xuất file.
+                </p>
+              </div>
+            ) : (
+              <p className="mt-2 rounded bg-slate-50 p-3 text-sm text-slate-600">
+                {previewBusy
+                  ? "Đang tạo ảnh xem trước PYC…"
+                  : "Chưa tạo được ảnh xem trước. Xem thông báo lỗi phía trên."}
+              </p>
+            )
+          ) : (
+            <pre className="mt-2 max-h-64 overflow-auto rounded bg-slate-50 p-2 text-xs">
+              {JSON.stringify(preview.cells, null, 2)}
+            </pre>
+          )}
         </section>
       )}
 
@@ -702,6 +812,7 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
                     : null
                 }
                 profiles={profiles}
+                workItems={workItems}
                 submitting={busy}
                 onSubmit={saveRequest}
                 onDirtyChange={setRequestDirty}
@@ -765,9 +876,10 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
                         <button
                           type="button"
                           onClick={() => void handlePreviewRequest(request)}
-                          className="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-50"
+                          disabled={busy || previewBusy}
+                          className="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-50 disabled:opacity-50"
                         >
-                          Xem trước
+                          {previewBusy ? "Đang tạo ảnh xem trước…" : "Xem trước"}
                         </button>
                         <button
                           type="button"
@@ -784,6 +896,14 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
                           className="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-50 disabled:opacity-50"
                         >
                           PYC PDF
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleDeleteRequest(request)}
+                          disabled={busy}
+                          className="block min-h-11 w-full rounded px-3 py-2 text-left text-sm text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+                        >
+                          Xoá PYC
                         </button>
                       </div>
                     </details>

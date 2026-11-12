@@ -27,6 +27,7 @@ import {
   formatCachedAt,
   makeViewCacheRecord,
   offlineDataLabel,
+  shouldLoadCatalogs,
 } from "../lib/viewCache";
 import {
   decideReconnectAction,
@@ -233,8 +234,12 @@ export default function SiteReportPage({
         );
       } else if (!baseReport) {
         setPhotos([]);
-        setWorkItems([]);
         if (serverFailed) {
+          // No server and no snapshot for this day: drop catalogs from the
+          // previously viewed day instead of showing stale options.
+          setWorkItems([]);
+          setOrganizations([]);
+          setManpowerContacts([]);
           setMessage("Không tải được báo cáo từ máy chủ; chưa có bản lưu trên thiết bị.");
         }
       }
@@ -244,7 +249,11 @@ export default function SiteReportPage({
       let loadedPhotos: SitePhoto[] =
         source === "cache" && cached ? (cached.photos as SitePhoto[]) : [];
 
-      if (!serverFailed && remote) {
+      // Catalogs are project-scoped and independent of the day's report.
+      // Fetch them whenever the server is reachable, even if the selected day
+      // has no saved report yet. Each request fails independently so one
+      // missing endpoint never leaves the whole form empty.
+      if (shouldLoadCatalogs(serverFailed)) {
         try {
           loadedWorkItems = await getWorkItems(projectId);
           if (!cancelled) setWorkItems(loadedWorkItems);
@@ -267,7 +276,10 @@ export default function SiteReportPage({
         } catch {
           if (!cancelled) setManpowerContacts([]);
         }
+      }
 
+      // Photos and the offline snapshot still require the day's server report.
+      if (!serverFailed && remote) {
         try {
           loadedPhotos = await listPhotos(projectId, remote.id);
           if (!cancelled) setPhotos(loadedPhotos);
@@ -291,13 +303,6 @@ export default function SiteReportPage({
           } catch {
             // Storage quota/private mode must not break the report view.
           }
-        }
-      } else if (source !== "cache") {
-        try {
-          const orgs = await getOrganizations(projectId);
-          if (!cancelled) setOrganizations(orgs);
-        } catch {
-          if (!cancelled) setOrganizations([]);
         }
       }
 

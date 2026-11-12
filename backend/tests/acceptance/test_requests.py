@@ -1,7 +1,7 @@
 """PYC request API tests."""
 from __future__ import annotations
 
-from conftest import create_request, request_payload, seed_daily_report, seed_work_item
+from conftest import create_record, create_request, request_payload, seed_daily_report, seed_work_item
 
 
 def test_create_list_and_get_request(client):
@@ -146,3 +146,58 @@ def test_daily_report_link_can_be_absent(client):
     )
     assert response.status_code == 200
     assert response.json() is None
+
+
+def test_delete_draft_request(client):
+    created = create_request(client, number="60")
+
+    deleted = client.delete(
+        f"/api/v1/projects/p1/acceptance-requests/{created['id']}"
+    )
+    assert deleted.status_code == 204, deleted.text
+    assert (
+        client.get(
+            f"/api/v1/projects/p1/acceptance-requests/{created['id']}"
+        ).status_code
+        == 404
+    )
+    assert client.get("/api/v1/projects/p1/acceptance-requests").json() == []
+
+
+def test_delete_request_is_project_scoped(client):
+    created = create_request(client, number="61")
+
+    rejected = client.delete(
+        f"/api/v1/projects/p2/acceptance-requests/{created['id']}"
+    )
+    assert rejected.status_code == 404
+    assert (
+        client.get(
+            f"/api/v1/projects/p1/acceptance-requests/{created['id']}"
+        ).status_code
+        == 200
+    )
+
+
+def test_delete_request_with_bbnt_requires_force_and_cascades(client):
+    created = create_request(client, number="62")
+    record = create_record(client, created["id"])
+
+    blocked = client.delete(
+        f"/api/v1/projects/p1/acceptance-requests/{created['id']}"
+    )
+    assert blocked.status_code == 409
+    assert blocked.json()["code"] == "request_has_records"
+    assert "BBNT" in blocked.json()["detail"]
+
+    forced = client.delete(
+        f"/api/v1/projects/p1/acceptance-requests/{created['id']}?force=true"
+    )
+    assert forced.status_code == 204, forced.text
+    assert (
+        client.get(
+            f"/api/v1/projects/p1/acceptance-records/{record['id']}"
+        ).status_code
+        == 404
+    )
+    assert client.get("/api/v1/projects/p1/acceptance-records").json() == []

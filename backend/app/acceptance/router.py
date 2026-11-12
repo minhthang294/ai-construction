@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from sqlalchemy.orm import Session
 
 try:  # shared core
@@ -60,6 +60,7 @@ from .service import (
     create_record_revision,
     create_request,
     delete_profile,
+    delete_request,
     download_filename,
     export_record,
     export_request,
@@ -75,6 +76,7 @@ from .service import (
     list_requests,
     preview_record,
     preview_request,
+    preview_request_image,
     record_payload,
     update_numbering,
     update_profile,
@@ -310,6 +312,30 @@ def patch_acceptance_request(
     return RequestOut.model_validate(request)
 
 
+@router.delete(
+    "/projects/{project_id}/acceptance-requests/{request_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_acceptance_request(
+    project_id: str,
+    request_id: str,
+    force: bool = False,
+    db: Session = Depends(get_db),
+    user=Depends(require_editor),
+):
+    try:
+        delete_request(
+            db,
+            project_id,
+            request_id,
+            current_user_id(user),
+            force=force,
+        )
+    except AcceptanceError as exc:
+        return _error(exc)
+    return None
+
+
 @router.post(
     "/projects/{project_id}/acceptance-requests/{request_id}/exports",
     response_model=ExportOut,
@@ -360,6 +386,23 @@ def preview_acceptance_request(
         return preview_request(db, project_id, request_id)
     except AcceptanceError as exc:
         return _error(exc)
+
+
+@router.get("/projects/{project_id}/acceptance-requests/{request_id}/preview-image")
+def preview_acceptance_request_image(
+    project_id: str,
+    request_id: str,
+    db: Session = Depends(get_db),
+    user=Depends(require_project_member),
+):
+    try:
+        image = preview_request_image(db, project_id, request_id)
+    except AcceptanceError as exc:
+        return _error(exc)
+    response = Response(content=image, media_type="image/png")
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 @router.post(

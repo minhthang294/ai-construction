@@ -1,8 +1,16 @@
 # Site Report Agent Report
 
-Cập nhật: 12/11/2026 (vòng 6: nhập tên nhân lực, công việc hôm nay, `work_name`). Phạm vi chính: `backend/app/site/`, `frontend/src/features/site/`, test tương ứng và file báo cáo này. Ngoại lệ vòng 5 do coordinator giao trực tiếp: chỉ `frontend/src/app/App.tsx` + `frontend/src/app/ChangePasswordDialog.tsx` cho UI đổi mật khẩu. Không sửa `backend/app/core`, `backend/app/models`, migration, module agent khác, Excel nguồn.
+Cập nhật: 12/11/2026 (vòng 7: nạp danh mục công việc/tổ chức cho ngày chưa có báo cáo). Phạm vi chính: `backend/app/site/`, `frontend/src/features/site/`, test tương ứng và file báo cáo này. Ngoại lệ vòng 5 do coordinator giao trực tiếp: chỉ `frontend/src/app/App.tsx` + `frontend/src/app/ChangePasswordDialog.tsx` cho UI đổi mật khẩu. Không sửa `backend/app/core`, `backend/app/models`, migration, module agent khác, Excel nguồn.
 
 ## Chức năng đã hoàn thành
+
+### Vòng 7 — danh mục công việc cho ngày chưa có báo cáo
+- **Nguyên nhân**: trong `SiteReportPage`, khối `getWorkItems(projectId)`/`getOrganizations`/`listManpowerPresets` nằm trong nhánh `if (!serverFailed && remote)`. Khi ngày được chọn chưa có báo cáo, `getDailyReport` trả `null` (404), nên `remote = null` và các API danh mục không bao giờ được gọi. Thêm nữa nhánh `else if (!baseReport)` gọi `setWorkItems([])`, xoá luôn danh sách nếu có.
+- **Sửa**: tách tải danh mục khỏi tải báo cáo. Helper thuần `shouldLoadCatalogs(serverFailed)` (`lib/viewCache.ts`) quyết định nạp danh mục khi server truy cập được. Ba API `getWorkItems`, `getOrganizations`, `listManpowerPresets` nằm trong nhánh này, mỗi API có `try/catch` riêng nên một API lỗi không chặn hai API còn lại (không dùng `Promise.all`).
+- **Ảnh/cache**: `listPhotos` và `saveViewCache` vẫn chỉ chạy khi có `remote` của đúng ngày; không thay đổi hành vi lưu báo cáo, offline queue, ảnh gốc/app PYC history.
+- **Offline**: khi `serverFailed` và có cache, vẫn dùng `cached.workItems`/`cached.photos`; khi `serverFailed` và không có cache, xoá danh mục cũ của ngày trước để không hiện lựa chọn stale.
+- **Không đè danh sách**: bỏ `setWorkItems([])` khỏi nhánh không có báo cáo khi server còn truy cập được, nên danh sách vừa tải được giữ nguyên.
+- Quyết định nhỏ: đặt helper trong `lib/viewCache.ts` thay vì tạo module mới, vì đây là quyết định chọn nguồn dữ liệu view (server/cache/empty) và đã có test Vitest cùng chỗ.
 
 ### Vòng 6 — nhập tên nhân lực, công việc hôm nay, `work_name`
 - **Sửa lỗi mất dấu cách khi nhập tên**: `splitManpowerTeam` và `teamToManpowerEntries` giữ nguyên text đang gõ (kể cả dấu cách cuối). Helper `normalizePersonName` chỉ `trim` + gộp khoảng trắng khi `onBlur` hoặc trước khi gửi API/draft (`buildBody` trong `SiteReportPage`). Add/remove Kỹ thuật, preset, dedupe vẫn dùng key đã chuẩn hoá nên không bị trùng tên.
@@ -131,8 +139,8 @@ Frontend:
 - `frontend/src/features/site/lib/queueRetry.test.ts` (mới)
 - `frontend/src/features/site/lib/acceptanceHistory.ts` (mới)
 - `frontend/src/features/site/lib/acceptanceHistory.test.ts` (mới)
-- `frontend/src/features/site/lib/viewCache.ts` (mới)
-- `frontend/src/features/site/lib/viewCache.test.ts` (mới)
+- `frontend/src/features/site/lib/viewCache.ts` (mới; vòng 7 thêm `shouldLoadCatalogs`)
+- `frontend/src/features/site/lib/viewCache.test.ts` (mới; vòng 7 thêm test helper)
 - `frontend/src/features/site/lib/manpower.ts`
 - `frontend/src/features/site/lib/manpower.test.ts`
 - `frontend/src/features/site/lib/datetime.ts`
@@ -153,7 +161,7 @@ Frontend:
 - `frontend/src/features/site/components/ManpowerPresets.tsx` (mới)
 - `frontend/src/features/site/components/OfflineQueuePanel.tsx` (mới)
 - `frontend/src/features/site/components/AcceptanceHistoryPanel.tsx` (mới)
-- `frontend/src/features/site/pages/SiteReportPage.tsx`
+- `frontend/src/features/site/pages/SiteReportPage.tsx` (vòng 7: tách tải danh mục khỏi `remote`)
 
 Shared frontend exception (vòng 5):
 - `frontend/src/app/App.tsx`
@@ -276,7 +284,7 @@ Frontend (Vitest, chạy từ `frontend/`):
 ```bash
 cd frontend
 npx vitest run src/features/site
-# 9 test files, 58 tests passed
+# 9 test files, 59 tests passed
 npx tsc --noEmit -p tsconfig.json
 # OK
 ```
@@ -296,6 +304,7 @@ Không chạy full `npm run build` trong vòng này để tránh tranh chấp v�
 - Vòng 6: `formatWorkLogLabel` trả `Tên tại Vị trí`, fallback component, một phía thì giữ nguyên.
 - Vòng 6: `teamToManpowerEntries`/`splitManpowerTeam` giữ nguyên dấu cách đang gõ; `normalizePersonName` chỉ trim/gộp khoảng trắng; dedupe Kỹ thuật vẫn đúng.
 - Vòng 6: `formatISODate` hiển thị `DD/MM/YYYY` không lệch timezone.
+- Vòng 7: `shouldLoadCatalogs(false) === true` và `shouldLoadCatalogs(true) === false`, bảo vệ quyết định nạp danh mục khi server truy cập được dù ngày chưa có báo cáo. Chưa có test render/E2E cho chính `SiteReportPage` (xem mục 24).
 
 Typecheck/build:
 - `npx tsc --noEmit -p tsconfig.json`: **OK**.
@@ -350,6 +359,7 @@ Biến môi trường:
 21. **Migration `work_name`**: đã thêm migration Alembic `a7c3e9f2b641` (sau `e2f6a1c9d430`) cho cột `daily_work_logs.work_name VARCHAR(500) NULL`; đã áp dụng vào `data/app.db`. Test dùng `Base.metadata.create_all` nên không phụ thuộc migration.
 22. **Nhóm danh mục công việc**: phân loại dựa trên từ khoá tên (đục / tẩy gỉ / vệ sinh-keo-epoxy / khoan-cấy / lắp đặt-bơm vữa). Nếu danh mục thật đổi tên theo cách không còn từ khoá, cần cập nhật `workItems.ts` và test tương ứng.
 23. **UI WorkLogForm**: đã kiểm tra bằng helper test + typecheck, chưa có test render (RTL) hoặc E2E trên thiết bị thật cho thao tác chọn công việc, nhập vị trí và mở/đóng “Chi tiết”. Trường `start_time`/`end_time` cũ vẫn được giữ nguyên trong dữ liệu nhưng không còn nhập từ UI.
+24. **Vòng 7 chưa có test render/E2E cho `SiteReportPage`**: repo frontend chưa có React Testing Library nên chỉ kiểm tra bằng helper `shouldLoadCatalogs` + typecheck + Vitest hiện có. Cần kiểm tra thủ công luồng: chọn ngày chưa có báo cáo (GET daily-report 404) → dropdown Công việc và danh mục tổ chức/mẫu nhân lực vẫn có dữ liệu; một API danh mục lỗi không làm mất hai danh mục còn lại.
 
 ## Hướng dẫn chạy
 
@@ -393,3 +403,5 @@ Kiểm tra thủ công sau khi Codex mount router + app shell:
 13. Nhập “Chỉ huy trưởng” và tên Kỹ thuật có dấu cách ở giữa/cuối: dấu cách phải giữ nguyên khi đang gõ; rời ô (blur) tên được trim/gộp khoảng trắng; thêm/xoá Kỹ thuật và dùng preset vẫn đúng.
 14. Khối “Công việc thực hiện hôm nay”: không còn ô giờ bắt đầu/kết thúc; hiển thị “Ngày báo cáo: DD/MM/YYYY”; select chỉ có 7 tên duy nhất chia nhóm; chọn công việc không tự ghi đè Vị trí/component; mở “Chi tiết” thấy số lượng/ĐVT/trạng thái/ghi chú; thêm/xoá dòng và empty state hoạt động.
 15. Lưu work log chọn theo tên (không có `work_item_id`), xuất Zalo/PDF/DOCX/ZIP: dòng công việc có dạng `Tên tại Vị trí`; báo cáo cũ có `work_item_id` vẫn hiển thị đúng tên danh mục.
+16. Chọn một ngày chưa có báo cáo (GET daily-report trả 404) khi đang online: dropdown “Công việc” trong khối “Công việc thực hiện hôm nay” phải có danh mục; form nhân lực hiện được organizations/mẫu nhân lực. Thử chặn riêng một API danh mục: hai danh mục còn lại vẫn hiển thị. Sau đó lưu báo cáo và kiểm tra hành vi lưu/queue không đổi.
+17. Ngắt mạng, mở lại đúng ngày đã có cache: work items/ảnh lấy từ cache như trước; ngày không có cache phải hiện thông báo và không giữ danh mục của ngày khác.
