@@ -17,6 +17,9 @@ export ENGINEERING_AI_STORAGE="$ROOT/data/storage/engineering-ai"
 export ACCEPTANCE_STORAGE="$ROOT/data/storage/acceptance"
 export ACCEPTANCE_TEMPLATE="$ROOT/data/templates/acceptance-original.xlsx"
 export ENGINEERING_AI_MAX_PDF_BYTES="${ENGINEERING_AI_MAX_PDF_BYTES:-80000000}"
+export ENGINEERING_AI_PROVIDER="${ENGINEERING_AI_PROVIDER:-opencode_deepseek}"
+export ENGINEERING_AI_OPENCODE_MODEL="${ENGINEERING_AI_OPENCODE_MODEL:-opencode-go/deepseek-v4.1-flash}"
+export ENGINEERING_AI_TIMEOUT="${ENGINEERING_AI_TIMEOUT:-180}"
 if [[ -z "${TESSDATA_PREFIX:-}" && -f "$HOME/.local/share/tessdata/vie.traineddata" ]]; then
   export TESSDATA_PREFIX="$HOME/.local/share/tessdata"
 fi

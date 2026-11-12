@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 from app.core import access, auth, database
 from app.core.auth import password_hash
-from app.core.models import User
+from app.core.models import AuditLog, User
 from app.main import app
 
 
@@ -96,3 +96,65 @@ def test_auth_project_scope_and_work_item(tmp_path, monkeypatch):
     assert oversized.json()["detail"] == "XLSX expands beyond 100 MB"
     assert client.post("/api/v1/auth/logout", headers=viewer).status_code == 200
     assert client.get(f"/api/v1/projects/{project_id}/work-items", headers=viewer).status_code == 401
+
+
+def test_change_password_revokes_tokens_and_checks_old_password(tmp_path, monkeypatch):
+    engine = create_engine(f"sqlite:///{tmp_path / 'password.db'}", connect_args={"check_same_thread": False})
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    database.Base.metadata.create_all(engine)
+    monkeypatch.setattr(database, "SessionLocal", factory)
+    monkeypatch.setattr(auth, "SessionLocal", factory)
+    monkeypatch.setattr(access, "SessionLocal", factory)
+    with factory() as db:
+        db.add(User(username="password-user", password_hash=password_hash("old-password-123"), role="engineer"))
+        db.commit()
+
+    client = TestClient(app)
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"username": "password-user", "password": "old-password-123"},
+    )
+    assert login.status_code == 200
+    old_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    wrong = client.post(
+        "/api/v1/auth/change-password",
+        headers=old_headers,
+        json={"current_password": "wrong-password", "new_password": "new-password-456"},
+    )
+    assert wrong.status_code == 400
+    assert wrong.json()["detail"] == "Current password is incorrect"
+
+    short = client.post(
+        "/api/v1/auth/change-password",
+        headers=old_headers,
+        json={"current_password": "old-password-123", "new_password": "short"},
+    )
+    assert short.status_code == 422
+
+    changed = client.post(
+        "/api/v1/auth/change-password",
+        headers=old_headers,
+        json={"current_password": "old-password-123", "new_password": "new-password-456"},
+    )
+    assert changed.status_code == 200
+    assert changed.json() == {"status": "password_changed", "relogin": True}
+
+    assert client.get("/api/v1/projects", headers=old_headers).status_code == 401
+    assert client.post(
+        "/api/v1/auth/login",
+        json={"username": "password-user", "password": "old-password-123"},
+    ).status_code == 401
+    new_login = client.post(
+        "/api/v1/auth/login",
+        json={"username": "password-user", "password": "new-password-456"},
+    )
+    assert new_login.status_code == 200
+    new_headers = {"Authorization": f"Bearer {new_login.json()['access_token']}"}
+    assert client.get("/api/v1/projects", headers=new_headers).status_code == 200
+
+    with factory() as db:
+        logs = db.query(AuditLog).filter(AuditLog.action == "change_password").all()
+        assert len(logs) == 1
+        assert logs[0].actor_id
+        assert "password" not in (logs[0].detail or "").lower()

@@ -14,6 +14,7 @@ text.
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import re
@@ -25,7 +26,13 @@ from sqlalchemy.orm import Session
 
 from . import fts, vector_store
 from .embeddings import EmbeddingProvider, cosine, embed_query, fold_text, tokenize
-from .models import DocumentChunk, DocumentEmbedding, DocumentPage, SourceDocument
+from .models import (
+    DocumentChunk,
+    DocumentEmbedding,
+    DocumentPage,
+    PageExtraction,
+    SourceDocument,
+)
 
 _TOKEN_RE = re.compile(r"[^\W_]+", re.UNICODE)
 _QUOTE_LIMIT = 420
@@ -95,7 +102,6 @@ def _load_vectors(db: Session, project_id: str, model: str) -> Dict[str, List[fl
             DocumentEmbedding.model == model,
         )
     ).all()
-    import json
 
     vectors: Dict[str, List[float]] = {}
     for chunk_id, raw in rows:
@@ -106,6 +112,49 @@ def _load_vectors(db: Session, project_id: str, model: str) -> Dict[str, List[fl
         if isinstance(value, list) and value:
             vectors[chunk_id] = [float(item) for item in value]
     return vectors
+
+
+def _page_extraction_boosts(
+    db: Session, project_id: str, query_tokens: List[str]
+) -> Dict[str, float]:
+    """Boost pages whose human/AI extraction key-values match the query.
+
+    Extraction data is advisory: it can make a page a candidate, but the answer
+    still comes from page text and the citation gate.  Only proposed/verified
+    rows are considered.
+    """
+
+    query_set = set(query_tokens)
+    if not query_set:
+        return {}
+    rows = db.execute(
+        select(PageExtraction.page_id, PageExtraction.extraction_json).where(
+            PageExtraction.project_id == project_id,
+            PageExtraction.status.in_(("proposed", "verified")),
+        )
+    ).all()
+    boosts: Dict[str, float] = {}
+    for page_id, raw in rows:
+        try:
+            data = json.loads(raw)
+        except (TypeError, ValueError):
+            continue
+        key_values = data.get("key_values") if isinstance(data, dict) else None
+        if not isinstance(key_values, list):
+            continue
+        best = 0
+        for item in key_values:
+            if not isinstance(item, dict):
+                continue
+            text = " ".join(
+                str(item.get(field) or "")
+                for field in ("name", "value", "unit")
+            )
+            overlap = len(set(tokenize(text)) & query_set)
+            best = max(best, overlap)
+        if best:
+            boosts[page_id] = min(3.0, 0.8 + 0.5 * best)
+    return boosts
 
 
 def search_chunks(
@@ -175,6 +224,7 @@ def search_chunks(
     total = len(rows)
     average_length = sum(len(tokens) for tokens in token_lists) / max(1, total)
     query_set = set(query_tokens)
+    page_boosts = _page_extraction_boosts(db, project_id, query_tokens)
     k1 = 1.5
     b = 0.75
 
@@ -213,6 +263,7 @@ def search_chunks(
             score += 0.35
         if chunk.id in knn_ids:
             score += 0.5 / (1.0 + knn_ids[chunk.id])
+        score += page_boosts.get(chunk.page_id, 0.0)
         # Vector similarity alone must not create evidence: a citation needs a
         # lexical hit (possibly accent-folded) or an FTS match.  This prevents
         # random hash-embedding collisions from producing false citations.

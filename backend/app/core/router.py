@@ -25,6 +25,11 @@ class UserIn(LoginIn):
     role: str = "viewer"
 
 
+class ChangePasswordIn(BaseModel):
+    current_password: str = Field(min_length=1)
+    new_password: str = Field(min_length=12)
+
+
 class ProjectIn(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     client: str | None = Field(default=None, max_length=255)
@@ -102,6 +107,31 @@ def logout(request: Request, db: Session = Depends(get_db)):
         db.delete(session)
         db.commit()
     return {"status": "logged_out"}
+
+
+@router.post("/auth/change-password")
+def change_password(payload: ChangePasswordIn, db: Session = Depends(get_db)):
+    actor = get_current_user()
+    user = db.get(User, actor.id)
+    if user is None:
+        raise HTTPException(401, "Authentication required")
+    if not password_valid(payload.current_password, user.password_hash):
+        raise HTTPException(400, "Current password is incorrect")
+
+    user.password_hash = password_hash(payload.new_password)
+    for token in db.scalars(select(ApiToken).where(ApiToken.user_id == user.id)).all():
+        db.delete(token)
+    db.add(
+        AuditLog(
+            actor_id=user.id,
+            action="change_password",
+            entity="User",
+            entity_id=user.id,
+            detail=json.dumps({"relogin": True}, ensure_ascii=False),
+        )
+    )
+    db.commit()
+    return {"status": "password_changed", "relogin": True}
 
 
 @router.post("/users", status_code=201)

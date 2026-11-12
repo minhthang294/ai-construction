@@ -73,6 +73,7 @@ Tests:
 - `backend/tests/engineering_ai/test_ocr_vision.py`
 - `backend/tests/engineering_ai/test_page_extraction.py` (POC tile/merge/validate/numeric check)
 - `backend/tests/engineering_ai/test_page_extraction_api.py` (save/upsert/scope/verify/retrieval isolation)
+- `backend/tests/engineering_ai/test_opencode_provider.py` (OpenCode DeepSeek provider mock/subprocess fallback)
 - `backend/tests/engineering_ai/test_documents.py` (extended for statuses/vectors/tables/sections/effective/compare)
 
 Frontend:
@@ -213,7 +214,8 @@ Safety rules:
 | `ENGINEERING_AI_OCR_ENGINE` | `tesseract` | `none` disables OCR |
 | `ENGINEERING_AI_OCR_CMD` | `tesseract` | OCR binary |
 | `ENGINEERING_AI_OCR_LANGUAGES` | `vie+eng` | Tesseract language pack list |
-| `ENGINEERING_AI_PROVIDER` | `extractive` | `openai_compatible` enables external chat |
+| `ENGINEERING_AI_PROVIDER` | `extractive` | `extractive`, `openai_compatible`, or `opencode_deepseek`/`opencode`/`deepseek` |
+| `ENGINEERING_AI_OPENCODE_MODEL` | `opencode-go/deepseek-v4.1-flash` | Only the allow-listed OpenCode DeepSeek model is accepted |
 | `ENGINEERING_AI_CHAT_URL` | unset | Full chat-completions endpoint |
 | `ENGINEERING_AI_MODEL` | unset | Chat model id |
 | `ENGINEERING_AI_API_KEY` | unset | Server-side key; never exposed to frontend |
@@ -375,6 +377,17 @@ Tests assert exact status order on first ingest and retry, and unchanged page/ch
 - Status labels updated for `ocr_completed`/`indexing`; effective badge, confirm-effective action, version compare panel, scope selector, conversation management and opt-in vision control added.
 - Feature typecheck clean; full `npm run build` also passed after site changes.
 
+## OpenCode DeepSeek answer provider (vòng 5)
+
+`providers.py` adds `OpenCodeDeepSeekProvider` with the exact name `opencode_deepseek:deepseek-v4.1-flash`:
+
+- Calls `opencode api` through the module-level `_opencode_call`; no key is read or hardcoded.
+- Creates `POST /api/session` with exactly `{"title":"Construction AI answer","model":{"providerID":"opencode-go","id":"deepseek-v4.1-flash"}}`, sends `{text, files: []}`, waits, reads assistant text parts, and always attempts session deletion.
+- The combined system/user prompt is grounded like the OpenAI provider and explicitly says `Không gọi tool; chỉ trả lời từ nguồn.`; it requires `[n]` citations and the exact no-source sentence.
+- `ENGINEERING_AI_PROVIDER=opencode_deepseek|opencode|deepseek` selects it. `ENGINEERING_AI_OPENCODE_MODEL` defaults to `opencode-go/deepseek-v4.1-flash`; any other model is rejected and falls back to extractive.
+- Timeout is `ENGINEERING_AI_TIMEOUT` (default 120s). Missing binary, API error, timeout, invalid JSON or empty answer raises `ProviderError`; existing service fallback returns the extractive citation answer.
+- Tests mock `_opencode_call`/`subprocess.run`: session/model body, prompt citation/no-source/no-tool instructions, success answer, timeout `ProviderError`, extractive fallback, aliases and model allow-list. No network/model call occurs in tests.
+
 ## Page extraction enrichment (vòng 4)
 
 Executable storage for POC/tiled page extraction, without model calls:
@@ -420,7 +433,7 @@ cd backend
 ../.venv/bin/python -m pytest tests/engineering_ai -q
 ```
 
-Result this pass: **59 passed** (1 third-party Starlette/httpx deprecation warning).
+Result this pass: **63 passed** (1 third-party Starlette/httpx deprecation warning).
 
 A separate manual smoke (not part of the automated suite because it needs the system binary/traineddata) generated a scanned image-only PDF, ran the real Tesseract engine through the API, and produced `extraction_method=ocr`, `ocr_confidence≈0.92`, drawing number `BV-09`, and a searchable page citation. Automated tests inject a mock OCR engine so they remain deterministic.
 
@@ -448,6 +461,7 @@ Coverage:
 - low-OCR fixed warning and confidence cap.
 - photo suggestion is proposal-only; non-image rejection.
 - offline extractive default without env/key; deterministic normalized local embeddings.
+- OpenCode DeepSeek answer provider: exact model/session body, grounded/no-tool prompt, success text, timeout/provider error, extractive fallback, aliases and allow-list; all subprocess calls mocked.
 - page extraction enrichment: save/upsert, rendered-page SHA-256, project/document/page scope, verify/reject with note, and proof that invented extraction text does not enter retrieval.
 - POC tile helpers: page coverage/overlap/title block, full-page metadata priority, dedupe/warnings/confidence, tile crop-noise filtering while keeping full-page warnings, schema validation, numeric/unit cross-check (`87140` vs `87440`, `mm` vs `cm`) with exact dedupe and 20-warning cap.
 - per-project/user rate limit returns 429 with `Retry-After`.
@@ -468,7 +482,7 @@ Full-suite note: the coordinator gate now passes `171 passed` with a temporary D
 ## Dependencies
 
 - Backend: FastAPI, SQLAlchemy 2, PyMuPDF (`pymupdf`/`fitz`), python-multipart, httpx (optional external providers), sqlite-vec, pytest.
-- System: optional Tesseract OCR binary; `vie` traineddata for Vietnamese scans. Tested with Tesseract 5.5.4 and `TESSDATA_PREFIX=/home/thangpham/.local/share/tessdata`.
+- System: optional Tesseract OCR binary; `vie` traineddata for Vietnamese scans. Tested with Tesseract 5.5.4 and `TESSDATA_PREFIX=/home/thangpham/.local/share/tessdata`. Optional `opencode` CLI only when `ENGINEERING_AI_PROVIDER=opencode_deepseek`; no model key is stored by this module.
 - `sqlite-vec` is used for persistent KNN when available; JSON vectors and the lexical ranker remain fallback. FTS5 is used when available; retrieval falls back to Python lexical/vector ranking otherwise.
 - Frontend: React/TypeScript/Vite/Tailwind (shared scaffold), browser `fetch`/`FormData`/object URLs.
 
@@ -476,6 +490,7 @@ Full-suite note: the coordinator gate now passes `171 passed` with a temporary D
 
 - Page-extraction verify/reject currently checks project access/membership, not a dedicated reviewer role; coordinator should map it to shared role policy. Re-saving the same unique extraction resets it to `proposed` and clears prior verification.
 - Verified extraction is intentionally not merged into retrieval/citation text yet; only the original page/chunk text is cited. A future coordinator decision must define how verified enrichment is exposed without replacing source text.
+- The OpenCode DeepSeek path has no real-model integration test by design; tests mock `_opencode_call`. Coordinator must run one live smoke with `ENGINEERING_AI_PROVIDER=opencode_deepseek` and the OpenCode service authenticated.
 - Real-scan ingest is not executed yet. Required before it: raise `ENGINEERING_AI_MAX_PDF_BYTES` above 66,405,004 B (recommended 70 MiB), raise reverse-proxy/body limits, and reserve ~1 GB storage for OCR renders/originals.
 - Real scans are available but not ingested; only four pages and a temporary 2-page cut were measured. No verified project knowledge exists yet.
 - OCR confidence is Tesseract word-average; it is not a calibrated probability. Drawing samples measured 0.67–0.69, so engineers must visually verify dimensions and notes; low-confidence pages always require direct drawing review.

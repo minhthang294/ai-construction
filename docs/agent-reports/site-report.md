@@ -1,6 +1,6 @@
 # Site Report Agent Report
 
-Cập nhật: 11/11/2026. Phạm vi chỉ trong `backend/app/site/`, `frontend/src/features/site/`, test tương ứng và file báo cáo này. Không sửa `backend/app/core`, `backend/app/models`, migration, module agent khác, Excel nguồn hoặc app shell frontend.
+Cập nhật: 12/11/2026. Phạm vi chính: `backend/app/site/`, `frontend/src/features/site/`, test tương ứng và file báo cáo này. Ngoại lệ vòng 5 do coordinator giao trực tiếp: chỉ `frontend/src/app/App.tsx` + `frontend/src/app/ChangePasswordDialog.tsx` cho UI đổi mật khẩu. Không sửa `backend/app/core`, `backend/app/models`, migration, module agent khác, Excel nguồn.
 
 ## Chức năng đã hoàn thành
 
@@ -68,6 +68,13 @@ Cập nhật: 11/11/2026. Phạm vi chỉ trong `backend/app/site/`, `frontend/s
 - Chỉ báo “Đã đồng bộ lúc …” sau khi tải/lưu server thành công; “Đang dùng bản offline” khi đang đọc cache.
 - Service worker hiện chỉ cache shell/app assets, bỏ qua mọi `/api/`; test service-worker có sẵn xác nhận API có auth không bị cache.
 
+### Đổi mật khẩu trong app shell (ngoại lệ shared frontend)
+- Header khi đã đăng nhập có nút “Đổi mật khẩu” cạnh “Đăng xuất”.
+- Dialog mobile-first: mật khẩu hiện tại, mật khẩu mới ≥12, xác nhận; validate client, hiển thị lỗi backend rõ ràng, disable khi đang gửi.
+- Gọi `POST /api/v1/auth/change-password` với bearer token hiện tại, body `{current_password,new_password}`.
+- Thành công: backend thu hồi token; app xoá token/localStorage, đóng dialog, về màn hình đăng nhập kèm thông báo.
+- Lỗi/mất mạng: giữ dialog và token để người dùng thử lại; không tự đăng xuất.
+
 ### Mobile-first / offline
 - Trang báo cáo một cột, nút lớn, sticky action bar, sticky header online/offline + số mục chờ.
 - Nhập nhân lực có ghi chú rõ “để trống = chưa rõ, 0 = không có người”; hiển thị tổng đã biết, nhóm chưa rõ, nhóm 0 người; chọn organization.
@@ -133,6 +140,10 @@ Frontend:
 - `frontend/src/features/site/components/OfflineQueuePanel.tsx` (mới)
 - `frontend/src/features/site/components/AcceptanceHistoryPanel.tsx` (mới)
 - `frontend/src/features/site/pages/SiteReportPage.tsx`
+
+Shared frontend exception (vòng 5):
+- `frontend/src/app/App.tsx`
+- `frontend/src/app/ChangePasswordDialog.tsx` (mới)
 
 Tài liệu:
 - `docs/agent-reports/site-report.md`
@@ -266,7 +277,7 @@ npm run build
 
 Typecheck/build:
 - `npm run build` chạy `tsc -b` + `vite build`: **thành công**.
-- Chưa chạy E2E trình duyệt; chỉ unit test logic và build production.
+- Chưa chạy E2E trình duyệt; chỉ unit test logic và build production. UI đổi mật khẩu chưa được kiểm thử E2E trên thiết bị thật.
 
 ## Phụ thuộc
 
@@ -312,6 +323,7 @@ Biến môi trường:
 17. **Cache storage**: mỗi `(projectId,date)` chỉ giữ một snapshot mới nhất; chưa có eviction/giới hạn dung lượng và chưa cache bytes ảnh (đúng chủ đích). IndexedDB đầy/quota sẽ bỏ qua cache, không làm hỏng trang.
 18. **Multi-tab/upgrade**: DB_VERSION đã tăng lên 2 để thêm store `views`; nếu tab cũ đang mở giữ kết nối cũ, upgrade IndexedDB có thể bị chặn. Cần kiểm tra đóng/mở nhiều tab.
 19. **Service worker**: giữ cache shell hiện tại (`site-assistant-shell-v2`), không cache `/api/`; chưa cần đổi version trong vòng này. Test service-worker hiện có xác nhận API request không được respondWith.
+20. **Đổi mật khẩu**: backend đã có `POST /auth/change-password` và thu hồi token; UI mới được typecheck/build, chưa E2E trên trình duyệt/điện thoại thật. Cần kiểm tra luồng đổi thành công → tự về login, lỗi mật khẩu hiện tại và mất mạng.
 
 ## Hướng dẫn chạy
 

@@ -14,6 +14,9 @@ set ENGINEERING_AI_STORAGE=%ROOT%\data\storage\engineering-ai
 set ACCEPTANCE_STORAGE=%ROOT%\data\storage\acceptance
 set ACCEPTANCE_TEMPLATE=%ROOT%\data\templates\acceptance-original.xlsx
 if "%ENGINEERING_AI_MAX_PDF_BYTES%"=="" set ENGINEERING_AI_MAX_PDF_BYTES=80000000
+if "%ENGINEERING_AI_PROVIDER%"=="" set ENGINEERING_AI_PROVIDER=opencode_deepseek
+if "%ENGINEERING_AI_OPENCODE_MODEL%"=="" set ENGINEERING_AI_OPENCODE_MODEL=opencode-go/deepseek-v4.1-flash
+if "%ENGINEERING_AI_TIMEOUT%"=="" set ENGINEERING_AI_TIMEOUT=180
 if "%CONSTRUCTION_API_PORT%"=="" set CONSTRUCTION_API_PORT=8765
 "%ROOT%\.venv\Scripts\alembic.exe" upgrade head
 if errorlevel 1 exit /b 1
