@@ -30,7 +30,7 @@ Có thể đổi mật khẩu ngay trong giao diện: nút **Đổi mật khẩu
 ## 3. Dữ liệu thật đã nạp
 
 - Project: `THI CÔNG SỬA CHỮA VẾT NỨT CỌC VÀ DẦM CẦU CẢNG NHÀ MÁY DAP`
-- 41 work item lấy từ sheet `DM` của workbook.
+- 42 work item lấy từ sheet `DM` của workbook (một số bổ sung trong quá trình dùng).
 - Hồ sơ:
   - `bản vẽ scan_1.pdf` — 133 trang, trạng thái `ready`
   - `Tập 1 - thuyết minh báo cáo KTKT sửa chữa nứt cọc dầm cầu cảng_0001.pdf` — 108 trang, trạng thái `ready`
@@ -75,10 +75,10 @@ Với bản vẽ dùng `--tile-grid 2 --tile-workers 4`. Script chỉ dùng Deep
 Đã có bản sao lưu sau khi extraction đầy đủ:
 
 ```bash
-python3 scripts/backup.py /tmp/opencode/backup-ready-20261112-final.tar.gz
+python3 scripts/backup.py /tmp/opencode/backup-ready-20261112-final2.tar.gz
 ```
 
-Kích thước khoảng 509 MB. Sao lưu định kỳ ra ngoài `data/`; archive chứa hồ sơ công trình, không commit.
+Kích thước khoảng 510 MB. Sao lưu định kỳ ra ngoài `data/`; archive chứa hồ sơ công trình, không commit.
 
 ## 7. Kiểm tra
 
