@@ -41,9 +41,9 @@ Có thể đổi mật khẩu ngay trong giao diện: nút **Đổi mật khẩu
 
 ## 4. Page extraction
 
-- Đã import 20 trang POC ban đầu; đang chạy extraction toàn bộ 241 trang.
-- Thuyết minh: **108/108 trang** đã extraction.
-- Bản vẽ: đang chạy 4 shard, dự kiến hoàn tất sau.
+- **Đã extraction toàn bộ 241/241 trang**: 108 trang thuyết minh + 133 trang bản vẽ.
+- 241 bản ghi extraction, **7.664 key values**, **4.303 warnings**; tất cả đang `proposed`.
+- Chế độ: 117 trang bản vẽ dùng tile, 124 trang còn lại dùng direct.
 - Dữ liệu extraction nằm trong `engineering_ai_page_extractions`, mặc định `proposed`.
 - Review trong `AI hồ sơ kỹ thuật → Hồ sơ & trang → chọn trang`: panel hiển thị summary/key values/warnings/confidence, nút Xác nhận/Từ chối.
 - Chỉ dữ liệu `verified` mới nên dùng làm thông tin tin cậy; `proposed` phải đối chiếu trang gốc.
@@ -89,7 +89,7 @@ scripts/verify_all.sh
 Kết quả hiện tại:
 
 - Backend: **191 passed**
-- Frontend: **34 passed**
+- Frontend: **54 passed**
 - Production build: pass
 - Migration head: `e2f6a1c9d430`
 
@@ -97,6 +97,6 @@ Kết quả hiện tại:
 
 1. **AI trả lời dùng OpenCode DeepSeek V4.1 Flash** ở backend (`ENGINEERING_AI_PROVIDER=opencode_deepseek`). Nếu OpenCode service không khả dụng, tự fallback extractive. Câu trả lời vẫn có citation và kiểm tra grounding.
 2. **OCR bản vẽ có lỗi**; không dùng số OCR/model làm kết luận kỹ thuật khi chưa kiểm tra trang gốc.
-3. **Page extraction toàn bộ 241 trang đang chạy nền**; dữ liệu mới ở trạng thái `proposed` cho đến khi kỹ sư xác nhận.
+3. **Page extraction đã đủ 241 trang** nhưng toàn bộ đang `proposed`; cần kỹ sư review/verify trước khi dùng làm dữ liệu tin cậy.
 4. **PWA/camera trên điện thoại** cần HTTPS và kiểm tra thiết bị thật.
 5. SQLite một file; phù hợp một máy/công trường nhỏ, chưa phải multi-worker.

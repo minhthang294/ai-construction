@@ -150,24 +150,16 @@ export default function App() {
     "projects",
     "work-items",
     "daily-report",
-    "manpower",
-    "photos",
     "acceptance",
     "documents",
-    "ai",
-    "history",
   ];
   const labels: Record<string, string> = {
     dashboard: "Tổng quan",
     projects: "Công trình",
     "work-items": "Công việc",
-    "daily-report": "Báo cáo ngày",
-    manpower: "Nhân lực",
-    photos: "Ảnh hiện trường",
+    "daily-report": "Hiện trường",
     acceptance: "Nghiệm thu",
-    documents: "Kho tài liệu",
-    ai: "AI Assistant",
-    history: "Lịch sử",
+    documents: "Hồ sơ & AI",
   };
 
   return (
@@ -214,7 +206,7 @@ export default function App() {
         </label>
 
         <nav
-          className="flex gap-2 overflow-x-auto pb-3"
+          className="grid grid-cols-3 gap-2 pb-3 sm:flex sm:flex-wrap"
           aria-label="Điều hướng chính"
         >
           {menu.map((item) => (
@@ -223,7 +215,8 @@ export default function App() {
               onClick={() => {
                 if (canLeaveAcceptance(item)) setPage(item);
               }}
-              className={`whitespace-nowrap rounded px-3 py-2 ${
+              aria-current={page === item ? "page" : undefined}
+              className={`min-h-11 rounded px-2 py-2 text-sm sm:px-3 ${
                 page === item ? "bg-teal-700 text-white" : "border bg-white"
               }`}
             >
@@ -245,8 +238,7 @@ export default function App() {
           <Dashboard token={token} projectId={projectId} date={today} />
         ) : projectId && page === "work-items" ? (
           <WorkItemList token={token} projectId={projectId} />
-        ) : projectId &&
-          ["daily-report", "manpower", "photos", "history"].includes(page) ? (
+        ) : projectId && page === "daily-report" ? (
           <SiteReportPage
             projectId={projectId}
             date={reportDate}
@@ -255,7 +247,7 @@ export default function App() {
           />
         ) : projectId && page === "acceptance" ? (
           <AcceptancePage projectId={projectId} onDirtyChange={setAcceptanceDirty} />
-        ) : projectId && (page === "documents" || page === "ai") ? (
+        ) : projectId && page === "documents" ? (
           <EngineeringAIPage projectId={projectId} />
         ) : (
           <section className="rounded-xl bg-white p-5 shadow-sm">

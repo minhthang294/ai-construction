@@ -5,8 +5,6 @@ import type { DailyReport, DailyReportInput } from "../types";
 
 export type ReconnectDecision = "none" | "reload" | "conflict";
 
-const TOLERANCE_MS = 1000;
-
 function time(value?: string | null): number {
   if (!value) return Number.NaN;
   const parsed = Date.parse(value);
@@ -22,7 +20,9 @@ export function hasServerUpdate(
   const base = time(baseUpdatedAt);
   // An old draft without a base timestamp cannot be trusted to be current.
   if (!Number.isFinite(base)) return true;
-  return server > base + TOLERANCE_MS;
+  // `baseUpdatedAt` is the exact server timestamp. Any strictly later server
+  // update must win; a coarse tolerance could miss a second-device edit.
+  return server > base;
 }
 
 export function draftConflictsWithServer(

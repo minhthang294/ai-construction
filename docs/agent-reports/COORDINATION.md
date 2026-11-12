@@ -94,9 +94,9 @@ Nguyên tắc: chỉ dùng DeepSeek V4.1 Flash; OCR vẫn là baseline; không g
 | Cache offline báo cáo/ảnh metadata | site-report-agent | xong: 34 frontend test pass |
 | Admin, project thật, upload 2 PDF, ingest OCR | điều phối viên | xong: 133 + 108 trang ready; 41 work item |
 | Import 20 trang extraction POC vào DB | điều phối viên | xong: 20 proposed (594 KV bản vẽ + 75 KV thuyết minh) |
-| Full gate, backup, hướng dẫn vận hành | điều phối viên | xong: 185 backend, 34 frontend, build pass; backup 508 MB; `docs/OPERATIONS.md` |
+| Full gate, backup, hướng dẫn vận hành | điều phối viên | xong: 191 backend, 54 frontend, build pass; backup 508 MB; `docs/OPERATIONS.md` |
 
-Cổng xác minh hiện tại: backend **185 passed**, frontend **34 passed**, build pass; migration head `e2f6a1c9d430`.
+Cổng xác minh hiện tại: backend **191 passed**, frontend **54 passed**, build pass; migration head `e2f6a1c9d430`; extraction 241/241 trang.
 
 ## 10. Vòng 5 — AI provider, đổi mật khẩu, extraction toàn bộ
 
@@ -106,10 +106,10 @@ Cổng xác minh hiện tại: backend **185 passed**, frontend **34 passed**, b
 | Backend đổi mật khẩu + thu hồi token | acceptance-agent | xong: test core pass; đã smoke API |
 | UI đổi mật khẩu | site-report-agent | xong: build/test pass |
 | Retrieval boost từ page extraction key values | điều phối viên | xong: query “chiều dài cầu cảng” trả đúng trang 10 |
-| Extraction toàn bộ 221 trang còn lại | điều phối viên | thuyết minh 108/108 xong; bản vẽ đang chạy 4 shard |
-| Import extraction còn lại + full gate + backup | điều phối viên | chờ bản vẽ xong |
+| Extraction toàn bộ 221 trang còn lại | điều phối viên | xong: 241/241 trang, 7.664 key values, 4.303 warnings, tất cả proposed |
+| Import extraction còn lại + full gate + backup | điều phối viên | xong gate 191 backend + 54 frontend; backup final |
 
-Cổng xác minh hiện tại: backend **191 passed**, frontend **34 passed**, build pass.
+Cổng xác minh hiện tại: backend **191 passed**, frontend **54 passed**, build pass.
 
 ## 11. Cổng xác minh
 
