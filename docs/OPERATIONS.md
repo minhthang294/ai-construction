@@ -75,7 +75,7 @@ Với bản vẽ dùng `--tile-grid 2 --tile-workers 4`. Script chỉ dùng Deep
 Đã có bản sao lưu sau khi extraction đầy đủ:
 
 ```bash
-python3 scripts/backup.py /tmp/opencode/backup-ready-20261112-final3.tar.gz
+python3 scripts/backup.py /tmp/opencode/backup-ready-20261113.tar.gz
 ```
 
 Kích thước khoảng 510 MB. Sao lưu định kỳ ra ngoài `data/`; archive chứa hồ sơ công trình, không commit.
