@@ -6,6 +6,7 @@ import ParticipantLibrary from "../components/ParticipantLibrary";
 import ParticipantsEditor from "../components/ParticipantsEditor";
 import RequestForm from "../components/RequestForm";
 import TriStateChecklist from "../components/TriStateChecklist";
+import MenuButton from "../../../ui/MenuButton";
 import {
   AcceptanceApiError,
   createRecord,
@@ -921,68 +922,67 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
                     >
                       {record ? "Mở BBNT" : "Tạo BBNT"}
                     </button>
-                    <details className="relative">
-                      <summary className="min-h-11 cursor-pointer list-none rounded border px-4 py-2 text-sm [&::-webkit-details-marker]:hidden">
-                        Thao tác
-                      </summary>
-                      <div className="absolute right-0 z-10 mt-1 w-48 rounded border bg-white p-1 shadow-lg">
-                        <button
-                          type="button"
-                          onClick={() => startEditRequest(request)}
-                          className="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-50"
-                        >
-                          Sửa PYC
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void handlePreviewRequest(request)}
-                          disabled={busy || previewBusy}
-                          className="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-50 disabled:opacity-50"
-                        >
-                          {previewBusy ? "Đang tạo ảnh xem trước…" : "Xem trước"}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void handleExportRequest(request, "xlsx")}
-                          disabled={busy}
-                          className="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-50 disabled:opacity-50"
-                        >
-                          PYC Excel
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void handleExportRequest(request, "pdf")}
-                          disabled={busy}
-                          className="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-50 disabled:opacity-50"
-                        >
-                          PYC PDF
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void handleCopyInvite(request)}
-                          disabled={busy}
-                          className="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-50 disabled:opacity-50"
-                        >
-                          Copy lời mời WhatsApp
-                        </button>
-                        <a
-                          href={whatsAppInviteUrl(buildWhatsAppInvite(request))}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-50"
-                        >
-                          Mở WhatsApp
-                        </a>
-                        <button
-                          type="button"
-                          onClick={() => void handleDeleteRequest(request)}
-                          disabled={busy}
-                          className="block min-h-11 w-full rounded px-3 py-2 text-left text-sm text-rose-700 hover:bg-rose-50 disabled:opacity-50"
-                        >
-                          Xoá PYC
-                        </button>
-                      </div>
-                    </details>
+                    <MenuButton
+                      label="Thao tác"
+                      triggerClassName="min-h-11 cursor-pointer rounded border px-4 py-2 text-sm"
+                      panelClassName="right-0 w-48 rounded border bg-white p-1 shadow-lg"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => startEditRequest(request)}
+                        className="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-50"
+                      >
+                        Sửa PYC
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handlePreviewRequest(request)}
+                        disabled={busy || previewBusy}
+                        className="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-50 disabled:opacity-50"
+                      >
+                        {previewBusy ? "Đang tạo ảnh xem trước…" : "Xem trước"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleExportRequest(request, "xlsx")}
+                        disabled={busy}
+                        className="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-50 disabled:opacity-50"
+                      >
+                        PYC Excel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleExportRequest(request, "pdf")}
+                        disabled={busy}
+                        className="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-50 disabled:opacity-50"
+                      >
+                        PYC PDF
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleCopyInvite(request)}
+                        disabled={busy}
+                        className="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-50 disabled:opacity-50"
+                      >
+                        Copy lời mời WhatsApp
+                      </button>
+                      <a
+                        href={whatsAppInviteUrl(buildWhatsAppInvite(request))}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-50"
+                      >
+                        Mở WhatsApp
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => void handleDeleteRequest(request)}
+                        disabled={busy}
+                        className="block min-h-11 w-full rounded px-3 py-2 text-left text-sm text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+                      >
+                        Xoá PYC
+                      </button>
+                    </MenuButton>
                   </li>
                 );
               })}

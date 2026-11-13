@@ -5,6 +5,7 @@ import { EngineeringAIPage } from "../features/engineering-ai";
 import { Dashboard, ProjectSetup, WorkItemList, request } from "./CorePages";
 import type { Project } from "./CorePages";
 import ChangePasswordDialog from "./ChangePasswordDialog";
+import MenuButton from "../ui/MenuButton";
 import {
   AcceptanceIcon,
   ArrowLeftIcon,
@@ -381,27 +382,31 @@ export default function App() {
                 ))}
               </select>
             </label>
-            <details className="relative shrink-0">
-              <summary className="flex min-h-10 cursor-pointer list-none items-center gap-2 rounded-xl border border-slate-200 bg-white px-2 py-1.5 text-sm hover:bg-slate-50 [&::-webkit-details-marker]:hidden">
-                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#405e9b] text-[11px] font-semibold text-white">{initials}</span>
-                <span className="hidden max-w-24 truncate sm:inline">{username || "Tài khoản"}</span>
-                <ChevronDownIcon className="h-4 w-4 text-slate-400" />
-              </summary>
-              <div className="absolute right-0 z-50 mt-2 w-52 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl">
-                <button
-                  type="button"
-                  className="block min-h-10 w-full rounded-lg px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
-                  onClick={() => {
-                    if (canLeaveAcceptance(page)) setShowChangePassword(true);
-                  }}
-                >
-                  Đổi mật khẩu
-                </button>
-                <button type="button" className="block min-h-10 w-full rounded-lg px-3 py-2 text-left text-sm text-red-700 hover:bg-red-50" onClick={signOut}>
-                  Đăng xuất
-                </button>
-              </div>
-            </details>
+            <MenuButton
+              className="shrink-0"
+              label={
+                <>
+                  <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#405e9b] text-[11px] font-semibold text-white">{initials}</span>
+                  <span className="hidden max-w-24 truncate sm:inline">{username || "Tài khoản"}</span>
+                  <ChevronDownIcon className="h-4 w-4 text-slate-400" />
+                </>
+              }
+              triggerClassName="flex min-h-10 cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-2 py-1.5 text-sm hover:bg-slate-50"
+              panelClassName="right-0 z-50 mt-2 w-52 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl"
+            >
+              <button
+                type="button"
+                className="block min-h-10 w-full rounded-lg px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                onClick={() => {
+                  if (canLeaveAcceptance(page)) setShowChangePassword(true);
+                }}
+              >
+                Đổi mật khẩu
+              </button>
+              <button type="button" className="block min-h-10 w-full rounded-lg px-3 py-2 text-left text-sm text-red-700 hover:bg-red-50" onClick={signOut}>
+                Đăng xuất
+              </button>
+            </MenuButton>
           </div>
         </header>
 
