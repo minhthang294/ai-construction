@@ -19,6 +19,7 @@ try:  # shared core
     from app.core.database import SessionLocal as _shared_session_factory  # type: ignore
     from app.core.auth import get_current_user as _shared_get_current_user  # type: ignore
     from app.core.access import require_project_member as _shared_require_project_member  # type: ignore
+    from app.core.access import require_project_role as _shared_require_project_role  # type: ignore
 
     _HAS_SHARED_DB = True
 except Exception:  # pragma: no cover - fallback for isolated/test runs
@@ -32,6 +33,9 @@ except Exception:  # pragma: no cover - fallback for isolated/test runs
         return SimpleNamespace(id="dev-user", role="admin")
 
     def _shared_require_project_member(project_id: str) -> Any:  # type: ignore[misc]
+        return _shared_get_current_user()
+
+    def _shared_require_project_role(project_id: str, allowed: set[str]) -> Any:  # type: ignore[misc]
         return _shared_get_current_user()
 
 
@@ -105,6 +109,10 @@ def project_access(project_id: str) -> Any:
     """FastAPI dependency wrapper so tests/integration can override access."""
 
     return require_project_member(project_id)
+
+
+def project_editor_access(project_id: str) -> Any:
+    return _shared_require_project_role(project_id, {"project_manager", "engineer"})
 
 
 def current_user_id(user: Any) -> Optional[str]:

@@ -1,0 +1,144 @@
+{
+  "page_number": 7,
+  "document_name": "bản vẽ scan_1.pdf",
+  "model": "manual-visual-review",
+  "prompt_version": "golden-2026-11-12",
+  "mode": "manual",
+  "confidence": 1.0,
+  "warnings": [
+    "Trang 7 chỉ có Phân đoạn 2; không có Phân đoạn 1. H77 không thuộc Phân đoạn 1."
+  ],
+  "verify_note": "Visual check p7: tiêu đề PHÂN ĐOẠN 2 - CẦU CHÍNH - NHÓM 1; bảng bên phải có dòng H77 | 0,2. Nhóm 1, Phân đoạn 2, Cầu chính là ô gộp; H77 và 0,2 đọc trực tiếp.",
+  "evidence": {
+    "source_pdf": "/home/thangpham/Downloads/bản vẽ scan_1.pdf",
+    "crops": [
+      "p7-header.png",
+      "p7-table.png",
+      "p7-titleblock.png"
+    ],
+    "page_title_quote": "PHÂN ĐOẠN 2 - CẦU CHÍNH - NHÓM 1",
+    "sheet_number_quote": "TK-01",
+    "table_headers": [
+      "Phân loại",
+      "Phân đoạn",
+      "Vị trí",
+      "Tên cọc (KS)",
+      "Chiều dài vết nứt L (m)"
+    ],
+    "direct_vs_joined": "H77 và 0,2 trực tiếp; Nhóm 1/Phân đoạn 2/Cầu chính là ô gộp áp dụng cho dòng H77."
+  },
+  "extraction": {
+    "page_type": "drawing",
+    "title": "PHÂN ĐOẠN 2 - CẦU CHÍNH - NHÓM 1",
+    "drawing_number": "TK-01",
+    "revision": null,
+    "summary": "Trang 7 (TK-01) xác nhận H77 thuộc Nhóm 1, Phân đoạn 2, Cầu chính; chiều dài vết nứt trên dòng H77 là 0,2 m. Nhóm/Phân đoạn/Vị trí nằm trong ô gộp.",
+    "key_values": [],
+    "table_rows": [
+      [
+        "Phân loại",
+        "Phân đoạn",
+        "Vị trí",
+        "Tên cọc (KS)",
+        "Chiều dài vết nứt L (m)"
+      ],
+      [
+        "Nhóm 1",
+        "Phân đoạn 2",
+        "Cầu chính",
+        "H77",
+        "0,2"
+      ]
+    ],
+    "warnings": [
+      "Trang 7 chỉ có Phân đoạn 2; không có Phân đoạn 1. H77 không thuộc Phân đoạn 1."
+    ],
+    "confidence": 1.0,
+    "component_facts": [
+      {
+        "component_type": "pile",
+        "component_code": "H77",
+        "fact_name": "nhóm",
+        "value": "1",
+        "unit": "nhóm",
+        "quote": "Nhóm 1",
+        "group": "1",
+        "segment": "2",
+        "location": "Cầu chính",
+        "table_row": 1,
+        "table_column": "Phân loại",
+        "evidence_kind": "joined",
+        "source_page": 7,
+        "source_quote": "Nhóm 1",
+        "source_row": 1,
+        "source_column": "Phân loại",
+        "source_table": "Bảng phân đoạn 2 - cầu chính - nhóm 1",
+        "source_sheet": "TK-01",
+        "join_note": "Ô gộp Nhóm 1 kéo dài toàn bảng; H77 nằm trong dải ô gộp."
+      },
+      {
+        "component_type": "pile",
+        "component_code": "H77",
+        "fact_name": "phân đoạn",
+        "value": "2",
+        "unit": "phân đoạn",
+        "quote": "Phân đoạn 2",
+        "group": "1",
+        "segment": "2",
+        "location": "Cầu chính",
+        "table_row": 1,
+        "table_column": "Phân đoạn",
+        "evidence_kind": "joined",
+        "source_page": 7,
+        "source_quote": "Phân đoạn 2",
+        "source_row": 1,
+        "source_column": "Phân đoạn",
+        "source_table": "Bảng phân đoạn 2 - cầu chính - nhóm 1",
+        "source_sheet": "TK-01",
+        "join_note": "Ô gộp Phân đoạn 2 phủ dòng H77/F66/I90; H77 nằm trong dải ô gộp."
+      },
+      {
+        "component_type": "pile",
+        "component_code": "H77",
+        "fact_name": "vị trí",
+        "value": "Cầu chính",
+        "unit": "vị trí",
+        "quote": "Cầu chính",
+        "group": "1",
+        "segment": "2",
+        "location": "Cầu chính",
+        "table_row": 1,
+        "table_column": "Vị trí",
+        "evidence_kind": "joined",
+        "source_page": 7,
+        "source_quote": "Cầu chính",
+        "source_row": 1,
+        "source_column": "Vị trí",
+        "source_table": "Bảng phân đoạn 2 - cầu chính - nhóm 1",
+        "source_sheet": "TK-01",
+        "join_note": "Ô gộp Vị trí phủ dòng H77/F66/I90; H77 nằm trong dải ô gộp."
+      },
+      {
+        "component_type": "pile",
+        "component_code": "H77",
+        "fact_name": "chiều dài vết nứt",
+        "value": "0.2",
+        "unit": "m",
+        "quote": "0,2",
+        "group": "1",
+        "segment": "2",
+        "location": "Cầu chính",
+        "table_row": 1,
+        "table_column": "Chiều dài vết nứt L (m)",
+        "evidence_kind": "direct",
+        "source_page": 7,
+        "source_quote": "0,2",
+        "source_row": 1,
+        "source_column": "Chiều dài vết nứt L (m)",
+        "source_table": "Bảng phân đoạn 2 - cầu chính - nhóm 1",
+        "source_sheet": "TK-01",
+        "join_note": "Đọc trực tiếp ô chiều dài vết nứt trên dòng H77."
+      }
+    ]
+  }
+}

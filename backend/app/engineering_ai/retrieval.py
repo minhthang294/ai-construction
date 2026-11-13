@@ -120,8 +120,7 @@ def _page_extraction_boosts(
     """Boost pages whose human/AI extraction key-values match the query.
 
     Extraction data is advisory: it can make a page a candidate, but the answer
-    still comes from page text and the citation gate.  Only proposed/verified
-    rows are considered.
+    still comes from page text and the citation gate. Only verified rows count.
     """
 
     query_set = set(query_tokens)
@@ -130,7 +129,7 @@ def _page_extraction_boosts(
     rows = db.execute(
         select(PageExtraction.page_id, PageExtraction.extraction_json).where(
             PageExtraction.project_id == project_id,
-            PageExtraction.status.in_(("proposed", "verified")),
+            PageExtraction.status == "verified",
         )
     ).all()
     boosts: Dict[str, float] = {}

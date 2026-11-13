@@ -1,0 +1,59 @@
+{
+  "page_number": 32,
+  "document_name": "Tập 1 - thuyết minh báo cáo KTKT sửa chữa nứt cọc dầm cầu cảng_0001.pdf",
+  "model": "manual-visual-review",
+  "prompt_version": "golden-procedure-2026-11-12",
+  "mode": "manual",
+  "confidence": 1.0,
+  "warnings": [],
+  "verify_note": "Đối chiếu ảnh trang 32 mục 4.2. Công tác sửa chữa cọc; quy trình theo nhóm, không nêu mã cấu kiện riêng. Có phần quy trình cọc nhóm 2.",
+  "extraction": {
+    "page_type": "text",
+    "title": "Cọc nhóm 1",
+    "drawing_number": null,
+    "revision": null,
+    "summary": "4.2. Công tác sửa chữa cọc — Cọc nhóm 1",
+    "key_values": [],
+    "table_rows": [],
+    "component_facts": [
+      {
+        "component_type": "pile",
+        "component_code": "PILE-GROUP-1",
+        "fact_name": "quy trình xử lý theo nhóm",
+        "value": "Đục bỏ bê tông om vỡ, tẩy gỉ cốt thép, vệ sinh bề mặt; quét keo epoxy HM-180C3P và phun cát tạo nhám; lắp ván khuôn, bơm vữa Sumen Grout 60 hoặc tương đương; mài phẳng, dán 2 lớp sợi carbon dày 1 mm; sơn bảo vệ.",
+        "unit": "quy trình",
+        "quote": "Đục bỏ bê tông om vỡ, tẩy gỉ cốt thép, vệ sinh bề mặt bê tông thân cọc sau khi đục.",
+        "group": "1",
+        "segment": null,
+        "location": "Cầu chính",
+        "table_row": null,
+        "table_column": "4.2. Công tác sửa chữa cọc",
+        "evidence_kind": "joined",
+        "source_page": 32,
+        "source_quote": "Đục bỏ bê tông om vỡ, tẩy gỉ cốt thép, vệ sinh bề mặt bê tông thân cọc sau khi đục.",
+        "source_table": "4.2. Công tác sửa chữa cọc",
+        "join_note": "Quy trình áp dụng theo nhóm; mã cấu kiện và nhóm phải được đối chiếu với bản vẽ riêng."
+      },
+      {
+        "component_type": "pile",
+        "component_code": "PILE-GROUP-2",
+        "fact_name": "quy trình xử lý theo nhóm",
+        "value": "Đục bê tông om vỡ, tẩy gỉ và vệ sinh; quét keo epoxy HM-180C3P, phun cát tạo nhám; lắp đặt và định vị vỏ composite tiền chế sợi carbon.",
+        "unit": "quy trình",
+        "quote": "Lắp đặt, định vị vỏ composite tiền chế sợi carbon bằng các thiết bị chuyên dụng.",
+        "group": "2",
+        "segment": null,
+        "location": "Cầu chính",
+        "table_row": null,
+        "table_column": "4.2. Công tác sửa chữa cọc — Cọc nhóm 2",
+        "evidence_kind": "joined",
+        "source_page": 32,
+        "source_quote": "Lắp đặt, định vị vỏ composite tiền chế sợi carbon bằng các thiết bị chuyên dụng.",
+        "source_table": "4.2. Công tác sửa chữa cọc — Cọc nhóm 2",
+        "join_note": "Quy trình áp dụng theo nhóm 2; mã cấu kiện và nhóm đối chiếu bản vẽ."
+      }
+    ],
+    "warnings": [],
+    "confidence": 1.0
+  }
+}

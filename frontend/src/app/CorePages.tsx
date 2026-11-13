@@ -1,4 +1,15 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import PageHeader from "./PageHeader";
+import {
+  AcceptanceIcon,
+  ArrowRightIcon,
+  AlertTriangleIcon,
+  CameraIcon,
+  CheckCircleIcon,
+  ClockIcon,
+  DocumentsIcon,
+  WorkIcon,
+} from "./AppIcons";
 
 export type Project = { id: string; name: string; client?: string; location?: string; report_title?: string };
 type WorkItem = { id: string; code: string; name: string; location?: string; component?: string; status: string };
@@ -29,7 +40,19 @@ export async function request(path: string, token: string, init?: RequestInit) {
   return response.json();
 }
 
-export function ProjectSetup({ token, projects, onCreated, onUpdated }: { token: string; projects: Project[]; onCreated: (project: Project) => void; onUpdated: (project: Project) => void }) {
+export function ProjectSetup({
+  token,
+  projects,
+  currentProjectId,
+  onCreated,
+  onUpdated,
+}: {
+  token: string;
+  projects: Project[];
+  currentProjectId?: string;
+  onCreated: (project: Project) => void;
+  onUpdated: (project: Project) => void;
+}) {
   const [name, setName] = useState("");
   const [client, setClient] = useState("");
   const [location, setLocation] = useState("");
@@ -47,32 +70,106 @@ export function ProjectSetup({ token, projects, onCreated, onUpdated }: { token:
   function edit(project: Project) {
     setEditingId(project.id); setName(project.name); setClient(project.client || ""); setLocation(project.location || ""); setReportTitle(project.report_title || ""); setError("");
   }
+  function reset() {
+    setEditingId(""); setName(""); setClient(""); setLocation(""); setReportTitle(""); setError("");
+  }
   async function update(event: React.FormEvent) {
     event.preventDefault();
     try {
       const project = await request(`/projects/${editingId}`, token, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, client, location, report_title: reportTitle }) });
-      onUpdated(project); setEditingId(""); setName(""); setClient(""); setLocation(""); setReportTitle(""); setError("");
+      onUpdated(project); reset(); setError("");
     } catch (cause) { setError((cause as Error).message); }
   }
-  return <section className="bg-white rounded-xl p-5 space-y-4">
-    <h1 className="text-xl font-semibold">Công trình</h1>
-    <ul className="divide-y rounded-lg border">{projects.map((project) => <li key={project.id} className="flex flex-wrap items-center justify-between gap-2 p-3"><span>{project.name}</span><button type="button" onClick={() => edit(project)} className="min-h-11 rounded border px-3 text-teal-900">Sửa thông tin</button></li>)}</ul>
-    <form onSubmit={editingId ? update : create} className="space-y-3 max-w-lg">
-      <h2 className="font-medium">{editingId ? "Thông tin công trình dùng cho báo cáo và nghiệm thu" : "Tạo công trình"}</h2>
-      <label className="block">Tên công trình<input className="mt-1 w-full border rounded p-2" value={name} onChange={(event) => setName(event.target.value)} required /></label>
-      <label className="block">Chủ đầu tư<input className="mt-1 w-full border rounded p-2" value={client} onChange={(event) => setClient(event.target.value)} /></label>
-      <label className="block">Địa điểm<input className="mt-1 w-full border rounded p-2" value={location} onChange={(event) => setLocation(event.target.value)} /></label>
-      <label className="block">Tiêu đề báo cáo (tùy chọn)<input className="mt-1 w-full border rounded p-2" value={reportTitle} onChange={(event) => setReportTitle(event.target.value)} /></label>
-      <div className="flex gap-2"><button className="min-h-11 bg-teal-700 text-white rounded px-4 py-2">Lưu</button>{editingId && <button type="button" className="min-h-11 rounded border px-4" onClick={() => { setEditingId(""); setName(""); setClient(""); setLocation(""); setReportTitle(""); }}>Hủy</button>}</div>
-    </form>
-    {error && <p role="alert" className="text-red-700">{error}</p>}
-  </section>;
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        eyebrow="Quản trị"
+        title="Công trình"
+        description="Thông tin công trình được dùng lại cho báo cáo ngày, phiếu yêu cầu nghiệm thu và biên bản nghiệm thu."
+      />
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(22rem,.9fr)] lg:items-start">
+        <section className="app-card app-card-pad">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-slate-950">Danh sách công trình</h2>
+              <p className="mt-1 text-xs text-slate-500">{projects.length} công trình đang quản lý</p>
+            </div>
+            <button type="button" className="app-button app-button-secondary px-3" onClick={reset}>
+              + Tạo mới
+            </button>
+          </div>
+          <div className="mt-4 space-y-2">
+            {projects.length === 0 && (
+              <p className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-600">
+                Chưa có công trình. Tạo công trình đầu tiên ở biểu mẫu bên cạnh.
+              </p>
+            )}
+            {projects.map((project) => {
+              const active = project.id === currentProjectId;
+              return (
+                <article
+                  key={project.id}
+                  className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border p-3.5 ${active ? "border-[#405e9b]/35 bg-[#405e9b]/5" : "border-slate-200 bg-white"}`}
+                >
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="font-semibold text-slate-900">{project.name}</h3>
+                      {active && <span className="app-badge border-[#405e9b]/25 bg-white text-[#35507f]">Đang chọn</span>}
+                    </div>
+                    <p className="mt-1 text-xs leading-5 text-slate-500">
+                      {project.client || "Chưa có chủ đầu tư"} · {project.location || "Chưa có địa điểm"}
+                    </p>
+                  </div>
+                  <button type="button" onClick={() => edit(project)} className="app-button app-button-secondary min-h-10 px-3">
+                    Sửa
+                  </button>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+
+        <section className="app-card app-card-pad lg:sticky lg:top-24">
+          <h2 className="text-base font-semibold text-slate-950">
+            {editingId ? "Sửa thông tin công trình" : "Tạo công trình"}
+          </h2>
+          <p className="mt-1 text-xs leading-5 text-slate-500">
+            Các trường này được điền sẵn vào báo cáo và phiếu nghiệm thu.
+          </p>
+          <form onSubmit={editingId ? update : create} className="mt-4 space-y-4">
+            <label className="app-label">
+              Tên công trình
+              <input className="app-input mt-1.5" value={name} onChange={(event) => setName(event.target.value)} required />
+            </label>
+            <label className="app-label">
+              Chủ đầu tư
+              <input className="app-input mt-1.5" value={client} onChange={(event) => setClient(event.target.value)} />
+            </label>
+            <label className="app-label">
+              Địa điểm
+              <input className="app-input mt-1.5" value={location} onChange={(event) => setLocation(event.target.value)} />
+            </label>
+            <label className="app-label">
+              Tiêu đề báo cáo <span className="font-normal text-slate-400">(tùy chọn)</span>
+              <input className="app-input mt-1.5" value={reportTitle} onChange={(event) => setReportTitle(event.target.value)} />
+            </label>
+            {error && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</p>}
+            <div className="flex flex-wrap gap-2">
+              <button className="app-button app-button-primary flex-1">{editingId ? "Lưu thay đổi" : "Tạo công trình"}</button>
+              {editingId && <button type="button" className="app-button app-button-secondary" onClick={reset}>Hủy</button>}
+            </div>
+          </form>
+        </section>
+      </div>
+    </div>
+  );
 }
 
 export function WorkItemList({ token, projectId }: { token: string; projectId: string }) {
   const [items, setItems] = useState<WorkItem[]>([]);
   const [preview, setPreview] = useState<PreviewItem[]>([]);
   const [name, setName] = useState("");
+  const [query, setQuery] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   useEffect(() => { request(`/projects/${projectId}/work-items`, token).then(setItems).catch((cause) => setError(cause.message)); }, [projectId, token]);
@@ -112,32 +209,167 @@ export function WorkItemList({ token, projectId }: { token: string; projectId: s
       setError("");
     } catch (cause) { setError((cause as Error).message); }
   }
-  const groups = groupWorkItems(items);
-  return <section className="bg-white rounded-xl p-5 space-y-4">
-    <h1 className="text-xl font-semibold">Danh mục công việc</h1>
-    <form onSubmit={createItem} className="grid gap-2 sm:grid-cols-[2fr_auto]">
-      <input className="border rounded p-2" aria-label="Tên công việc" placeholder="Tên công việc" value={name} onChange={(event) => setName(event.target.value)} required />
-      <button className="bg-teal-700 text-white rounded px-4 py-2">Thêm công việc</button>
-    </form>
-    <label className="block">Xem trước danh mục từ sheet DM của Excel<input type="file" accept=".xlsx" className="block mt-2" onChange={(event) => void previewFile(event.target.files?.[0])} /></label>
-    {preview.length > 0 && <div><p>{preview.length} dòng sẽ được nhập. Kiểm tra trước khi lưu.</p><ul className="max-h-56 overflow-y-auto list-disc pl-5">{preview.map((item) => <li key={item.source_row}>{item.name}</li>)}</ul><button disabled={saving} onClick={() => void importItems()} className="bg-teal-700 text-white rounded px-4 py-2 mt-2 disabled:opacity-50">Xác nhận nhập</button></div>}
-    {error && <p role="alert" className="text-red-700">{error}</p>}
-    {[...groups].map(([phase, named]) => <section key={phase} className="space-y-2">
-      <h2 className="font-semibold text-blue-900">{phase} · {named.size}</h2>
-      <ul className="divide-y rounded-lg border">{[...named].map(([key, matching]) => <li key={key} className="p-3">
-        <details>
-          <summary className="min-h-11 cursor-pointer font-semibold">{matching[0].name}<span className="ml-2 text-sm font-normal text-slate-600">{matching.length} hạng mục</span></summary>
-          <div className="mt-2 grid gap-2">{matching.map((item) => <label key={item.id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
-            <span>{item.component || item.location || "Chung"}</span>
-            <select aria-label={`Trạng thái ${item.name} ${item.component || item.location || "Chung"}`} className="min-h-11 rounded border p-2" value={item.status} onChange={(event) => void changeStatus(item, event.target.value)}>{Object.entries(workStatuses).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
-          </label>)}</div>
-        </details>
-      </li>)}</ul>
-    </section>)}
-  </section>;
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLocaleLowerCase("vi");
+    if (!needle) return items;
+    return items.filter((item) =>
+      [item.name, item.component, item.location, item.code].some((value) =>
+        (value || "").toLocaleLowerCase("vi").includes(needle),
+      ),
+    );
+  }, [items, query]);
+  const groups = groupWorkItems(filtered);
+  const completed = items.filter((item) => item.status === "completed").length;
+  const pending = items.filter((item) => item.status === "pending_acceptance").length;
+  const progress = items.length ? Math.round((completed / items.length) * 100) : 0;
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        eyebrow="Điều hành"
+        title="Danh mục công việc"
+        description="Theo dõi hạng mục theo giai đoạn thi công và cập nhật trạng thái ngay tại hiện trường."
+        actions={<span className="app-badge bg-white px-3 py-2 text-sm text-slate-700">{items.length} hạng mục</span>}
+      />
+      <div className="grid gap-3 sm:grid-cols-3">
+        {(
+          [
+            { label: "Tổng hạng mục", value: items.length, icon: WorkIcon, accent: "#405e9b" },
+            { label: "Hoàn thành", value: completed, icon: CheckCircleIcon, accent: "#15803d" },
+            { label: "Chờ nghiệm thu", value: pending, icon: ClockIcon, accent: "#b45309" },
+          ] satisfies Array<{
+            label: string;
+            value: number;
+            icon: typeof WorkIcon;
+            accent: string;
+          }>
+        ).map(({ label, value, icon: Icon, accent }) => (
+          <div key={label} className="app-kpi" style={{ "--kpi-accent": accent } as CSSProperties}>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</p>
+              <Icon className="h-4 w-4 text-slate-400" />
+            </div>
+            <p className="mt-1 text-2xl font-semibold tabular-nums text-slate-950">{value}</p>
+          </div>
+        ))}
+      </div>
+      <div className="app-card app-card-pad">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-900">Tiến độ danh mục</h2>
+            <p className="mt-1 text-xs text-slate-500">{completed}/{items.length} hạng mục đã hoàn thành</p>
+          </div>
+          <span className="text-lg font-semibold tabular-nums text-[#405e9b]">{progress}%</span>
+        </div>
+        <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100" role="progressbar" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100} aria-label="Tiến độ công việc">
+          <div className="h-full rounded-full bg-[#405e9b]" style={{ width: `${progress}%` }} />
+        </div>
+      </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <section className="app-card app-card-pad">
+          <h2 className="text-base font-semibold text-slate-950">Thêm công việc</h2>
+          <form onSubmit={createItem} className="mt-3 flex flex-col gap-2 sm:flex-row">
+            <input className="app-input" aria-label="Tên công việc" placeholder="Tên công việc mới" value={name} onChange={(event) => setName(event.target.value)} required />
+            <button className="app-button app-button-primary shrink-0">Thêm</button>
+          </form>
+        </section>
+        <section className="app-card app-card-pad">
+          <h2 className="text-base font-semibold text-slate-950">Nhập từ Excel</h2>
+          <p className="mt-1 text-xs leading-5 text-slate-500">Đọc sheet DM, xem trước rồi xác nhận nhập.</p>
+          <label className="mt-3 block">
+            <span className="sr-only">Chọn file Excel danh mục công việc</span>
+            <input type="file" accept=".xlsx" className="block w-full text-sm text-slate-600" onChange={(event) => void previewFile(event.target.files?.[0])} />
+          </label>
+        </section>
+      </div>
+      {preview.length > 0 && (
+        <section className="app-card app-card-pad">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold text-slate-900">{preview.length} dòng sẽ được nhập</h2>
+            <button disabled={saving} onClick={() => void importItems()} className="app-button app-button-primary min-h-10 px-3 disabled:opacity-50">
+              {saving ? "Đang nhập..." : "Xác nhận nhập"}
+            </button>
+          </div>
+          <ul className="mt-3 max-h-56 list-disc space-y-1 overflow-y-auto pl-5 text-sm text-slate-700">
+            {preview.map((item) => <li key={item.source_row}>{item.name}</li>)}
+          </ul>
+        </section>
+      )}
+      {error && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</p>}
+      <section className="app-card app-card-pad">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="text-base font-semibold text-slate-950">Hạng mục theo giai đoạn</h2>
+          <input className="app-input sm:max-w-xs" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Tìm công việc, cấu kiện..." aria-label="Tìm công việc" />
+        </div>
+        <div className="mt-4 space-y-3">
+          {[...groups].map(([phase, named]) => {
+            const phaseItems = [...named.values()].flat();
+            const phaseDone = phaseItems.filter((item) => item.status === "completed").length;
+            const phaseProgress = phaseItems.length ? Math.round((phaseDone / phaseItems.length) * 100) : 0;
+            return (
+              <details key={phase} className="rounded-xl border border-slate-200 bg-white">
+                <summary className="flex min-h-12 cursor-pointer list-none flex-wrap items-center justify-between gap-2 px-4 py-3 [&::-webkit-details-marker]:hidden">
+                  <div>
+                    <span className="font-semibold text-slate-900">{phase}</span>
+                    <span className="ml-2 text-xs text-slate-500">{named.size} công việc · {phaseItems.length} hạng mục</span>
+                  </div>
+                  <span className="text-xs font-medium text-slate-500">{phaseProgress}%</span>
+                </summary>
+                <div className="border-t border-slate-100 px-4 py-3">
+                  <div className="mb-3 h-1.5 overflow-hidden rounded-full bg-slate-100">
+                    <div className="h-full rounded-full bg-[#405e9b]" style={{ width: `${phaseProgress}%` }} />
+                  </div>
+                  <div className="space-y-2">
+                    {[...named].map(([key, matching]) => (
+                      <div key={key} className="rounded-lg bg-slate-50/70 p-3">
+                        <p className="text-sm font-medium text-slate-800">{matching[0].name}</p>
+                        <div className="mt-2 grid gap-2">
+                          {matching.map((item) => (
+                            <label key={item.id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                              <span className="min-w-0 text-slate-600">{item.component || item.location || "Chung"}</span>
+                              <select aria-label={`Trạng thái ${item.name} ${item.component || item.location || "Chung"}`} className="app-input min-h-10 w-auto py-1.5 text-xs" value={item.status} onChange={(event) => void changeStatus(item, event.target.value)}>
+                                {Object.entries(workStatuses).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                              </select>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </details>
+            );
+          })}
+          {filtered.length === 0 && <p className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-600">Không có hạng mục phù hợp.</p>}
+        </div>
+      </section>
+    </div>
+  );
 }
 
-export function Dashboard({ token, projectId, date }: { token: string; projectId: string; date: string }) {
+function formatDashboardDate(value: string): string {
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("vi-VN", {
+    weekday: "long",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(date);
+}
+
+export function Dashboard({
+  token,
+  projectId,
+  date,
+  project,
+  onNavigate,
+}: {
+  token: string;
+  projectId: string;
+  date: string;
+  project?: Project;
+  onNavigate?: (page: string) => void;
+}) {
   const [items, setItems] = useState<WorkItem[]>([]);
   const [photos, setPhotos] = useState<{ id: string; upload_time: string }[]>([]);
   const [report, setReport] = useState<{ report_date: string; manpower: { count: number | null }[] } | null>(null);
@@ -159,15 +391,130 @@ export function Dashboard({ token, projectId, date }: { token: string; projectId
     return () => { active = false; };
   }, [projectId, token, date]);
   const count = (status: string) => items.filter((item) => item.status === status).length;
+  const total = items.length;
+  const completed = count("completed");
+  const progress = total ? Math.round((completed / total) * 100) : 0;
+  const manpower = report ? report.manpower.reduce((sum, entry) => sum + (entry.count ?? 0), 0) : 0;
   const cards = [
-    ["Tổng công việc", items.length], ["Đang thi công", count("in_progress")],
-    ["Hoàn thành", count("completed")], ["Chờ nghiệm thu", count("pending_acceptance")],
-    ["Cần khắc phục", count("rectify")],
+    ["Tổng công việc", total, "Toàn bộ danh mục", "#405e9b"],
+    ["Đang thi công", count("in_progress"), "Cần theo dõi hôm nay", "#0369a1"],
+    ["Chờ nghiệm thu", count("pending_acceptance"), "Cần lập PYC/BBNT", "#b45309"],
+    ["Cần khắc phục", count("rectify"), "Ưu tiên xử lý", "#b91c1c"],
   ] as const;
-  return <section className="space-y-4">
-    <h1 className="text-xl font-semibold">Tổng quan</h1>
-    {error && <p role="alert" className="text-red-700">{error}</p>}
-    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">{cards.map(([label, value]) => <div key={label} className="bg-white rounded-xl p-4 shadow-sm"><p className="text-sm text-slate-600">{label}</p><strong className="text-2xl">{value}</strong></div>)}</div>
-    <div className="bg-white rounded-xl p-4 space-y-2"><p>Báo cáo ngày {date}: {report ? "Đã ghi" : "Chưa có"}</p><p>Nhân lực đã cập nhật: {report ? report.manpower.reduce((sum, entry) => sum + (entry.count ?? 0), 0) : "Chưa có báo cáo"}</p><p>Ảnh mới nhất: {photos[0]?.upload_time || "Chưa có"}</p></div>
-  </section>;
+  const quickActions = [
+    { label: "Báo cáo hiện trường", page: "daily-report", icon: CameraIcon, description: "Nhân lực, ảnh, nhật ký" },
+    { label: "Lập phiếu nghiệm thu", page: "acceptance", icon: AcceptanceIcon, description: "PYC và BBNT" },
+    { label: "Hỏi AI hồ sơ", page: "documents", icon: DocumentsIcon, description: "Tra cứu bản vẽ, thuyết minh" },
+    { label: "Cập nhật công việc", page: "work-items", icon: WorkIcon, description: "Trạng thái hạng mục" },
+  ];
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        eyebrow={project?.name || "Công trường"}
+        title="Tổng quan hôm nay"
+        description={`${formatDashboardDate(date)} · Nắm nhanh tiến độ, báo cáo và các việc cần xử lý.`}
+        actions={
+          onNavigate && (
+            <button type="button" className="app-button app-button-primary" onClick={() => onNavigate("daily-report")}>
+              <CameraIcon className="h-4 w-4" /> Cập nhật hiện trường
+            </button>
+          )
+        }
+      />
+      {error && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</p>}
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {cards.map(([label, value, hint, accent]) => (
+          <div key={label} className="app-kpi" style={{ "--kpi-accent": accent } as CSSProperties}>
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</p>
+            <p className="mt-1 text-3xl font-semibold tabular-nums tracking-tight text-slate-950">{value}</p>
+            <p className="mt-1 text-xs text-slate-500">{hint}</p>
+          </div>
+        ))}
+      </div>
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(20rem,.75fr)]">
+        <section className="app-card app-card-pad">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-base font-semibold text-slate-950">Tiến độ thi công</h2>
+              <p className="mt-1 text-xs text-slate-500">{completed}/{total} hạng mục hoàn thành</p>
+            </div>
+            <span className="text-2xl font-semibold tabular-nums text-[#405e9b]">{progress}%</span>
+          </div>
+          <div className="mt-4 h-2.5 overflow-hidden rounded-full bg-slate-100" role="progressbar" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100} aria-label="Tiến độ thi công">
+            <div className="h-full rounded-full bg-[#405e9b]" style={{ width: `${progress}%` }} />
+          </div>
+          <div className="mt-5 grid gap-2 sm:grid-cols-2">
+            {[
+              ["Đang thi công", count("in_progress"), "#0369a1"],
+              ["Chờ nghiệm thu", count("pending_acceptance"), "#b45309"],
+              ["Hoàn thành", completed, "#15803d"],
+              ["Cần khắc phục", count("rectify"), "#b91c1c"],
+            ].map(([label, value, accent]) => (
+              <div key={label as string} className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-2.5">
+                <span className="flex items-center gap-2 text-sm text-slate-600">
+                  <span className="h-2 w-2 rounded-full" style={{ background: accent as string }} aria-hidden="true" />
+                  {label as string}
+                </span>
+                <span className="font-semibold tabular-nums text-slate-900">{value as number}</span>
+              </div>
+            ))}
+          </div>
+          <div className="mt-5 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm leading-6 text-amber-950">
+            <AlertTriangleIcon className="mt-0.5 h-4 w-4 shrink-0" />
+            <p>Kiểm tra các hạng mục chờ nghiệm thu trước khi lập phiếu để tránh sai khối lượng hoặc vị trí.</p>
+          </div>
+        </section>
+        <div className="space-y-4">
+          <section className="app-card app-card-pad">
+            <h2 className="text-base font-semibold text-slate-950">Báo cáo ngày</h2>
+            <div className="mt-3 space-y-2 text-sm">
+              <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
+                <span className="text-slate-600">Trạng thái</span>
+                <span className={`font-semibold ${report ? "text-emerald-700" : "text-amber-700"}`}>{report ? "Đã ghi" : "Chưa có"}</span>
+              </div>
+              <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
+                <span className="text-slate-600">Nhân lực</span>
+                <span className="font-semibold tabular-nums text-slate-900">{report ? manpower : "—"}</span>
+              </div>
+              <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
+                <span className="text-slate-600">Ảnh mới nhất</span>
+                <span className="max-w-[10rem] truncate text-right text-xs text-slate-700">{photos[0]?.upload_time || "Chưa có"}</span>
+              </div>
+            </div>
+            {onNavigate && (
+              <button type="button" className="app-button app-button-secondary mt-3 w-full" onClick={() => onNavigate("daily-report")}>
+                Mở báo cáo hôm nay <ArrowRightIcon className="h-4 w-4" />
+              </button>
+            )}
+          </section>
+          <section className="app-card app-card-pad">
+            <h2 className="text-base font-semibold text-slate-950">Việc nhanh</h2>
+            <div className="mt-3 space-y-2">
+              {quickActions.map((action) => {
+                const ActionIcon = action.icon;
+                return (
+                  <button
+                    key={action.page}
+                    type="button"
+                    className="flex w-full items-center gap-3 rounded-xl border border-slate-200 bg-white p-3 text-left transition-colors hover:border-[#405e9b]/35 hover:bg-[#405e9b]/5"
+                    onClick={() => onNavigate?.(action.page)}
+                    disabled={!onNavigate}
+                  >
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#405e9b]/10 text-[#405e9b]">
+                      <ActionIcon className="h-4 w-4" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-semibold text-slate-800">{action.label}</span>
+                      <span className="block text-xs text-slate-500">{action.description}</span>
+                    </span>
+                    <ArrowRightIcon className="h-4 w-4 shrink-0 text-slate-400" />
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  );
 }

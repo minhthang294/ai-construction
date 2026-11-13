@@ -1,0 +1,239 @@
+{
+  "page_number": 22,
+  "document_name": "bản vẽ scan_1.pdf",
+  "model": "manual-visual-review",
+  "prompt_version": "golden-2026-11-12",
+  "mode": "manual",
+  "confidence": 1.0,
+  "warnings": [
+    "Các giá trị khối lượng là ô đọc trực tiếp trong bảng khối lượng 1 cọc tại cột L1=0,2m / Cầu chính / t=1cm; liên kết với H77 qua dòng thống kê p22 và danh tính p7. Không coi trang 22 một mình là nguồn định danh H77 cho các ô khối lượng."
+  ],
+  "verify_note": "Visual check p22: H77 trực tiếp trong bảng thống kê nhóm I (Loại 1, Cầu chính, 1 cọc, L1=0,2m, t=1cm). Bảng khối lượng nhóm I: dòng 1 = 0,003 m3; dòng 4 = 1,280 m2; dòng 6 = 0,304 m2 tại cột L1=0,2m / Cầu chính / t=1cm. Đây là provenance joined, không phải câu “H77” in trong bảng khối lượng.",
+  "evidence": {
+    "source_pdf": "/home/thangpham/Downloads/bản vẽ scan_1.pdf",
+    "crops": [
+      "p22-header.png",
+      "p22-table.png",
+      "p22-khoiluong.png",
+      "p22-khoiluong-view.png",
+      "p22-titleblock.png"
+    ],
+    "table_titles": [
+      "BẢNG THỐNG KÊ CỌC HƯ HỎNG NHÓM I",
+      "BẢNG KHỐI LƯỢNG NHÓM I"
+    ],
+    "sheet_number_quote": "TK-16",
+    "direct_vs_joined": "H77, Loại 1, Cầu chính, L1, t đọc trực tiếp trên dòng thống kê p22; L1/t là ô gộp. Thể tích/mài/keo là ô trực tiếp trong bảng khối lượng nhưng liên kết H77 là joined qua cấu hình cột + dòng thống kê p22 + p7.",
+    "identity_pages": [
+      7,
+      22
+    ]
+  },
+  "extraction": {
+    "page_type": "table",
+    "title": "BẢNG THỐNG KÊ CỌC HƯ HỎNG NHÓM I; BẢNG KHỐI LƯỢNG NHÓM I",
+    "drawing_number": "TK-16",
+    "revision": null,
+    "summary": "Trang 22 (TK-16) có dòng H77 trực tiếp trong BẢNG THỐNG KÊ CỌC HƯ HỎNG NHÓM I: Loại 1, Cầu chính, 1 cọc, L1 = 0,2m, t = 1cm. BẢNG KHỐI LƯỢNG NHÓM I ghi tại cột L1=0,2m / Cầu chính / t=1cm: thể tích đục 0,003 m3; mài phẳng 1,280 m2; quét keo epoxy 0,304 m2. Các ô khối lượng không tự nêu mã H77; liên kết H77 là joined qua dòng thống kê p22 và danh tính p7.",
+    "key_values": [],
+    "table_rows": [
+      [
+        "Loại",
+        "Vị trí",
+        "Tên cọc",
+        "Số cọc",
+        "L1 (m)",
+        "t (cm)"
+      ],
+      [
+        "Loại 1",
+        "Cầu chính",
+        "H77",
+        "1",
+        "0,2",
+        "1"
+      ]
+    ],
+    "warnings": [
+      "Các giá trị khối lượng là ô đọc trực tiếp trong bảng khối lượng 1 cọc tại cột L1=0,2m / Cầu chính / t=1cm; liên kết với H77 qua dòng thống kê p22 và danh tính p7. Không coi trang 22 một mình là nguồn định danh H77 cho các ô khối lượng."
+    ],
+    "confidence": 1.0,
+    "component_facts": [
+      {
+        "component_type": "pile",
+        "component_code": "H77",
+        "fact_name": "phân loại",
+        "value": "Loại 1",
+        "unit": "loại",
+        "quote": "Loại 1",
+        "group": "1",
+        "segment": "2",
+        "location": "Cầu chính",
+        "table_row": 1,
+        "table_column": "Loại",
+        "evidence_kind": "direct",
+        "source_page": 22,
+        "source_quote": "Loại 1",
+        "source_row": 1,
+        "source_column": "Loại",
+        "source_table": "BẢNG THỐNG KÊ CỌC HƯ HỎNG NHÓM I",
+        "source_sheet": "TK-16",
+        "join_note": "Đọc trực tiếp dòng H77; Nhóm I từ tiêu đề bảng, Phân đoạn 2 từ p7.",
+        "identity_pages": [
+          7,
+          22
+        ]
+      },
+      {
+        "component_type": "pile",
+        "component_code": "H77",
+        "fact_name": "vị trí",
+        "value": "Cầu chính",
+        "unit": "vị trí",
+        "quote": "Cầu chính",
+        "group": "1",
+        "segment": "2",
+        "location": "Cầu chính",
+        "table_row": 1,
+        "table_column": "Vị trí",
+        "evidence_kind": "direct",
+        "source_page": 22,
+        "source_quote": "Cầu chính",
+        "source_row": 1,
+        "source_column": "Vị trí",
+        "source_table": "BẢNG THỐNG KÊ CỌC HƯ HỎNG NHÓM I",
+        "source_sheet": "TK-16",
+        "join_note": "Đọc trực tiếp dòng H77; Phân đoạn 2 lấy từ p7.",
+        "identity_pages": [
+          7,
+          22
+        ]
+      },
+      {
+        "component_type": "pile",
+        "component_code": "H77",
+        "fact_name": "chiều dài sửa",
+        "value": "0.2",
+        "unit": "m",
+        "quote": "0,2",
+        "group": "1",
+        "segment": "2",
+        "location": "Cầu chính",
+        "table_row": 1,
+        "table_column": "L1 (m)",
+        "evidence_kind": "joined",
+        "source_page": 22,
+        "source_quote": "0,2",
+        "source_row": 1,
+        "source_column": "L1 (m)",
+        "source_table": "BẢNG THỐNG KÊ CỌC HƯ HỎNG NHÓM I",
+        "source_sheet": "TK-16",
+        "join_note": "Ô L1 = 0,2m là ô gộp cho H77 và M299/M297; dòng H77 xác nhận áp dụng. Danh tính H77 lấy từ p7 + dòng thống kê p22.",
+        "identity_pages": [
+          7,
+          22
+        ]
+      },
+      {
+        "component_type": "pile",
+        "component_code": "H77",
+        "fact_name": "chiều sâu đục",
+        "value": "1",
+        "unit": "cm",
+        "quote": "1",
+        "group": "1",
+        "segment": "2",
+        "location": "Cầu chính",
+        "table_row": 1,
+        "table_column": "t (cm)",
+        "evidence_kind": "joined",
+        "source_page": 22,
+        "source_quote": "1",
+        "source_row": 1,
+        "source_column": "t (cm)",
+        "source_table": "BẢNG THỐNG KÊ CỌC HƯ HỎNG NHÓM I",
+        "source_sheet": "TK-16",
+        "join_note": "Ô t = 1cm là ô gộp cho H77 và M299/M297; dòng H77 xác nhận áp dụng. Danh tính H77 lấy từ p7 + dòng thống kê p22.",
+        "identity_pages": [
+          7,
+          22
+        ]
+      },
+      {
+        "component_type": "pile",
+        "component_code": "H77",
+        "fact_name": "thể tích đục",
+        "value": "0.003",
+        "unit": "m3",
+        "quote": "0,003",
+        "group": "1",
+        "segment": "2",
+        "location": "Cầu chính",
+        "table_row": 1,
+        "table_column": "Khối lượng 1 cọc / L1 = 0,2m / Cầu chính / t = 1cm",
+        "evidence_kind": "joined",
+        "source_page": 22,
+        "source_quote": "0,003",
+        "source_row": 1,
+        "source_column": "Khối lượng 1 cọc / L1 = 0,2m / Cầu chính / t = 1cm",
+        "source_table": "BẢNG KHỐI LƯỢNG NHÓM I",
+        "source_sheet": "TK-16",
+        "join_note": "Giá trị đọc trực tiếp tại ô dòng 1, cột L1=0,2m / Cầu chính / t=1cm; liên kết H77 qua dòng thống kê p22 (H77, Cầu chính, L1=0,2m, t=1cm) và danh tính p7 (Nhóm 1, Phân đoạn 2). Trang 22 một mình không định danh H77 cho bảng khối lượng.",
+        "identity_pages": [
+          7,
+          22
+        ]
+      },
+      {
+        "component_type": "pile",
+        "component_code": "H77",
+        "fact_name": "diện tích mài phẳng",
+        "value": "1.280",
+        "unit": "m2",
+        "quote": "1,280",
+        "group": "1",
+        "segment": "2",
+        "location": "Cầu chính",
+        "table_row": 4,
+        "table_column": "Khối lượng 1 cọc / L1 = 0,2m / Cầu chính / t = 1cm",
+        "evidence_kind": "joined",
+        "source_page": 22,
+        "source_quote": "1,280",
+        "source_row": 4,
+        "source_column": "Khối lượng 1 cọc / L1 = 0,2m / Cầu chính / t = 1cm",
+        "source_table": "BẢNG KHỐI LƯỢNG NHÓM I",
+        "source_sheet": "TK-16",
+        "join_note": "Giá trị đọc trực tiếp tại ô dòng 4 (Mài tạo phẳng và vệ sinh bề mặt cọc), cột L1=0,2m / Cầu chính / t=1cm; liên kết H77 qua dòng thống kê p22 và danh tính p7. Trang 22 một mình không định danh H77 cho bảng khối lượng.",
+        "identity_pages": [
+          7,
+          22
+        ]
+      },
+      {
+        "component_type": "pile",
+        "component_code": "H77",
+        "fact_name": "diện tích quét keo epoxy",
+        "value": "0.304",
+        "unit": "m2",
+        "quote": "0,304",
+        "group": "1",
+        "segment": "2",
+        "location": "Cầu chính",
+        "table_row": 6,
+        "table_column": "Khối lượng 1 cọc / L1 = 0,2m / Cầu chính / t = 1cm",
+        "evidence_kind": "joined",
+        "source_page": 22,
+        "source_quote": "0,304",
+        "source_row": 6,
+        "source_column": "Khối lượng 1 cọc / L1 = 0,2m / Cầu chính / t = 1cm",
+        "source_table": "BẢNG KHỐI LƯỢNG NHÓM I",
+        "source_sheet": "TK-16",
+        "join_note": "Giá trị đọc trực tiếp tại ô dòng 6 (Quét keo epoxy HM-180C3P), cột L1=0,2m / Cầu chính / t=1cm; liên kết H77 qua dòng thống kê p22 và danh tính p7. Trang 22 một mình không định danh H77 cho bảng khối lượng.",
+        "identity_pages": [
+          7,
+          22
+        ]
+      }
+    ]
+  }
+}

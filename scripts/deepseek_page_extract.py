@@ -45,6 +45,15 @@ SCHEMA = {
     "key_values": [
         {"name": "string", "value": "string", "unit": "string|null", "quote": "string"}
     ],
+    "component_facts": [
+        {
+            "component_type": "pile|beam", "component_code": "string",
+            "fact_name": "string", "value": "string|number", "unit": "string",
+            "quote": "string", "group": "string|null", "segment": "string|null",
+            "location": "string|null", "table_row": "integer|null",
+            "table_column": "string|integer|null",
+        }
+    ],
     "table_rows": [["string"]],
     "warnings": ["string"],
     "confidence": "number 0..1",
@@ -64,6 +73,13 @@ Trả về DUY NHẤT một JSON object, không markdown, không giải thích, 
   "key_values": [
     {"name": string, "value": string, "unit": string | null, "quote": string}
   ],
+  "component_facts": [
+    {"component_type": "pile" | "beam", "component_code": string,
+     "fact_name": string, "value": string | number, "unit": string,
+     "quote": string, "group": string | null, "segment": string | null,
+     "location": string | null, "table_row": number | null,
+     "table_column": string | number | null}
+  ],
   "table_rows": [[string]],
   "warnings": [string],
   "confidence": number
@@ -75,6 +91,8 @@ Quy tắc:
 - Không tự tạo tên người, chữ ký, số hiệu bản vẽ, revision hoặc kích thước.
 - Nếu trang là bìa/danh mục, dùng page_type "text" hoặc "other".
 - Nếu trang có bảng, đưa các hàng nhìn thấy vào `table_rows` (tối đa 50 hàng).
+- Với cọc/dầm có mã nhìn thấy rõ, ghi từng kích thước hoặc khối lượng vào `component_facts`; giữ đúng mã, đơn vị, nhóm/phân đoạn/vị trí và chỉ số hàng/cột trong bảng. Nếu ô gộp xác định phân đoạn/nhóm, đọc ranh giới ô gộp trước khi gán các dòng. Không gán mã hoặc phân đoạn từ vùng ngoài ảnh đang đọc.
+- Không tự tính khối lượng trong bước trích xuất. Nếu không nhìn thấy mã cấu kiện hoặc không chắc cột nào ứng với số, bỏ fact đó và ghi warning.
 - `confidence` là mức tin cậy của bạn vào toàn bộ kết quả, từ 0 đến 1.
 """
 
@@ -462,6 +480,11 @@ def _validate(value: dict[str, Any]) -> list[str]:
     confidence = value.get("confidence")
     if not isinstance(confidence, (int, float)) or not 0 <= confidence <= 1:
         problems.append("confidence is not a number in 0..1")
+    if "component_facts" in value:
+        problems.extend(
+            error for error in validate_extraction(value)
+            if error.startswith("component_facts")
+        )
     return problems
 
 

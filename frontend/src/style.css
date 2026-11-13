@@ -1,4 +1,5 @@
 @import "tailwindcss";
+
 @theme {
   --color-teal-50: #eff4fc;
   --color-teal-100: #dbe6f7;
@@ -7,6 +8,238 @@
   --color-teal-900: #253e6d;
   --color-red-600: #e5322c;
 }
-body { margin: 0; font-family: system-ui, sans-serif; }
-button, select, input { font: inherit; }
-button:focus-visible, select:focus-visible, input:focus-visible, a:focus-visible { outline: 3px solid #e5322c; outline-offset: 2px; }
+html {
+  -webkit-text-size-adjust: 100%;
+}
+body {
+  margin: 0;
+  min-width: 320px;
+  background: #f5f7fb;
+  color: #0f172a;
+  font-family: "Be Vietnam Pro", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont,
+    "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  font-feature-settings: "kern", "liga";
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+button,
+select,
+input,
+textarea {
+  font: inherit;
+}
+button,
+[role="button"],
+summary {
+  cursor: pointer;
+  touch-action: manipulation;
+}
+button:focus-visible,
+select:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+a:focus-visible {
+  outline: 3px solid #e5322c;
+  outline-offset: 2px;
+}
+::selection {
+  background: #405e9b;
+  color: #fff;
+}
+
+/* Shared application primitives. Feature pages can adopt these gradually. */
+@layer components {
+.app-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 1rem;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+.app-card-pad {
+  padding: 1rem;
+}
+.app-button {
+  display: inline-flex;
+  min-height: 2.75rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 0.75rem;
+  padding: 0.625rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.25rem;
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease,
+    color 180ms ease,
+    box-shadow 180ms ease;
+}
+.app-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.app-button-primary {
+  border: 1px solid #405e9b;
+  background: #405e9b;
+  color: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+.app-button-primary:hover:not(:disabled) {
+  background: #344c7e;
+  border-color: #344c7e;
+}
+.app-button-secondary {
+  border: 1px solid #d7dee9;
+  background: #fff;
+  color: #334155;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+.app-button-secondary:hover:not(:disabled) {
+  border-color: #9fb0cd;
+  background: #f8fafc;
+  color: #304b80;
+}
+.app-button-ghost {
+  border: 1px solid transparent;
+  background: transparent;
+  color: #475569;
+}
+.app-button-ghost:hover:not(:disabled) {
+  background: #f1f5f9;
+  color: #253e6d;
+}
+.app-button-danger {
+  border: 1px solid #fecaca;
+  background: #fff;
+  color: #b91c1c;
+}
+.app-button-danger:hover:not(:disabled) {
+  background: #fef2f2;
+}
+.app-input {
+  min-height: 2.75rem;
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.75rem;
+  background: #fff;
+  padding: 0.625rem 0.75rem;
+  color: #0f172a;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+}
+.app-input::placeholder {
+  color: #94a3b8;
+}
+.app-input:focus {
+  border-color: #405e9b;
+  box-shadow: 0 0 0 3px rgba(64, 94, 155, 0.16);
+  outline: none;
+}
+.app-label {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #334155;
+}
+.app-help {
+  font-size: 0.75rem;
+  line-height: 1.25rem;
+  color: #64748b;
+}
+.app-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: 999px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  padding: 0.125rem 0.5rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: #475569;
+}
+.app-kpi {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  border-radius: 1rem;
+  background: #fff;
+  padding: 1rem;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+.app-kpi::after {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  content: "";
+  background: var(--kpi-accent, #405e9b);
+}
+.app-scrollbar {
+  scrollbar-color: #cbd5e1 transparent;
+  scrollbar-width: thin;
+}
+.app-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.app-scrollbar::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: #cbd5e1;
+}
+.app-skip-link {
+  position: fixed;
+  z-index: 100;
+  top: 0.75rem;
+  left: 0.75rem;
+  transform: translateY(-200%);
+  border-radius: 0.5rem;
+  background: #0f172a;
+  padding: 0.75rem 1rem;
+  color: #fff;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+.app-skip-link:focus {
+  transform: translateY(0);
+}
+.app-nav-item {
+  display: flex;
+  min-height: 2.75rem;
+  width: 100%;
+  align-items: center;
+  gap: 0.75rem;
+  border-radius: 0.75rem;
+  padding: 0.625rem 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #475569;
+  transition:
+    background-color 160ms ease,
+    color 160ms ease;
+}
+.app-nav-item:hover {
+  background: #f1f5f9;
+  color: #253e6d;
+}
+.app-nav-item[aria-current="page"] {
+  background: #405e9b;
+  color: #fff;
+  box-shadow: 0 6px 16px rgba(64, 94, 155, 0.22);
+}
+}
+
+@media (min-width: 640px) {
+  .app-card-pad {
+    padding: 1.25rem;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

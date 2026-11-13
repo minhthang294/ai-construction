@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { CloseIcon, KeyIcon } from "./AppIcons";
 
 type Props = {
   token: string;
@@ -95,7 +96,8 @@ export default function ChangePasswordDialog({
       >
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h2 id="change-password-title" className="text-lg font-semibold">
+            <h2 id="change-password-title" className="flex items-center gap-2 text-lg font-semibold">
+              <KeyIcon className="h-5 w-5 text-[#405e9b]" />
               Đổi mật khẩu
             </h2>
             <p className="mt-1 text-xs text-slate-500">
@@ -105,12 +107,12 @@ export default function ChangePasswordDialog({
           </div>
           <button
             type="button"
-            className="min-h-9 rounded-lg px-2 text-sm text-slate-600 disabled:opacity-50"
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 disabled:opacity-50"
             aria-label="Đóng"
             disabled={submitting}
             onClick={onClose}
           >
-            ✕
+            <CloseIcon className="h-4 w-4" />
           </button>
         </div>
 
@@ -121,7 +123,7 @@ export default function ChangePasswordDialog({
               type="password"
               autoComplete="current-password"
               autoFocus
-              className="mt-1 min-h-11 w-full rounded-lg border border-slate-300 px-3 text-base"
+              className="app-input mt-1"
               value={currentPassword}
               disabled={submitting}
               onChange={(event) => setCurrentPassword(event.target.value)}
@@ -134,7 +136,7 @@ export default function ChangePasswordDialog({
               type="password"
               autoComplete="new-password"
               minLength={12}
-              className="mt-1 min-h-11 w-full rounded-lg border border-slate-300 px-3 text-base"
+              className="app-input mt-1"
               value={newPassword}
               disabled={submitting}
               onChange={(event) => setNewPassword(event.target.value)}
@@ -147,7 +149,7 @@ export default function ChangePasswordDialog({
               type="password"
               autoComplete="new-password"
               minLength={12}
-              className="mt-1 min-h-11 w-full rounded-lg border border-slate-300 px-3 text-base"
+              className="app-input mt-1"
               value={confirmPassword}
               disabled={submitting}
               onChange={(event) => setConfirmPassword(event.target.value)}
@@ -156,7 +158,7 @@ export default function ChangePasswordDialog({
           </label>
 
           {error && (
-            <p role="alert" className="rounded-lg bg-red-50 p-2 text-sm text-red-700">
+            <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">
               {error}
             </p>
           )}
@@ -164,7 +166,7 @@ export default function ChangePasswordDialog({
           <div className="flex gap-2 pt-1">
             <button
               type="button"
-              className="min-h-11 flex-1 rounded-lg border border-slate-300 px-3 text-sm font-medium text-slate-700 disabled:opacity-50"
+              className="app-button app-button-secondary flex-1"
               disabled={submitting}
               onClick={onClose}
             >
@@ -172,7 +174,7 @@ export default function ChangePasswordDialog({
             </button>
             <button
               type="submit"
-              className="min-h-11 flex-1 rounded-lg bg-teal-700 px-3 text-sm font-semibold text-white disabled:opacity-60"
+              className="app-button app-button-primary flex-1"
               disabled={submitting}
             >
               {submitting ? "Đang đổi…" : "Đổi mật khẩu"}

@@ -194,7 +194,7 @@ function EngineeringAIProjectPage({ projectId }: Props) {
   }
 
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-4 sm:space-y-5">
+    <div className="w-full space-y-4 sm:space-y-5">
       <header className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="flex h-1.5" aria-hidden="true">
           <span className="w-4/5 bg-[#405e9b]" />

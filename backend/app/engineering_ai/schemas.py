@@ -155,6 +155,13 @@ class ChatRequest(BaseModel):
     vision: bool = False
 
 
+class PageActionOut(BaseModel):
+    document_id: str
+    page_id: Optional[str] = None
+    page_number: int
+    label: str = ""
+
+
 class ChatResponse(BaseModel):
     conversation_id: str
     message_index: int
@@ -165,6 +172,7 @@ class ChatResponse(BaseModel):
     warnings: List[str] = Field(default_factory=list)
     vision_used: bool = False
     vision_note: Optional[str] = None
+    page_action: Optional[PageActionOut] = None
 
 
 class ConversationMessageOut(BaseModel):

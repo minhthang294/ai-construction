@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from . import fts, storage, vector_store
 from .chunking import chunk_text, chunk_text_with_sections
+from .component_chat import answer_component_query, parse_component_query
 from .constants import (
     CROSS_REFERENCE_DISCLAIMER,
     CROSS_REFERENCE_NO_FINDING,
@@ -46,6 +47,7 @@ from .models import (
 )
 from .ocr import OcrEngine
 from .page_extraction import validate_extraction
+from .page_navigation import answer_page_navigation
 from .providers import (
     AnswerProvider,
     ExtractiveProvider,
@@ -754,6 +756,11 @@ def run_ingest_job(
         document = db.get(SourceDocument, document_id)
         if document is None or document.project_id != project_id:
             return
+        had_ready_index = bool(
+            document.page_count
+            and db.scalar(select(DocumentChunk.id).where(DocumentChunk.document_id == document.id))
+            and db.scalar(select(DocumentPage.id).where(DocumentPage.document_id == document.id))
+        )
         try:
             if status_hook:
                 status_hook("pending")
@@ -765,6 +772,19 @@ def run_ingest_job(
                 status_hook("running")
             db.commit()
 
+            source_path = Path(document.original_path)
+            if storage.sha256_bytes(source_path.read_bytes()) != document.sha256:
+                raise ExtractionError("PDF gốc đã thay đổi; cần tải lên như phiên bản mới.")
+            old_pages = {
+                page.page_number: page
+                for page in db.scalars(
+                    select(DocumentPage).where(DocumentPage.document_id == document.id)
+                ).all()
+            }
+            old_render_hashes = {
+                number: _page_sha256(page, project_id)
+                for number, page in old_pages.items()
+            }
             extraction = extract_document(
                 Path(document.original_path),
                 project_id,
@@ -791,30 +811,60 @@ def run_ingest_job(
                 delete(DocumentEmbedding).where(DocumentEmbedding.document_id == document.id)
             )
             db.execute(delete(DocumentChunk).where(DocumentChunk.document_id == document.id))
-            db.execute(delete(DocumentPage).where(DocumentPage.document_id == document.id))
+            existing_pages = {
+                page.page_number: page
+                for page in db.scalars(
+                    select(DocumentPage).where(DocumentPage.document_id == document.id)
+                ).all()
+            }
+            extracted_numbers = {page.page_number for page in extraction.pages}
+            for page_number, old_page in existing_pages.items():
+                if page_number not in extracted_numbers:
+                    if db.scalar(select(PageExtraction.id).where(PageExtraction.page_id == old_page.id)):
+                        raise ExtractionError(
+                            f"Trang {page_number} đã biến mất nhưng có dữ kiện trích xuất; cần xử lý thủ công."
+                        )
+                    db.delete(old_page)
             db.flush()
             if fts.ensure_fts(db):
                 fts.delete_document_rows(db, document.id)
 
             for extracted in extraction.pages:
-                page = DocumentPage(
-                    project_id=project_id,
-                    document_id=document.id,
-                    page_number=extracted.page_number,
-                    rendered_path=extracted.rendered_path,
-                    text=extracted.text,
-                    ocr_text=extracted.ocr_text,
-                    tables_json=json.dumps(extracted.tables, ensure_ascii=False),
-                    ocr_confidence=extracted.ocr_confidence,
-                    extraction_method=extracted.extraction_method,
-                    drawing_number=extracted.drawing_number,
-                    revision=extracted.revision,
-                    width=extracted.width,
-                    height=extracted.height,
-                    needs_review=extracted.needs_review,
-                    warnings_json=json.dumps(extracted.warnings, ensure_ascii=False),
-                )
-                db.add(page)
+                page = existing_pages.get(extracted.page_number)
+                if page is None:
+                    page = DocumentPage(
+                        project_id=project_id,
+                        document_id=document.id,
+                        page_number=extracted.page_number,
+                    )
+                    db.add(page)
+                elif (
+                    page.text != extracted.text
+                    or page.tables_json != json.dumps(extracted.tables, ensure_ascii=False)
+                    or old_render_hashes.get(extracted.page_number)
+                    != (
+                        storage.sha256_bytes(Path(extracted.rendered_path).read_bytes())
+                        if extracted.rendered_path else None
+                    )
+                ):
+                    # A changed source text needs a fresh engineer review.
+                    db.execute(
+                        update(PageExtraction)
+                        .where(PageExtraction.page_id == page.id)
+                        .values(status="proposed", verified_by=None, verified_at=None, verify_note=None)
+                    )
+                page.rendered_path = extracted.rendered_path
+                page.text = extracted.text
+                page.ocr_text = extracted.ocr_text
+                page.tables_json = json.dumps(extracted.tables, ensure_ascii=False)
+                page.ocr_confidence = extracted.ocr_confidence
+                page.extraction_method = extracted.extraction_method
+                page.drawing_number = extracted.drawing_number
+                page.revision = extracted.revision
+                page.width = extracted.width
+                page.height = extracted.height
+                page.needs_review = extracted.needs_review
+                page.warnings_json = json.dumps(extracted.warnings, ensure_ascii=False)
                 db.flush()
 
             document.page_count = extraction.page_count
@@ -912,7 +962,7 @@ def run_ingest_job(
             db.rollback()
             failed = db.get(SourceDocument, document_id)
             if failed is not None:
-                failed.status = "failed"
+                failed.status = "ready" if had_ready_index else "failed"
                 failed.ingest_finished_at = _now()
                 message = str(exc) if isinstance(exc, ExtractionError) else (
                     f"Không thể xử lý PDF ({type(exc).__name__})."
@@ -1582,26 +1632,50 @@ def ask(
         if conversation is None:
             raise LookupError("Hội thoại không thuộc công trình này.")
 
-    results = search_chunks(
-        db, project_id, message, top_k, embedding_provider, scope=scope
-    )
-    warnings: List[str] = [UNVERIFIED_KB_NOTE]
-    if results:
-        answer, used, provider_warnings = _grounded_answer(provider, message, results)
-        warnings.extend(provider_warnings)
-        warnings.extend(answer.warnings)
+    page_action = None
+    warnings: List[str] = []
+    navigation = answer_page_navigation(db, project_id, message, scope)
+    if navigation is not None:
+        answer = navigation.answer
+        citations = navigation.citations
+        warnings = list(navigation.warnings)
+        no_source = navigation.no_source
+        confidence = navigation.confidence
+        page_action = navigation.page_action
+        used = []
     else:
-        answer = ProviderAnswer(text=NO_SOURCE_ANSWER)
-        used = []
+        component_query = parse_component_query(message)
+        if component_query is not None:
+            answer, citations, component_warnings, no_source, confidence = (
+                answer_component_query(
+                    db, project_id, message, component_query, scope
+                )
+            )
+            warnings.extend(component_warnings)
+            used = []
+        else:
+            warnings = [UNVERIFIED_KB_NOTE]
+            results = search_chunks(
+                db, project_id, message, top_k, embedding_provider, scope=scope
+            )
+            if results:
+                answer, used, provider_warnings = _grounded_answer(
+                    provider, message, results
+                )
+                warnings.extend(provider_warnings)
+                warnings.extend(answer.warnings)
+            else:
+                answer = ProviderAnswer(text=NO_SOURCE_ANSWER)
+                used = []
 
-    no_source = answer.text.strip() == NO_SOURCE_ANSWER
-    if no_source:
-        used = []
-    low_ocr = low_confidence_citations(used, LOW_OCR_THRESHOLD)
-    if low_ocr:
-        warnings.append(LOW_OCR_WARNING)
-    citations = [citation_to_out(result) for result in used]
-    confidence = 0.0 if no_source else _confidence(used, low_ocr)
+            no_source = answer.text.strip() == NO_SOURCE_ANSWER
+            if no_source:
+                used = []
+            low_ocr = low_confidence_citations(used, LOW_OCR_THRESHOLD)
+            if low_ocr:
+                warnings.append(LOW_OCR_WARNING)
+            citations = [citation_to_out(result) for result in used]
+            confidence = 0.0 if no_source else _confidence(used, low_ocr)
     vision_used = False
     vision_note = None
     if use_vision and used:
@@ -1675,6 +1749,7 @@ def ask(
         warnings=warnings,
         vision_used=vision_used,
         vision_note=vision_note,
+        page_action=page_action,
     )
 
 

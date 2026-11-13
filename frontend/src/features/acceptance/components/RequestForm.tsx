@@ -1,10 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { getDailyReportByDate } from "../lib/api";
 import { shouldMarkSaved } from "../lib/formGuard";
-import {
-  mergeProjectMetadata,
-  projectMetadataDefaults,
-} from "../lib/projectPrefill";
+import { mergeProjectMetadata } from "../lib/projectPrefill";
+import { buildRequestDefaults } from "../lib/requestPrefill";
 import {
   buildWorkItemOptions,
   findWorkItemOption,
@@ -27,6 +25,8 @@ type Props = {
   projectId: string;
   project?: ProjectContext | null;
   initial?: AcceptanceRequest | null;
+  /** Last saved PYC used only when creating a new request. */
+  previousRequest?: AcceptanceRequest | null;
   dailyReport?: LinkedDailyReport | null;
   profiles?: ParticipantProfile[];
   /** Project work-item catalog; empty/error simply keeps free-text input. */
@@ -92,9 +92,10 @@ const BLANK: FormState = {
 function toForm(
   request?: AcceptanceRequest | null,
   project?: ProjectContext | null,
+  previous?: AcceptanceRequest | null,
 ): FormState {
   if (!request) {
-    return { ...BLANK, ...projectMetadataDefaults(project) };
+    return { ...BLANK, ...buildRequestDefaults(previous, project) };
   }
   return mergeProjectMetadata(
     {
@@ -135,6 +136,7 @@ export default function RequestForm({
   projectId,
   project,
   initial,
+  previousRequest,
   dailyReport,
   profiles = [],
   workItems = [],
@@ -143,7 +145,9 @@ export default function RequestForm({
   onDirtyChange,
   submitting = false,
 }: Props) {
-  const [form, setForm] = useState<FormState>(() => toForm(initial, project));
+  const [form, setForm] = useState<FormState>(() =>
+    toForm(initial, project, previousRequest),
+  );
   const [error, setError] = useState<string | null>(null);
   const [dailyReportDate, setDailyReportDate] = useState(dailyReport?.report_date ?? "");
   const [linkedReport, setLinkedReport] = useState<LinkedDailyReport | null>(
@@ -162,7 +166,7 @@ export default function RequestForm({
     findWorkItemOption(contentOptions, form.content)?.name ?? "";
 
   useEffect(() => {
-    setForm(toForm(initial, project));
+    setForm(toForm(initial, project, previousRequest));
     setLinkedReport(dailyReport ?? null);
     setDailyReportDate(dailyReport?.report_date ?? "");
     setReportMessage(null);
@@ -216,6 +220,11 @@ export default function RequestForm({
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((previous) => ({ ...previous, [key]: value }));
+  }
+
+  function resetToProjectDefaults() {
+    setForm({ ...BLANK, ...buildRequestDefaults(null, project) });
+    onDirtyChange?.(true);
   }
 
   function chooseWorkItem(name: string) {
@@ -304,6 +313,22 @@ export default function RequestForm({
         Tên công trình, Chủ đầu tư và Địa điểm được điền sẵn từ Thiết lập công
         trình; chỉ sửa khi PYC này cần giá trị khác.
       </p>
+      {!initial && previousRequest && (
+        <div className="flex flex-col gap-2 rounded border border-teal-200 bg-teal-50 p-2 text-xs text-teal-900 sm:flex-row sm:items-center sm:justify-between">
+          <p>
+            Đã điền vị trí, đơn vị và người ký từ PYC{" "}
+            <strong>{previousRequest.number}</strong>. Ngày yêu cầu mặc định là
+            hôm nay.
+          </p>
+          <button
+            type="button"
+            className="min-h-9 shrink-0 rounded border border-teal-300 bg-white px-2 font-medium text-teal-800"
+            onClick={resetToProjectDefaults}
+          >
+            Xóa dữ liệu mẫu
+          </button>
+        </div>
+      )}
 
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="block text-sm">

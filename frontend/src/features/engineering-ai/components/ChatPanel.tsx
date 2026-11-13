@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   askEngineeringAI,
   createConversation,
@@ -27,7 +27,9 @@ import {
 } from "../lib/ui";
 import { ChatIcon, SearchIcon, SpinnerIcon } from "./icons";
 import CitationCard from "./CitationCard";
+import QuestionSuggestions from "./QuestionSuggestions";
 import type { ChatMessage, Citation, Conversation } from "../types";
+import type { QuestionSuggestion } from "../lib/questionSuggestions";
 
 type Props = {
   projectId: string;
@@ -45,6 +47,7 @@ export default function ChatPanel({ projectId, onOpenCitation }: Props) {
   const [useVision, setUseVision] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   async function loadConversations(q = search) {
     try {
@@ -128,8 +131,24 @@ export default function ChatPanel({ projectId, onOpenCitation }: Props) {
     }
   }
 
-  async function send() {
-    const question = input.trim();
+  function pickSuggestion(suggestion: QuestionSuggestion) {
+    if (busy) return;
+    setInput(suggestion.prompt);
+    if (suggestion.mode === "send") {
+      void send(suggestion.prompt);
+      return;
+    }
+    window.requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(
+        suggestion.prompt.length,
+        suggestion.prompt.length,
+      );
+    });
+  }
+
+  async function send(questionOverride?: string) {
+    const question = (questionOverride ?? input).trim();
     if (!question || busy) return;
     setBusy(true);
     setError(null);
@@ -162,6 +181,16 @@ export default function ChatPanel({ projectId, onOpenCitation }: Props) {
         },
       ]);
       await loadConversations();
+      const target = response.page_action
+        ? response.citations.find(
+            (citation) =>
+              citation.document_id === response.page_action?.document_id &&
+              citation.page_number === response.page_action?.page_number,
+          )
+        : undefined;
+      if (target) {
+        onOpenCitation(target);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Không gửi được câu hỏi.");
     } finally {
@@ -347,16 +376,6 @@ export default function ChatPanel({ projectId, onOpenCitation }: Props) {
                       )}
                     >
                       <span>{isUser ? "Bạn" : "AI"}</span>
-                      {message.role === "assistant" && message.confidence != null && (
-                        <span
-                          className={cx(
-                            BADGE,
-                            "border border-slate-200 bg-white font-normal text-slate-700",
-                          )}
-                        >
-                          độ khớp nguồn {Math.round(message.confidence * 100)}%
-                        </span>
-                      )}
                       {message.vision_used && (
                         <span
                           className={cx(
@@ -430,11 +449,17 @@ export default function ChatPanel({ projectId, onOpenCitation }: Props) {
               </div>
             )}
 
-            <div className="space-y-2 border-t border-slate-200 pt-4">
+            <div className="space-y-3 border-t border-slate-200 pt-4">
+              <QuestionSuggestions
+                busy={busy}
+                compact={messages.length > 0}
+                onPick={pickSuggestion}
+              />
               <label htmlFor="eai-chat-input" className={LABEL}>
                 Câu hỏi
               </label>
               <textarea
+                ref={textareaRef}
                 id="eai-chat-input"
                 className={cx(FIELD, "min-h-24 resize-y")}
                 rows={3}

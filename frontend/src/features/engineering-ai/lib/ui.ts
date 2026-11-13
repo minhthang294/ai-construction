@@ -19,27 +19,27 @@ export function cx(
   return values.filter(Boolean).join(" ");
 }
 
-export const CARD = "rounded-xl border border-slate-200 bg-white shadow-sm";
-export const CARD_PAD = "p-4 sm:p-5";
+export const CARD = "rounded-2xl border border-slate-200/80 bg-white shadow-sm";
+export const CARD_PAD = "p-4 sm:p-6";
 export const SECTION_TITLE =
-  "text-base font-semibold tracking-tight text-slate-950 sm:text-lg";
+  "text-lg font-semibold tracking-tight text-slate-950 sm:text-xl";
 export const SECTION_TEXT = "text-sm leading-6 text-slate-600";
 export const META_TEXT = "text-xs leading-5 text-slate-600";
 export const LABEL = "block text-sm font-medium text-slate-800";
 export const HELP_TEXT = "mt-1 text-xs leading-5 text-slate-500";
 
 export const FIELD_BASE =
-  "min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-base text-slate-900 shadow-sm placeholder:text-slate-400 focus:border-[#405e9b] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#405e9b]/30 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 sm:text-sm";
+  "min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-base text-slate-900 shadow-sm placeholder:text-slate-400 focus:border-[#405e9b] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#405e9b]/30 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 sm:text-sm";
 
 export const FIELD = "mt-1.5 " + FIELD_BASE;
 
 export const FIELD_INLINE =
-  "min-h-11 rounded-lg border border-slate-300 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-[#405e9b] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#405e9b]/30 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 sm:text-sm";
+  "min-h-11 rounded-xl border border-slate-300 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-[#405e9b] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#405e9b]/30 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 sm:text-sm";
 
 export const SELECT_INLINE = FIELD_INLINE;
 
 export const BUTTON_BASE =
-  "inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 " +
+  "inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 " +
   FOCUS_RING;
 
 export const BUTTON_PRIMARY =

@@ -27,7 +27,12 @@ import {
   updateRecord,
   updateRequest,
 } from "../lib/api";
+import { latestRequestForPrefill } from "../lib/requestPrefill";
 import { projectMetadataDefaults } from "../lib/projectPrefill";
+import {
+  buildWhatsAppInvite,
+  whatsAppInviteUrl,
+} from "../lib/whatsappInvite";
 import { confirmRecord } from "../lib/api";
 import type {
   AcceptanceExport,
@@ -212,6 +217,7 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastExport, setLastExport] = useState<AcceptanceExport | null>(null);
+  const [downloadFailed, setDownloadFailed] = useState(false);
   const [reportLinks, setReportLinks] = useState<
     Record<string, LinkedDailyReport | null>
   >({});
@@ -562,16 +568,38 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
   async function handleExportRequest(request: AcceptanceRequest, format: "xlsx" | "pdf") {
     setBusy(true);
     setError(null);
+    setMessage(null);
     try {
       const exported = await exportRequest(projectId, request.id, format);
       setLastExport(exported);
-      setMessage(
-        `Đã tạo ${format.toUpperCase()} PYC ${request.number}. Chỉ các ô đã kiểm tra được ghi.`,
-      );
+      try {
+        const filename = await downloadExport(exported);
+        setDownloadFailed(false);
+        setMessage(
+          `Đã xuất và tải ${filename}. Chỉ các ô đã kiểm tra được ghi.`,
+        );
+      } catch (downloadError) {
+        setDownloadFailed(true);
+        setError(
+          `${errorMessage(downloadError)} File ${format.toUpperCase()} PYC ${request.number} đã tạo nhưng chưa tải được; bấm "Tải lại" bên dưới.`,
+        );
+      }
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function handleCopyInvite(request: AcceptanceRequest) {
+    const invite = buildWhatsAppInvite(request);
+    try {
+      await navigator.clipboard.writeText(invite);
+      setError(null);
+      setMessage("Đã copy lời mời WhatsApp.");
+    } catch {
+      setError(null);
+      window.prompt("Sao chép lời mời WhatsApp", invite);
     }
   }
 
@@ -682,16 +710,27 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
       setError("Cần lưu BBNT trước khi xuất.");
       return;
     }
+    const recordId = draft.id;
     setBusy(true);
     setError(null);
+    setMessage(null);
     try {
-      const exported = await exportRecord(projectId, draft.id, kind, format);
+      const exported = await exportRecord(projectId, recordId, kind, format);
       setLastExport(exported);
-      setMessage(
-        kind === "bbnt"
-          ? `Đã tạo ${format.toUpperCase()} BBNT. Bản xuất dùng dữ liệu đã được con người xác nhận.`
-          : `Đã tạo ${format.toUpperCase()} PYC từ BBNT; sheet BBNT được để trống an toàn.`,
-      );
+      try {
+        const filename = await downloadExport(exported);
+        setDownloadFailed(false);
+        setMessage(
+          kind === "bbnt"
+            ? `Đã xuất và tải ${filename}. Bản xuất dùng dữ liệu đã được con người xác nhận.`
+            : `Đã xuất và tải ${filename}. Sheet BBNT được để trống an toàn.`,
+        );
+      } catch (downloadError) {
+        setDownloadFailed(true);
+        setError(
+          `${errorMessage(downloadError)} File ${format.toUpperCase()} ${kind.toUpperCase()} đã tạo nhưng chưa tải được; bấm "Tải lại" bên dưới.`,
+        );
+      }
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
@@ -702,10 +741,13 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
   async function handleDownloadExport(exported: AcceptanceExport) {
     setBusy(true);
     setError(null);
+    setMessage(null);
     try {
       const filename = await downloadExport(exported);
+      setDownloadFailed(false);
       setMessage(`Đã tải ${filename}.`);
     } catch (cause) {
+      setDownloadFailed(true);
       setError(errorMessage(cause));
     } finally {
       setBusy(false);
@@ -716,20 +758,24 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
 
   return (
     <div className="space-y-4">
-      <header className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-xl font-semibold">Nghiệm thu (PYC / BBNT)</h1>
+      <header className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#405e9b]">Điều hành</p>
+          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">Nghiệm thu (PYC / BBNT)</h1>
+          <p className="mt-1 text-sm text-slate-600">Lập phiếu yêu cầu, biên bản và xuất hồ sơ nghiệm thu.</p>
+        </div>
         <div className="flex gap-2">
           <button
             type="button"
             onClick={() => switchTab("requests")}
-            className={`rounded px-3 py-2 text-sm ${tab === "requests" ? "bg-teal-700 text-white" : "border bg-white"}`}
+            className={`min-h-11 rounded-xl px-3 py-2 text-sm font-medium ${tab === "requests" ? "bg-teal-700 text-white" : "border bg-white"}`}
           >
             Phiếu yêu cầu (PYC)
           </button>
           <button
             type="button"
             onClick={() => switchTab("records")}
-            className={`rounded px-3 py-2 text-sm ${tab === "records" ? "bg-teal-700 text-white" : "border bg-white"}`}
+            className={`min-h-11 rounded-xl px-3 py-2 text-sm font-medium ${tab === "records" ? "bg-teal-700 text-white" : "border bg-white"}`}
           >
             Biên bản nghiệm thu (BBNT)
           </button>
@@ -751,7 +797,8 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
             disabled={busy}
             onClick={() => void handleDownloadExport(lastExport)}
           >
-            tải {lastExport.kind.toUpperCase()} (.{lastExport.format})
+            {downloadFailed ? "Tải lại" : "Tải xuống lại"}{" "}
+            {lastExport.kind.toUpperCase()} (.{lastExport.format})
           </button>{" "}
           <span className="text-slate-500">sha256 {lastExport.sha256.slice(0, 12)}…</span>
         </div>
@@ -806,6 +853,11 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
                 projectId={projectId}
                 project={projectContext}
                 initial={selectedRequest}
+                previousRequest={
+                  editingRequest === "new"
+                    ? latestRequestForPrefill(requests)
+                    : null
+                }
                 dailyReport={
                   selectedRequest
                     ? reportLinks[selectedRequest.id] ?? null
@@ -897,6 +949,22 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
                         >
                           PYC PDF
                         </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleCopyInvite(request)}
+                          disabled={busy}
+                          className="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-50 disabled:opacity-50"
+                        >
+                          Copy lời mời WhatsApp
+                        </button>
+                        <a
+                          href={whatsAppInviteUrl(buildWhatsAppInvite(request))}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-50"
+                        >
+                          Mở WhatsApp
+                        </a>
                         <button
                           type="button"
                           onClick={() => void handleDeleteRequest(request)}

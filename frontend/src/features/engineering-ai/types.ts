@@ -99,6 +99,13 @@ export type SearchResponse = {
   message?: string | null;
 };
 
+export type PageAction = {
+  document_id: string;
+  page_id?: string | null;
+  page_number: number;
+  label: string;
+};
+
 export type ChatResponse = {
   conversation_id: string;
   message_index: number;
@@ -109,6 +116,7 @@ export type ChatResponse = {
   warnings: string[];
   vision_used: boolean;
   vision_note?: string | null;
+  page_action?: PageAction | null;
 };
 
 export type Conversation = {

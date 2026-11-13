@@ -65,7 +65,7 @@ Tests:
 - PDF tests assert PYC = 1 page, BBNT = 1 page (no PYC page), no `DANH MỤC HỒ SƠ`; the missing-title path is tested separately through `_select_pdf_pages()`.
 
 APIs/models:
-- No new routes; only the `Content-Disposition` filename for `GET .../acceptance-exports/{id}/download` changed.
+- PYC preview-image and DELETE routes were added in round 8 (see below); the round-6 filename change only affected `Content-Disposition` on the existing download route.
 - No model/migration changes. The download name still comes from `generated_documents.metadata_json["number"]`.
 
 Dependencies:

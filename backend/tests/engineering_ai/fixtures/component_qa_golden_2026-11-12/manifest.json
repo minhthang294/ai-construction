@@ -1,0 +1,105 @@
+{
+  "fixture_version": "1.0",
+  "created_at": "2026-11-12",
+  "status": "visual-confirmed, proposed for Codex replay/review",
+  "purpose": "Golden fixture for component QA: p7 H77 identity, p8/p15 pile membership, p22 H77 quantities, p46 beam facts.",
+  "source_pdf": "/home/thangpham/Downloads/bản vẽ scan_1.pdf",
+  "source_pdf_pages": 133,
+  "source_crop_dir": "/tmp/opencode/rag-diag",
+  "document_name": "bản vẽ scan_1.pdf",
+  "no_db_ids": true,
+  "no_db_writes": true,
+  "pages": [
+    {
+      "page_number": 7,
+      "file": "page_007.json",
+      "sheet": "TK-01",
+      "focus": "H77 identity: Nhóm 1, Phân đoạn 2, Cầu chính; crack length 0,2 m",
+      "crops": [
+        "p7-header.png",
+        "p7-table.png",
+        "p7-titleblock.png"
+      ]
+    },
+    {
+      "page_number": 8,
+      "file": "page_008.json",
+      "sheet": "TK-02",
+      "focus": "45 pile codes, Phân đoạn 1, Nhóm 2, Cầu chính",
+      "crops": [
+        "p8-header.png",
+        "p8-table-top.png",
+        "p8-table-bot.png",
+        "p8-table.png",
+        "p8-titleblock.png"
+      ]
+    },
+    {
+      "page_number": 15,
+      "file": "page_015.json",
+      "sheet": "TK-09",
+      "focus": "39 pile codes, Phân đoạn 1, Nhóm 3, Cầu chính; I49 excluded",
+      "crops": [
+        "p15-header.png",
+        "p15-table-top.png",
+        "p15-table-bot.png",
+        "p15-table.png",
+        "p15-boundary.png",
+        "p15-titleblock.png"
+      ]
+    },
+    {
+      "page_number": 22,
+      "file": "page_022.json",
+      "sheet": "TK-16",
+      "focus": "H77 quantities: t=1cm, L1=0,2m, V=0,003m3, mài=1,280m2, keo=0,304m2; joined via p7 identity",
+      "crops": [
+        "p22-header.png",
+        "p22-table.png",
+        "p22-khoiluong.png",
+        "p22-khoiluong-view.png",
+        "p22-titleblock.png"
+      ]
+    },
+    {
+      "page_number": 46,
+      "file": "page_046.json",
+      "sheet": "TK-40",
+      "focus": "Beam I-30-31: Lxl=1900mm, Tb 5cm/Tb 7cm, fiberglass 4,560m2; damage length L ambiguous (diagnosis 1500 vs callout 1900), omitted",
+      "crops": [
+        "p46-full.png",
+        "p46-table-full.png",
+        "p46-thickness-labels.png",
+        "p46-plan-callout.png",
+        "p46-titleblock.png"
+      ]
+    }
+  ],
+  "replay": {
+    "target": "save_page_extraction on a copy; never data/app.db",
+    "payload_fields": [
+      "model",
+      "prompt_version",
+      "mode",
+      "extraction",
+      "confidence",
+      "warnings"
+    ],
+    "mapping": "Match document_name + page_number to the copied DB; do not use production ids from this fixture.",
+    "verify_note_source": "Each page file has a verify_note for the verify endpoint.",
+    "search_compatibility": "component_facts use component_type, component_code, fact_name, value, unit, quote, group, segment, location, table_row, table_column; component_search exact-match filters group/segment/location by first number."
+  },
+  "gaps": [
+    "p46: callout ghi Lxl = L = 1900 nhưng chẩn đoán trước ghi chiều dài vùng hư hỏng L1 = 1500; không thấy 1500 trên p46. Fixture chỉ giữ Lxl = 1900, bỏ chiều dài vùng hư hỏng để tránh nhập nhằng.",
+    "p46 has no volume/epoxy-area/grinding-area row; those values are omitted, not computed.",
+    "p8/p15 crack lengths were not transcribed row-by-row; membership uses status facts with exact pile-code quote.",
+    "p22 quantity cells do not name H77; H77 linkage is joined via the p22 statistics row and p7 identity. Do not present p22 alone as H77 identity.",
+    "Only one visual reviewer has confirmed these rows. Codex owns second-person review/import."
+  ],
+  "counts": {
+    "group_2_segment_1": 45,
+    "group_3_segment_1": 39,
+    "union_unique": 84,
+    "i49_in_segment_1": false
+  }
+}

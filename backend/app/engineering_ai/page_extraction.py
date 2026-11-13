@@ -26,12 +26,27 @@ SCHEMA_FIELDS = (
 PAGE_TYPES = {"drawing", "specification", "table", "text", "other"}
 
 MAX_KEY_VALUES = 200
+MAX_COMPONENT_FACTS = 200
 MAX_TABLE_ROWS = 200
 MAX_TABLE_COLUMNS = 50
 MAX_WARNINGS = 100
 MAX_TEXT = 4000
 MIN_TILE_SIDE = 4
 MAX_NUMERIC_WARNINGS = 20
+
+_COMPONENT_FACT_FIELDS = (
+    "component_type",
+    "component_code",
+    "fact_name",
+    "value",
+    "unit",
+    "quote",
+    "group",
+    "segment",
+    "location",
+    "table_row",
+    "table_column",
+)
 
 _TILE_NOISE_MARKERS = (
     "vùng crop",
@@ -231,6 +246,52 @@ def _normalise_key_value(item: Any) -> Optional[Dict[str, Any]]:
     return {"name": name, "value": value, "unit": unit, "quote": quote}
 
 
+def _component_fact_errors(fact: Any, prefix: str) -> List[str]:
+    errors: List[str] = []
+    if not isinstance(fact, dict):
+        return [f"{prefix} is not an object"]
+    if fact.get("component_type") not in {"pile", "beam"}:
+        errors.append(f"{prefix}.component_type must be 'pile' or 'beam'")
+    for field in ("component_code", "fact_name", "unit", "quote"):
+        item = fact.get(field)
+        if not isinstance(item, str) or not item.strip():
+            errors.append(f"{prefix}.{field} must be a non-empty string")
+    fact_value = fact.get("value")
+    if (
+        isinstance(fact_value, bool)
+        or not isinstance(fact_value, (str, int, float))
+        or not str(fact_value).strip()
+    ):
+        errors.append(f"{prefix}.value must be a non-empty string or number")
+    for field in ("group", "segment", "location"):
+        item = fact.get(field)
+        if item is not None and (
+            not isinstance(item, str) or not item.strip()
+        ):
+            errors.append(f"{prefix}.{field} must be a non-empty string or null")
+    table_row = fact.get("table_row")
+    if table_row is not None and (
+        isinstance(table_row, bool)
+        or not isinstance(table_row, int)
+        or table_row < 0
+    ):
+        errors.append(f"{prefix}.table_row must be a non-negative integer or null")
+    table_column = fact.get("table_column")
+    if table_column is not None and not (
+        (
+            isinstance(table_column, int)
+            and not isinstance(table_column, bool)
+            and table_column >= 0
+        )
+        or (isinstance(table_column, str) and table_column.strip())
+    ):
+        errors.append(
+            f"{prefix}.table_column must be a non-empty string, "
+            "a non-negative integer or null"
+        )
+    return errors
+
+
 def merge_extractions(
     parts: Iterable[Mapping[str, Any]],
     full_page: Optional[Mapping[str, Any]] = None,
@@ -341,6 +402,77 @@ def merge_extractions(
         _append_warning(warnings, f"table_rows bị giới hạn ở {MAX_TABLE_ROWS} hàng.")
         table_rows = table_rows[:MAX_TABLE_ROWS]
 
+    component_facts: List[Dict[str, Any]] = []
+    component_facts_present = False
+    seen_fact_keys: Set[Tuple[Tuple[str, str], ...]] = set()
+    seen_fact_values: Dict[Tuple[str, str, str, str], Tuple[str, str]] = {}
+    for source in sources:
+        if "component_facts" in source:
+            component_facts_present = True
+        raw_facts = source.get("component_facts")
+        if raw_facts is None:
+            continue
+        if not isinstance(raw_facts, list):
+            _append_warning(warnings, "Bỏ qua component_facts không phải list.")
+            continue
+        for item in raw_facts:
+            fact_errors = _component_fact_errors(item, "component_fact")
+            if fact_errors:
+                _append_warning(
+                    warnings,
+                    "Bỏ qua component_fact không hợp lệ: "
+                    + "; ".join(fact_errors),
+                )
+                continue
+            clean = {
+                field: item[field]
+                for field in _COMPONENT_FACT_FIELDS
+                if field in item
+            }
+            fact_key = tuple(
+                (field, _norm(clean.get(field)))
+                for field in _COMPONENT_FACT_FIELDS
+                if field in clean
+            )
+            if fact_key in seen_fact_keys:
+                continue
+            seen_fact_keys.add(fact_key)
+            conflict_key = (
+                _norm(clean.get("component_code")),
+                _norm(clean.get("fact_name")),
+                _norm(clean.get("table_row")),
+                _norm(clean.get("table_column")),
+            )
+            conflict_value = (
+                _norm(clean.get("value")),
+                _norm(clean.get("unit")),
+            )
+            previous = seen_fact_values.get(conflict_key)
+            if previous is None:
+                seen_fact_values[conflict_key] = conflict_value
+            elif previous != conflict_value:
+                position: List[str] = []
+                if clean.get("table_row") is not None:
+                    position.append(f"hàng {clean['table_row']}")
+                if clean.get("table_column") is not None:
+                    position.append(f"cột {clean['table_column']}")
+                location = ", ".join(position) or "không có vị trí bảng"
+                _append_warning(
+                    warnings,
+                    f"Mâu thuẫn component_facts {clean['component_code']} / "
+                    f"{clean['fact_name']} ({location}): "
+                    f"{previous[0]} {previous[1]} vs "
+                    f"{conflict_value[0]} {conflict_value[1]}",
+                )
+            if len(component_facts) < MAX_COMPONENT_FACTS:
+                component_facts.append(clean)
+    if len(component_facts) >= MAX_COMPONENT_FACTS:
+        _append_warning(
+            warnings,
+            f"component_facts bị giới hạn ở {MAX_COMPONENT_FACTS} mục.",
+        )
+        component_facts = component_facts[:MAX_COMPONENT_FACTS]
+
     for source in sources:
         raw_warnings = source.get("warnings")
         if raw_warnings is None:
@@ -380,7 +512,7 @@ def merge_extractions(
         _append_warning(warnings, "Có mâu thuẫn giữa các lần trích xuất; cần kiểm tra trang gốc.")
     confidence = round(max(0.0, min(1.0, confidence)), 4)
 
-    return {
+    merged: Dict[str, Any] = {
         "page_type": page_type,
         "title": title,
         "drawing_number": drawing_number,
@@ -391,6 +523,9 @@ def merge_extractions(
         "warnings": warnings[:MAX_WARNINGS],
         "confidence": confidence,
     }
+    if component_facts_present:
+        merged["component_facts"] = component_facts
+    return merged
 
 
 def validate_extraction(value: Any) -> List[str]:
@@ -426,6 +561,16 @@ def validate_extraction(value: Any) -> List[str]:
             unit = item.get("unit")
             if unit is not None and not isinstance(unit, str):
                 errors.append(f"key_values[{index}].unit must be string or null")
+
+    component_facts = value.get("component_facts")
+    if component_facts is not None:
+        if not isinstance(component_facts, list):
+            errors.append("component_facts is not a list")
+        else:
+            for index, fact in enumerate(component_facts):
+                errors.extend(
+                    _component_fact_errors(fact, f"component_facts[{index}]")
+                )
 
     rows = value.get("table_rows")
     if not isinstance(rows, list):

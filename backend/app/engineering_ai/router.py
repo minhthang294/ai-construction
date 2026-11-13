@@ -36,6 +36,7 @@ from .dependencies import (
     get_session_factory,
     get_vision_provider,
     project_access,
+    project_editor_access,
 )
 from .schemas import (
     ChatRequest,
@@ -440,7 +441,7 @@ def save_page_extraction_route(
     payload: PageExtractionIn,
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
-    _access=Depends(project_access),
+    _access=Depends(project_editor_access),
 ):
     _guard_rate(project_id, user, "page_extraction")
     try:
@@ -508,7 +509,7 @@ def verify_page_extraction_route(
     payload: PageExtractionVerifyIn,
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
-    _access=Depends(project_access),
+    _access=Depends(project_editor_access),
 ):
     _guard_rate(project_id, user, "page_extraction_verify")
     try:

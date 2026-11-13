@@ -7,6 +7,21 @@ from app.engineering_ai.page_extraction import (
 )
 
 
+def _component_fact(**overrides):
+    fact = {
+        "component_type": "pile",
+        "component_code": "P-01",
+        "fact_name": "chiều sâu đục",
+        "value": "1",
+        "unit": "cm",
+        "quote": "t = 1 cm",
+        "table_row": 3,
+        "table_column": "t",
+    }
+    fact.update(overrides)
+    return fact
+
+
 def _valid_extraction(**overrides):
     value = {
         "page_type": "drawing",
@@ -155,6 +170,80 @@ def test_merge_filters_tile_crop_context_noise_but_keeps_full_warnings():
 
 
 
+def test_merge_component_facts_preserves_dedupes_and_drops_invalid():
+    fact = _component_fact()
+    beam_fact = _component_fact(
+        component_type="beam",
+        component_code="B-01",
+        fact_name="chiều dài sửa chữa",
+        value="1900",
+        unit="mm",
+        quote="L = 1900 mm",
+        table_row=4,
+        table_column="L",
+    )
+    invalid = {
+        "component_type": "pile",
+        "fact_name": "thiếu mã",
+        "value": "1",
+        "unit": "cm",
+        "quote": "thiếu mã",
+    }
+    full = _valid_extraction(component_facts=[fact])
+    tile = _valid_extraction(component_facts=[dict(fact), invalid, beam_fact])
+
+    merged = merge_extractions([tile], full_page=full)
+
+    assert merged["component_facts"] == [fact, beam_fact]
+    assert merged["key_values"] == full["key_values"]
+    assert merged["table_rows"] == full["table_rows"]
+    assert any(
+        "component_fact" in warning and "component_code" in warning
+        for warning in merged["warnings"]
+    )
+    assert validate_extraction(merged) == []
+
+
+def test_merge_component_facts_warns_on_conflicting_values():
+    full_fact = _component_fact(value="1900", unit="mm")
+    tile_fact = _component_fact(value="2000", unit="mm")
+    full = _valid_extraction(component_facts=[full_fact])
+    tile = _valid_extraction(component_facts=[tile_fact])
+
+    merged = merge_extractions([tile], full_page=full)
+
+    assert merged["component_facts"] == [full_fact, tile_fact]
+    assert any(
+        "Mâu thuẫn component_facts" in warning
+        and "1900" in warning
+        and "2000" in warning
+        for warning in merged["warnings"]
+    )
+    assert validate_extraction(merged) == []
+
+
+def test_merge_component_facts_caps_at_200_and_warns():
+    facts = [
+        _component_fact(
+            fact_name="chiều sâu đục",
+            value=str(index + 1),
+            table_row=index,
+        )
+        for index in range(201)
+    ]
+
+    merged = merge_extractions(
+        [_valid_extraction(component_facts=facts)]
+    )
+
+    assert len(merged["component_facts"]) == 200
+    assert any(
+        "component_facts" in warning and "200" in warning
+        for warning in merged["warnings"]
+    )
+    assert validate_extraction(merged) == []
+
+
 def test_validate_extraction_rejects_bad_schema():
     assert validate_extraction(_valid_extraction()) == []
     invalid = _valid_extraction(
@@ -173,6 +262,49 @@ def test_validate_extraction_rejects_bad_schema():
     assert any("table_rows" in error for error in errors)
     assert any("warnings" in error for error in errors)
     assert validate_extraction(None) == ["top-level JSON must be an object"]
+
+
+def test_validate_extraction_accepts_legacy_schema_without_component_facts():
+    value = _valid_extraction()
+    assert "component_facts" not in value
+    assert validate_extraction(value) == []
+
+
+def test_validate_extraction_accepts_valid_pile_fact():
+    value = _valid_extraction(
+        component_facts=[
+            {
+                "component_type": "pile",
+                "component_code": "P-01",
+                "fact_name": "chiều sâu đục",
+                "value": 1.0,
+                "unit": "cm",
+                "quote": "t = 1 cm",
+                "group": "1",
+                "segment": "2",
+                "location": "cầu chính",
+                "table_row": 3,
+                "table_column": "t",
+            }
+        ]
+    )
+    assert validate_extraction(value) == []
+
+
+def test_validate_extraction_rejects_component_fact_without_code():
+    value = _valid_extraction(
+        component_facts=[
+            {
+                "component_type": "beam",
+                "fact_name": "chiều dài sửa chữa",
+                "value": "1900",
+                "unit": "mm",
+                "quote": "L = 1900 mm",
+            }
+        ]
+    )
+    errors = validate_extraction(value)
+    assert any("component_code" in error for error in errors)
 
 
 def test_numeric_cross_check_flags_missing_and_mismatched_units():

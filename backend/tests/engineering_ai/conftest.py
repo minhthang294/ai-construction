@@ -24,6 +24,7 @@ from app.engineering_ai.dependencies import (
     get_session_factory,
     get_vision_provider,
     project_access,
+    project_editor_access,
 )
 from app.engineering_ai.embeddings import HashingEmbeddingProvider
 from app.engineering_ai.models import Base
@@ -139,6 +140,7 @@ def client(session_factory, ocr_engine, answer_provider, vision_provider, embedd
     app.dependency_overrides[get_session_factory] = lambda: session_factory
     app.dependency_overrides[get_current_user] = lambda: type("U", (), {"id": "test-user"})()
     app.dependency_overrides[project_access] = lambda project_id: None
+    app.dependency_overrides[project_editor_access] = lambda project_id: None
     app.dependency_overrides[get_ocr_engine] = lambda: ocr_engine
     app.dependency_overrides[get_answer_provider] = lambda: answer_provider
     app.dependency_overrides[get_embedding_provider] = lambda: embedding_provider

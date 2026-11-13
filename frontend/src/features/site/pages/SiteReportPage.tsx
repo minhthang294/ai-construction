@@ -670,13 +670,14 @@ export default function SiteReportPage({
 
   return (
     <div
-      className="mx-auto min-h-screen max-w-2xl space-y-4 bg-gray-100 p-3"
-      style={{ paddingBottom: "calc(10rem + env(safe-area-inset-bottom))" }}
+      className="mx-auto w-full max-w-4xl space-y-4"
+      style={{ paddingBottom: "calc(4rem + env(safe-area-inset-bottom))" }}
     >
-      <header className="sticky top-0 z-20 -mx-3 border-b border-gray-200 bg-gray-100/95 px-3 py-2 backdrop-blur">
+      <header className="app-card app-card-pad">
         <div className="flex items-start justify-between gap-2">
           <div>
-            <h1 className="text-xl font-bold">Báo cáo ngày</h1>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#405e9b]">Hiện trường</p>
+            <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">Báo cáo ngày</h1>
             {onDateChange ? (
               <div className="mt-1 flex items-center gap-2">
                 <button
