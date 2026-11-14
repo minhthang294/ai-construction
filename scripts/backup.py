@@ -1,6 +1,7 @@
 """Consistent SQLite backup plus original private files and template copies."""
 
 import argparse
+import contextlib
 import sqlite3
 import tarfile
 import tempfile
@@ -16,7 +17,11 @@ def backup(data_dir: Path, output: Path) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory() as temporary:
         snapshot = Path(temporary) / "app.db"
-        with sqlite3.connect(database) as source, sqlite3.connect(snapshot) as destination:
+        # sqlite3's context manager only commits; connections must be closed
+        # explicitly so Windows can remove the temporary snapshot file.
+        with contextlib.closing(sqlite3.connect(database)) as source, contextlib.closing(
+            sqlite3.connect(snapshot)
+        ) as destination:
             source.backup(destination)
         with output.open("xb") as stream:
             output.chmod(0o600)

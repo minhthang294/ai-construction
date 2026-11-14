@@ -18,13 +18,16 @@ def test_backup_restores_database_and_original(tmp_path):
         db.execute("insert into sample values ('saved')")
     archive = tmp_path / "backup.tar.gz"
     backup(data, archive)
-    assert archive.stat().st_mode & 0o777 == 0o600
+    if sys.platform != "win32":
+        # Windows has no POSIX mode bits; chmod only toggles the read-only flag.
+        assert archive.stat().st_mode & 0o777 == 0o600
     target = tmp_path / "restored"
     restore(archive, target)
     with sqlite3.connect(target / "app.db") as db:
         assert db.execute("select value from sample").fetchone() == ("saved",)
     assert (target / "storage" / "project" / "original.jpg").read_bytes() == b"original"
-    assert (target / "storage" / "project" / "original.jpg").stat().st_mode & 0o777 == 0o600
+    if sys.platform != "win32":
+        assert (target / "storage" / "project" / "original.jpg").stat().st_mode & 0o777 == 0o600
     try:
         restore(archive, target)
     except FileExistsError:

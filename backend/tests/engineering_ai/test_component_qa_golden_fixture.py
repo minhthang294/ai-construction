@@ -116,7 +116,9 @@ def test_p46_keeps_only_lxl_and_omits_ambiguous_damage_length():
 def test_procedure_fixture_has_group_and_page_evidence():
     directory = FIXTURE_DIR.parent / "procedure_qa_2026-11-12"
     for page in (32, 33):
-        item = json.loads((directory / f"report_{page:03}.json").read_text())
+        item = json.loads(
+            (directory / f"report_{page:03}.json").read_text(encoding="utf-8")
+        )
         facts = item["extraction"]["component_facts"]
         assert {fact["component_code"] for fact in facts} >= {"PILE-GROUP-2"}
         assert all(fact["source_page"] == page for fact in facts)
