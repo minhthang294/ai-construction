@@ -19,6 +19,7 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from .dm_sync import sync_request_to_dm
 from .errors import AcceptanceError, TemplateError
 from .models import (
     AcceptanceAuditLog,
@@ -980,7 +981,19 @@ def create_request(
     )
     db.commit()
     db.refresh(request)
+    _sync_dm(request)
     return request
+
+
+def _sync_dm(
+    request: AcceptanceRequest, previous_number: Optional[str] = None
+) -> None:
+    """Write the workbook copy without ever rolling back the saved PYC."""
+
+    result = sync_request_to_dm(request, previous_number=previous_number)
+    request.excel_sync_warning = (
+        result.message if not result.synced and result.message else None
+    )
 
 
 def update_request(
@@ -990,6 +1003,7 @@ def update_request(
     if request is None:
         raise AcceptanceError(404, "Không tìm thấy PYC trong công trình", "request_not_found")
 
+    previous_number = request.number
     data = _request_values(payload, include_unset=False)
     if "number" in data and data["number"] != request.number:
         duplicate = db.scalar(
@@ -1036,6 +1050,7 @@ def update_request(
     )
     db.commit()
     db.refresh(request)
+    _sync_dm(request, previous_number=previous_number)
     return request
 
 

@@ -70,6 +70,7 @@ export type AcceptanceRequest = {
   supervisor_org?: string | null;
   investor_org?: string | null;
   notes?: string | null;
+  excel_sync_warning?: string | null;
   created_at: string;
   updated_at: string;
 };

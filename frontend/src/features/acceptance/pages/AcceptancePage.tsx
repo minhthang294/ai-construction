@@ -469,12 +469,20 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
     setBusy(true);
     setError(null);
     try {
+      let saved: AcceptanceRequest;
       if (editingRequest && editingRequest !== "new") {
-        await updateRequest(projectId, editingRequest.id, input);
-        setMessage(`Đã cập nhật PYC ${input.number}.`);
+        saved = await updateRequest(projectId, editingRequest.id, input);
+        setMessage(`Đã cập nhật PYC ${saved.number}.`);
       } else {
-        await createRequest(projectId, input);
-        setMessage(`Đã tạo PYC nháp ${input.number}.`);
+        saved = await createRequest(projectId, input);
+        setMessage(`Đã tạo PYC nháp ${saved.number}.`);
+      }
+      if (saved.excel_sync_warning) {
+        setMessage((current) =>
+          current
+            ? `${current} ${saved.excel_sync_warning}`
+            : saved.excel_sync_warning ?? null,
+        );
       }
       setEditingRequest(null);
       setRequestDirty(false);

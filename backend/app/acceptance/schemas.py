@@ -174,6 +174,7 @@ class RequestOut(OrmBase):
     notes: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+    excel_sync_warning: Optional[str] = None
 
 
 class RecordIn(BaseModel):

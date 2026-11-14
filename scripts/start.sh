@@ -16,6 +16,15 @@ export SITE_REPORT_STORAGE="$ROOT/data/storage/site"
 export ENGINEERING_AI_STORAGE="$ROOT/data/storage/engineering-ai"
 export ACCEPTANCE_STORAGE="$ROOT/data/storage/acceptance"
 export ACCEPTANCE_TEMPLATE="$ROOT/data/templates/acceptance-original.xlsx"
+if [[ -z "${ACCEPTANCE_DM_WORKBOOK:-}" ]]; then
+  DM_CANDIDATE="$(ls -t "$HOME/Downloads"/YCNT*BBNT*.xlsx 2>/dev/null | head -1 || true)"
+  if [[ -z "$DM_CANDIDATE" ]]; then
+    DM_CANDIDATE="$(ls -t "$ROOT"/data/templates/YCNT*BBNT*.xlsx 2>/dev/null | head -1 || true)"
+  fi
+  if [[ -n "$DM_CANDIDATE" ]]; then
+    export ACCEPTANCE_DM_WORKBOOK="$DM_CANDIDATE"
+  fi
+fi
 export ENGINEERING_AI_MAX_PDF_BYTES="${ENGINEERING_AI_MAX_PDF_BYTES:-80000000}"
 export ENGINEERING_AI_PROVIDER="${ENGINEERING_AI_PROVIDER:-opencode_deepseek}"
 export ENGINEERING_AI_OPENCODE_MODEL="${ENGINEERING_AI_OPENCODE_MODEL:-opencode-go/deepseek-v4.1-flash}"
