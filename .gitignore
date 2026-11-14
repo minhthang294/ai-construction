@@ -15,3 +15,4 @@ docs/agent-reports/logs/
 .env.*
 !.env.example
 *.tsbuildinfo
+data/logs/
