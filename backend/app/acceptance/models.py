@@ -16,13 +16,16 @@ except Exception:  # pragma: no cover - isolated fallback
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -222,6 +225,54 @@ class AcceptanceParticipantProfile(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
     )
+
+
+class ComponentAcceptanceLink(Base):
+    """An explicit N-N link from a component/stage/scope to a PYC or BBNT.
+
+    ``stage_id`` and ``scope_id`` are optional, but when present they must
+    belong to ``component_id``.  A row targets exactly one of PYC or BBNT.
+    The service, not the database, decides which is valid; the expression
+    index also makes duplicate rows impossible when optional ids are NULL.
+    """
+
+    __tablename__ = "component_acceptance_links"
+    __table_args__ = (
+        CheckConstraint(
+            "(request_id IS NULL) <> (record_id IS NULL)",
+            name="ck_component_acceptance_link_single_target",
+        ),
+        Index(
+            "uq_component_acceptance_link",
+            "project_id",
+            "component_id",
+            text("coalesce(stage_id, '')"),
+            text("coalesce(scope_id, '')"),
+            text("coalesce(request_id, '')"),
+            text("coalesce(record_id, '')"),
+            unique=True,
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    project_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    component_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("structural_components.id"), nullable=False, index=True
+    )
+    stage_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("component_stages.id"), nullable=True, index=True
+    )
+    scope_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("component_repair_scopes.id"), nullable=True, index=True
+    )
+    request_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("acceptance_requests.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    record_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("acceptance_records.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    created_by: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
 
 
 from app.core.models import AuditLog as AcceptanceAuditLog

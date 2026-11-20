@@ -1,6 +1,7 @@
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
+$env:OPENCODE_CONFIG_DIR = Join-Path $root '.opencode'
 New-Item -ItemType Directory -Force docs/agent-reports/logs | Out-Null
 $agents = @(
   @{ Name = 'site-report-agent'; Branch = 'site-report'; Prompt = 'Implement Site Report according to docs/API_CONTRACTS.md and docs/AGENT_BOUNDARIES.md' },

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { SiteReportPage } from "../features/site";
+import { ComponentCatalogImport, SiteReportPage } from "../features/site";
 import { AcceptancePage } from "../features/acceptance";
 import { EngineeringAIPage } from "../features/engineering-ai";
 import { Dashboard, ProjectSetup, WorkItemList, request } from "./CorePages";
@@ -37,12 +37,13 @@ export function pickProjectId(projects: Project[], current: string, recent: stri
     projects.find((project) => project.id === recent)?.id || projects[0]?.id || "";
 }
 
-type PageId = "dashboard" | "projects" | "work-items" | "daily-report" | "acceptance" | "documents";
+type PageId = "dashboard" | "projects" | "work-items" | "components" | "daily-report" | "acceptance" | "documents";
 
 const PAGE_META: Record<PageId, { label: string; description: string }> = {
   dashboard: { label: "Tổng quan", description: "Tình hình công trường hôm nay" },
   projects: { label: "Công trình", description: "Thông tin dùng chung cho báo cáo và nghiệm thu" },
   "work-items": { label: "Công việc", description: "Danh mục và trạng thái hạng mục" },
+  components: { label: "Cấu kiện", description: "Danh mục cọc và dầm theo phân đoạn" },
   "daily-report": { label: "Hiện trường", description: "Báo cáo ngày, nhân lực, ảnh và nhật ký" },
   acceptance: { label: "Nghiệm thu", description: "Phiếu yêu cầu và biên bản nghiệm thu" },
   documents: { label: "Hồ sơ & AI", description: "Bản vẽ, thuyết minh và hỏi đáp có citation" },
@@ -51,13 +52,14 @@ const PAGE_META: Record<PageId, { label: string; description: string }> = {
 const NAV_ITEMS: Array<{ id: PageId; icon: typeof DashboardIcon }> = [
   { id: "dashboard", icon: DashboardIcon },
   { id: "work-items", icon: WorkIcon },
+  { id: "components", icon: ProjectIcon },
   { id: "daily-report", icon: SiteIcon },
   { id: "acceptance", icon: AcceptanceIcon },
   { id: "documents", icon: DocumentsIcon },
   { id: "projects", icon: ProjectIcon },
 ];
 
-const MOBILE_NAV: PageId[] = ["dashboard", "daily-report", "acceptance", "documents", "work-items"];
+const MOBILE_NAV: PageId[] = ["dashboard", "components", "daily-report", "acceptance", "documents"];
 
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem("access_token") || "");
@@ -344,10 +346,10 @@ export default function App() {
 
       <div className="lg:pl-72">
         <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/90 backdrop-blur">
-          <div className="mx-auto flex max-w-[96rem] flex-wrap items-center gap-3 px-4 py-3 sm:px-6">
+          <div className="mx-auto flex max-w-[96rem] flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2 sm:px-6 sm:py-3">
             <button
               type="button"
-              className="flex h-10 w-10 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 lg:hidden"
+              className="flex size-11 shrink-0 items-center justify-center rounded-lg text-slate-700 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-700 lg:hidden"
               onClick={() => setMenuOpen(true)}
               aria-label="Mở menu"
               aria-expanded={menuOpen}
@@ -374,7 +376,7 @@ export default function App() {
                     setPageHistory([]);
                   }
                 }}
-                className="app-input min-h-10 max-w-full py-1.5 text-sm sm:max-w-[18rem]"
+                className="app-input min-h-11 max-w-full py-1.5 text-base sm:max-w-[18rem] sm:text-sm"
               >
                 <option value="">Chọn công trình</option>
                 {projects.map((project) => (
@@ -391,7 +393,7 @@ export default function App() {
                   <ChevronDownIcon className="h-4 w-4 text-slate-400" />
                 </>
               }
-              triggerClassName="flex min-h-10 cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-2 py-1.5 text-sm hover:bg-slate-50"
+              triggerClassName="flex min-h-11 cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-2 py-1.5 text-sm hover:bg-slate-50"
               panelClassName="right-0 z-50 mt-2 w-52 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl"
             >
               <button
@@ -410,9 +412,9 @@ export default function App() {
           </div>
         </header>
 
-        <main id="main-content" className="mx-auto w-full max-w-[96rem] px-4 pb-28 pt-5 sm:px-6 lg:pb-10">
+        <main id="main-content" className="mx-auto w-full max-w-[96rem] px-4 pb-28 pt-3 sm:px-6 sm:pt-5 lg:pb-10">
           {page !== "dashboard" && page !== "projects" && (
-            <button type="button" onClick={goBack} className="app-button app-button-ghost mb-3 min-h-10 px-2">
+            <button type="button" onClick={goBack} className={`app-button app-button-ghost mb-3 min-h-11 px-2 ${page === "components" ? "hidden lg:inline-flex" : ""}`}>
               <ArrowLeftIcon className="h-4 w-4" /> Quay lại
             </button>
           )}
@@ -440,9 +442,11 @@ export default function App() {
               </button>
             </section>
           ) : page === "dashboard" ? (
-            <Dashboard token={token} projectId={projectId} date={today} project={selected} onNavigate={(next) => navigate(next as PageId)} />
+            <Dashboard key={projectId} token={token} projectId={projectId} date={today} project={selected} onNavigate={(next) => navigate(next as PageId)} />
           ) : page === "work-items" ? (
             <WorkItemList token={token} projectId={projectId} />
+          ) : page === "components" ? (
+            <ComponentCatalogImport key={projectId} projectId={projectId} />
           ) : page === "daily-report" ? (
             <SiteReportPage
               projectId={projectId}
@@ -459,7 +463,7 @@ export default function App() {
       </div>
 
       <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-1.5 shadow-[0_-8px_24px_rgba(15,23,42,0.06)] backdrop-blur lg:hidden" aria-label="Điều hướng nhanh">
-        <div className="mx-auto grid max-w-lg grid-cols-5 gap-1">
+        <div className="mx-auto grid max-w-lg grid-cols-5 gap-2">
           {MOBILE_NAV.map((item) => {
             const config = NAV_ITEMS.find((candidate) => candidate.id === item)!;
             const ItemIcon = config.icon;
@@ -468,12 +472,12 @@ export default function App() {
               <button
                 key={item}
                 type="button"
-                className={`flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-lg px-1 text-[10px] font-medium ${active ? "bg-[#405e9b]/10 text-[#35507f]" : "text-slate-500"}`}
+                className={`flex min-h-12 min-w-0 flex-col items-center justify-center gap-0.5 rounded-lg px-0.5 py-1 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-700 ${active ? "bg-[#405e9b]/10 text-[#35507f]" : "text-slate-600"}`}
                 aria-current={active ? "page" : undefined}
                 onClick={() => navigate(item)}
               >
-                <ItemIcon className="h-5 w-5" />
-                <span className="max-w-full truncate">{PAGE_META[item].label}</span>
+                <ItemIcon className="h-5 w-5" aria-hidden="true" />
+                <span className="max-w-full text-balance text-center text-[11px] leading-tight font-semibold">{PAGE_META[item].label}</span>
               </button>
             );
           })}

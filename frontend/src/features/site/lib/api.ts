@@ -9,6 +9,28 @@ import type {
   SitePhoto,
   WorkItem,
 } from "../types";
+import type {
+  ComponentImportResult,
+  ComponentPreview,
+  ComponentSegment,
+  ComponentSummary,
+  ManualComponentInput,
+} from "./componentImport";
+import type {
+  BulkProgressInput,
+  DesignQuantityMap,
+  ProgressFilters,
+  ProgressPreview,
+  ProgressRow,
+  ProgressSaveResult,
+  StageDefinition,
+} from "./componentProgress";
+import type {
+  JournalExport,
+  JournalExportFormat,
+  JournalPreview,
+  JournalSnapshot,
+} from "./journal";
 
 const API_BASE = (import.meta as any)?.env?.VITE_API_BASE ?? "/api/v1";
 
@@ -190,6 +212,250 @@ export async function getOrganizations(projectId: string): Promise<Organization[
   const res = await apiFetch(`/projects/${projectId}/organizations`);
   if (!res.ok) return fail(res);
   return res.json();
+}
+
+export async function previewComponentImport(
+  projectId: string,
+  file: File,
+): Promise<ComponentPreview> {
+  const form = new FormData();
+  form.append("file", file, file.name);
+  const res = await apiFetch(`/projects/${projectId}/components/import-preview`, {
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) return fail(res);
+  return res.json();
+}
+
+export type ComponentCommitPayload = {
+  reviewed: true;
+  idempotency_key: string;
+  preview: ComponentPreview;
+  source_file_base64: string;
+};
+
+export async function commitComponentImport(
+  projectId: string,
+  payload: ComponentCommitPayload,
+): Promise<ComponentImportResult> {
+  const res = await apiFetch(`/projects/${projectId}/components/import-commit`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) return fail(res);
+  return res.json();
+}
+
+export async function listComponents(
+  projectId: string,
+  query?: string,
+): Promise<ComponentSummary[]> {
+  const search = query?.trim();
+  const suffix = search ? `?q=${encodeURIComponent(search)}` : "";
+  const res = await apiFetch(`/projects/${projectId}/components${suffix}`);
+  if (!res.ok) return fail(res);
+  return res.json();
+}
+
+export async function createComponent(
+  projectId: string,
+  payload: ManualComponentInput,
+): Promise<ComponentSummary> {
+  const res = await apiFetch(`/projects/${projectId}/components`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) return fail(res);
+  return res.json();
+}
+
+export async function listSegments(
+  projectId: string,
+  zone?: string,
+): Promise<ComponentSegment[]> {
+  const suffix = zone ? `?zone=${encodeURIComponent(zone)}` : "";
+  const res = await apiFetch(`/projects/${projectId}/segments${suffix}`);
+  if (!res.ok) return fail(res);
+  return res.json();
+}
+
+export async function listStageDefinitions(
+  projectId: string,
+  type?: "pile" | "beam",
+): Promise<StageDefinition[]> {
+  const suffix = type ? `?type=${type}` : "";
+  const res = await apiFetch(`/projects/${projectId}/stage-definitions${suffix}`);
+  if (!res.ok) return fail(res);
+  return res.json();
+}
+
+export async function listComponentProgress(
+  projectId: string,
+  filters?: Partial<ProgressFilters>,
+): Promise<ProgressRow[]> {
+  const params = new URLSearchParams();
+  const query = filters?.query?.trim();
+  if (query) params.set("q", query);
+  if (filters?.zone) params.set("zone", filters.zone);
+  if (filters?.segment) params.set("segment_id", filters.segment);
+  if (filters?.type) params.set("type", filters.type);
+  if (filters?.stage_definition_id) {
+    params.set("stage_definition_id", filters.stage_definition_id);
+  }
+  if (filters?.construction_status) {
+    params.set("construction_status", filters.construction_status);
+  }
+  if (filters?.acceptance_status) {
+    params.set("acceptance_status", filters.acceptance_status);
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const res = await apiFetch(`/projects/${projectId}/progress${suffix}`);
+  if (!res.ok) return fail(res);
+  return res.json();
+}
+
+/** Read-only design quantities keyed by concrete stage id. */
+export async function getDesignQuantities(
+  projectId: string,
+  componentIds: string[],
+  signal?: AbortSignal,
+): Promise<DesignQuantityMap> {
+  const res = await apiFetch(`/projects/${projectId}/progress/design-quantities`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ component_ids: componentIds }),
+    signal,
+  });
+  if (!res.ok) return fail(res);
+  return res.json();
+}
+
+export async function previewProgressBulk(
+  projectId: string,
+  payload: BulkProgressInput,
+): Promise<ProgressPreview> {
+  const res = await apiFetch(`/projects/${projectId}/progress/bulk-preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) return fail(res);
+  return res.json();
+}
+
+export type ProgressSavePayload = BulkProgressInput & {
+  reviewed: true;
+  idempotency_key: string;
+};
+
+export async function saveProgressBulk(
+  projectId: string,
+  payload: ProgressSavePayload,
+): Promise<ProgressSaveResult> {
+  const res = await apiFetch(`/projects/${projectId}/progress/bulk`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) return fail(res);
+  return res.json();
+}
+
+/** Read-only preview: unreviewed/missing sections stay explicit. */
+export async function getJournalPreview(
+  projectId: string,
+  date: string,
+): Promise<JournalPreview> {
+  const res = await apiFetch(
+    `/projects/${projectId}/journals/${date}/preview`,
+  );
+  if (!res.ok) return fail(res);
+  return res.json();
+}
+
+export async function createJournalSnapshot(
+  projectId: string,
+  date: string,
+  previewSha256: string,
+): Promise<JournalSnapshot> {
+  const res = await apiFetch(`/projects/${projectId}/journals/${date}/snapshots`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reviewed: true, preview_sha256: previewSha256 }),
+  });
+  if (!res.ok) return fail(res);
+  return res.json();
+}
+
+export async function listJournalSnapshots(
+  projectId: string,
+  date: string,
+): Promise<JournalSnapshot[]> {
+  const res = await apiFetch(`/projects/${projectId}/journals/${date}/snapshots`);
+  if (!res.ok) return fail(res);
+  return res.json();
+}
+
+export async function createJournalExport(
+  projectId: string,
+  date: string,
+  snapshotId: string,
+  format: JournalExportFormat,
+): Promise<JournalExport> {
+  const res = await apiFetch(`/projects/${projectId}/journals/${date}/exports`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ snapshot_id: snapshotId, format }),
+  });
+  if (!res.ok) return fail(res);
+  return res.json();
+}
+
+export async function listJournalExports(
+  projectId: string,
+  date: string,
+): Promise<JournalExport[]> {
+  const res = await apiFetch(`/projects/${projectId}/journals/${date}/exports`);
+  if (!res.ok) return fail(res);
+  return res.json();
+}
+
+/** Download the frozen snapshot JSON with auth headers. */
+export async function downloadJournalSnapshot(
+  result: JournalSnapshot,
+): Promise<void> {
+  const res = await apiFetchUrl(result.download_url);
+  if (!res.ok) return fail(res);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `nhat-ky-${result.journal_date}-snapshot.json`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+/** Download a frozen journal export with auth headers. */
+export async function downloadJournalExport(
+  result: JournalExport,
+): Promise<void> {
+  if (!result.download_url) throw new Error("Export has no download URL");
+  const res = await apiFetchUrl(result.download_url);
+  if (!res.ok) return fail(res);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `nhat-ky-${result.journal_date}-${result.format}`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
 }
 
 export type ManpowerPresetInput = Pick<

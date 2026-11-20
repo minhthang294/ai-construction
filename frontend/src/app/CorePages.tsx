@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import PageHeader from "./PageHeader";
+import ConstructionProgressChart, { type ConstructionProgressSummary } from "./ConstructionProgressChart";
 import {
   AcceptanceIcon,
   ArrowRightIcon,
-  AlertTriangleIcon,
   CameraIcon,
   CheckCircleIcon,
   ClockIcon,
@@ -374,6 +374,20 @@ export function Dashboard({
   const [photos, setPhotos] = useState<{ id: string; upload_time: string }[]>([]);
   const [report, setReport] = useState<{ report_date: string; manpower: { count: number | null }[] } | null>(null);
   const [error, setError] = useState("");
+  const [summary, setSummary] = useState<ConstructionProgressSummary | null>(null);
+  const [summaryFailed, setSummaryFailed] = useState(false);
+  useEffect(() => {
+    const controller = new AbortController();
+    request(`/projects/${projectId}/progress/summary`, token, { signal: controller.signal }).then(
+      (data: ConstructionProgressSummary) => {
+        if (!controller.signal.aborted) setSummary(data);
+      },
+      () => {
+        if (!controller.signal.aborted) setSummaryFailed(true);
+      },
+    );
+    return () => controller.abort();
+  }, [projectId, token]);
   useEffect(() => {
     let active = true;
     Promise.allSettled([
@@ -392,20 +406,18 @@ export function Dashboard({
   }, [projectId, token, date]);
   const count = (status: string) => items.filter((item) => item.status === status).length;
   const total = items.length;
-  const completed = count("completed");
-  const progress = total ? Math.round((completed / total) * 100) : 0;
   const manpower = report ? report.manpower.reduce((sum, entry) => sum + (entry.count ?? 0), 0) : 0;
   const cards = [
-    ["Tổng công việc", total, "Toàn bộ danh mục", "#405e9b"],
-    ["Đang thi công", count("in_progress"), "Cần theo dõi hôm nay", "#0369a1"],
-    ["Chờ nghiệm thu", count("pending_acceptance"), "Cần lập PYC/BBNT", "#b45309"],
-    ["Cần khắc phục", count("rectify"), "Ưu tiên xử lý", "#b91c1c"],
+    ["Tổng hạng mục", total, "Toàn bộ danh mục", "#405e9b"],
+    ["Hạng mục đang thi công", count("in_progress"), "Cần theo dõi hôm nay", "#0369a1"],
+    ["Hạng mục chờ nghiệm thu", count("pending_acceptance"), "Cần lập PYC/BBNT", "#b45309"],
+    ["Hạng mục cần khắc phục", count("rectify"), "Ưu tiên xử lý", "#b91c1c"],
   ] as const;
   const quickActions = [
+    { label: "Cập nhật tiến độ thi công", page: "components", icon: WorkIcon, description: "Ghi tiến độ theo mã cọc, dầm" },
     { label: "Báo cáo hiện trường", page: "daily-report", icon: CameraIcon, description: "Nhân lực, ảnh, nhật ký" },
     { label: "Lập phiếu nghiệm thu", page: "acceptance", icon: AcceptanceIcon, description: "PYC và BBNT" },
     { label: "Hỏi AI hồ sơ", page: "documents", icon: DocumentsIcon, description: "Tra cứu bản vẽ, thuyết minh" },
-    { label: "Cập nhật công việc", page: "work-items", icon: WorkIcon, description: "Trạng thái hạng mục" },
   ];
   return (
     <div className="space-y-6">
@@ -422,49 +434,40 @@ export function Dashboard({
         }
       />
       {error && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</p>}
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {cards.map(([label, value, hint, accent]) => (
-          <div key={label} className="app-kpi" style={{ "--kpi-accent": accent } as CSSProperties}>
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</p>
-            <p className="mt-1 text-3xl font-semibold tabular-nums tracking-tight text-slate-950">{value}</p>
-            <p className="mt-1 text-xs text-slate-500">{hint}</p>
-          </div>
-        ))}
-      </div>
+      <section className="app-card app-card-pad">
+        <h2 className="text-base font-semibold text-slate-950">Việc nhanh</h2>
+        <div className="mt-3 grid gap-2 min-[375px]:grid-cols-2 xl:grid-cols-4">
+          {quickActions.map(({ page, label, icon: ActionIcon, description }) => (
+            <button
+              key={page}
+              type="button"
+              className="flex min-h-14 min-w-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-left hover:border-teal-700/40 hover:bg-teal-50 sm:px-3"
+              onClick={() => onNavigate?.(page)}
+              disabled={!onNavigate}
+            >
+              <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-teal-50 text-teal-700">
+                <ActionIcon className="size-4" />
+              </span>
+              <span className="min-w-0">
+                <span className="block text-sm font-semibold text-slate-800">{label}</span>
+                <span className="block text-xs text-slate-600">{description}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      </section>
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(20rem,.75fr)]">
         <section className="app-card app-card-pad">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <h2 className="text-base font-semibold text-slate-950">Tiến độ thi công</h2>
-              <p className="mt-1 text-xs text-slate-500">{completed}/{total} hạng mục hoàn thành</p>
-            </div>
-            <span className="text-2xl font-semibold tabular-nums text-[#405e9b]">{progress}%</span>
-          </div>
-          <div className="mt-4 h-2.5 overflow-hidden rounded-full bg-slate-100" role="progressbar" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100} aria-label="Tiến độ thi công">
-            <div className="h-full rounded-full bg-[#405e9b]" style={{ width: `${progress}%` }} />
-          </div>
-          <div className="mt-5 grid gap-2 sm:grid-cols-2">
-            {[
-              ["Đang thi công", count("in_progress"), "#0369a1"],
-              ["Chờ nghiệm thu", count("pending_acceptance"), "#b45309"],
-              ["Hoàn thành", completed, "#15803d"],
-              ["Cần khắc phục", count("rectify"), "#b91c1c"],
-            ].map(([label, value, accent]) => (
-              <div key={label as string} className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-2.5">
-                <span className="flex items-center gap-2 text-sm text-slate-600">
-                  <span className="h-2 w-2 rounded-full" style={{ background: accent as string }} aria-hidden="true" />
-                  {label as string}
-                </span>
-                <span className="font-semibold tabular-nums text-slate-900">{value as number}</span>
-              </div>
-            ))}
-          </div>
-          <div className="mt-5 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm leading-6 text-amber-950">
-            <AlertTriangleIcon className="mt-0.5 h-4 w-4 shrink-0" />
-            <p>Kiểm tra các hạng mục chờ nghiệm thu trước khi lập phiếu để tránh sai khối lượng hoặc vị trí.</p>
-          </div>
+          <h2 className="text-base font-semibold text-slate-950">Tiến độ thi công</h2>
+          {summaryFailed ? (
+            <p role="alert" className="mt-3 text-sm text-red-800">Chưa tải được tiến độ thi công.</p>
+          ) : summary ? (
+            <ConstructionProgressChart summary={summary} />
+          ) : (
+            <p role="status" className="mt-3 text-sm text-slate-600">Đang tải tiến độ thi công…</p>
+          )}
         </section>
-        <div className="space-y-4">
+        <div>
           <section className="app-card app-card-pad">
             <h2 className="text-base font-semibold text-slate-950">Báo cáo ngày</h2>
             <div className="mt-3 space-y-2 text-sm">
@@ -487,33 +490,16 @@ export function Dashboard({
               </button>
             )}
           </section>
-          <section className="app-card app-card-pad">
-            <h2 className="text-base font-semibold text-slate-950">Việc nhanh</h2>
-            <div className="mt-3 space-y-2">
-              {quickActions.map((action) => {
-                const ActionIcon = action.icon;
-                return (
-                  <button
-                    key={action.page}
-                    type="button"
-                    className="flex w-full items-center gap-3 rounded-xl border border-slate-200 bg-white p-3 text-left transition-colors hover:border-[#405e9b]/35 hover:bg-[#405e9b]/5"
-                    onClick={() => onNavigate?.(action.page)}
-                    disabled={!onNavigate}
-                  >
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#405e9b]/10 text-[#405e9b]">
-                      <ActionIcon className="h-4 w-4" />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-sm font-semibold text-slate-800">{action.label}</span>
-                      <span className="block text-xs text-slate-500">{action.description}</span>
-                    </span>
-                    <ArrowRightIcon className="h-4 w-4 shrink-0 text-slate-400" />
-                  </button>
-                );
-              })}
-            </div>
-          </section>
         </div>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {cards.map(([label, value, hint, accent]) => (
+          <div key={label} className="app-kpi" style={{ "--kpi-accent": accent } as CSSProperties}>
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</p>
+            <p className="mt-1 text-3xl font-semibold tabular-nums tracking-tight text-slate-950">{value}</p>
+            <p className="mt-1 text-xs text-slate-500">{hint}</p>
+          </div>
+        ))}
       </div>
     </div>
   );

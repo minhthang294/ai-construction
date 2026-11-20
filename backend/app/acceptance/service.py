@@ -15,7 +15,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -30,9 +30,11 @@ from .models import (
     AcceptanceParticipantProfile,
     AcceptanceRecord,
     AcceptanceRequest,
+    ComponentAcceptanceLink,
 )
 from .schemas import (
     ChecklistIn,
+    ComponentLinkIn,
     ConfirmIn,
     ExportIn,
     NumberingIn,
@@ -47,9 +49,19 @@ from .schemas import (
 from .template import copy_and_fill, sha256_file, template_path, validate_template
 
 try:  # shared core when available
+    from app.core.component_models import (
+        ComponentStage as _SharedComponentStage,
+        RepairScope as _SharedRepairScope,
+        StageDefinition as _SharedStageDefinition,
+        StructuralComponent as _SharedStructuralComponent,
+    )
     from app.core.models import Project as _SharedProject  # type: ignore
     from app.core.models import WorkItem as _SharedWorkItem  # type: ignore
 except Exception:  # pragma: no cover - isolated fallback
+    _SharedComponentStage = None  # type: ignore
+    _SharedRepairScope = None  # type: ignore
+    _SharedStageDefinition = None  # type: ignore
+    _SharedStructuralComponent = None  # type: ignore
     _SharedProject = None  # type: ignore
     _SharedWorkItem = None  # type: ignore
 
@@ -1134,8 +1146,275 @@ def delete_request(
         },
     )
     _delete_export_artifacts(db, project_id, source_ids)
+    db.execute(
+        delete(ComponentAcceptanceLink).where(
+            ComponentAcceptanceLink.project_id == project_id,
+            or_(
+                ComponentAcceptanceLink.request_id == request.id,
+                ComponentAcceptanceLink.record_id.in_([record.id for record in records]),
+            ),
+        )
+    )
     db.delete(request)
     db.commit()
+
+
+def _component_contract():
+    if any(
+        model is None
+        for model in (
+            _SharedStructuralComponent,
+            _SharedComponentStage,
+            _SharedStageDefinition,
+            _SharedRepairScope,
+        )
+    ):
+        raise AcceptanceError(
+            503,
+            "Danh mục cấu kiện chưa sẵn sàng",
+            "component_contract_unavailable",
+        )
+    return (
+        _SharedStructuralComponent,
+        _SharedComponentStage,
+        _SharedStageDefinition,
+        _SharedRepairScope,
+    )
+
+
+def _link_target(
+    db: Session,
+    project_id: str,
+    *,
+    request_id: Optional[str] = None,
+    record_id: Optional[str] = None,
+) -> tuple[Optional[AcceptanceRequest], Optional[AcceptanceRecord]]:
+    if bool(request_id) == bool(record_id):
+        raise AcceptanceError(
+            422,
+            "Liên kết phải trỏ tới đúng một PYC hoặc BBNT",
+            "component_link_target_invalid",
+        )
+    if record_id:
+        record = get_record(db, project_id, record_id)
+        if record is None:
+            raise AcceptanceError(404, "Không tìm thấy BBNT trong công trình", "record_not_found")
+        return None, record
+    request = get_request(db, project_id, request_id or "")
+    if request is None:
+        raise AcceptanceError(404, "Không tìm thấy PYC trong công trình", "request_not_found")
+    return request, None
+
+
+def _component_link_payload(link, component, stage, definition, scope) -> Dict[str, Any]:
+    return {
+        "id": link.id,
+        "component_id": component.id,
+        "component_code": component.canonical_code,
+        "stage_id": stage.id if stage is not None else None,
+        "stage_code": definition.code if definition is not None else None,
+        "stage_name": definition.name if definition is not None else None,
+        "scope_id": scope.id if scope is not None else None,
+        "scope_kind": scope.kind if scope is not None else None,
+        "scope_revision": scope.revision if scope is not None else None,
+        "request_id": link.request_id,
+        "record_id": link.record_id,
+    }
+
+
+def list_component_links(
+    db: Session,
+    project_id: str,
+    *,
+    request_id: Optional[str] = None,
+    record_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    component_model, stage_model, definition_model, scope_model = _component_contract()
+    request, record = _link_target(
+        db, project_id, request_id=request_id, record_id=record_id
+    )
+    target = (
+        ComponentAcceptanceLink.request_id == request.id
+        if request is not None
+        else ComponentAcceptanceLink.record_id == record.id
+    )
+    rows = db.execute(
+        select(
+            ComponentAcceptanceLink,
+            component_model,
+            stage_model,
+            definition_model,
+            scope_model,
+        )
+        .join(component_model, ComponentAcceptanceLink.component_id == component_model.id)
+        .outerjoin(stage_model, ComponentAcceptanceLink.stage_id == stage_model.id)
+        .outerjoin(definition_model, stage_model.stage_definition_id == definition_model.id)
+        .outerjoin(scope_model, ComponentAcceptanceLink.scope_id == scope_model.id)
+        .where(ComponentAcceptanceLink.project_id == project_id, target)
+        .order_by(
+            component_model.canonical_code,
+            definition_model.position,
+            definition_model.code,
+            scope_model.revision,
+            scope_model.kind,
+            ComponentAcceptanceLink.id,
+        )
+    ).all()
+    return [
+        _component_link_payload(link, component, stage, definition, scope)
+        for link, component, stage, definition, scope in rows
+    ]
+
+
+def replace_component_links(
+    db: Session,
+    project_id: str,
+    *,
+    request_id: Optional[str] = None,
+    record_id: Optional[str] = None,
+    links: Sequence[ComponentLinkIn],
+    actor_id: Optional[str],
+) -> List[Dict[str, Any]]:
+    """Replace every link for one PYC or one BBNT revision atomically.
+
+    Review is explicit (``reviewed: true`` at the API).  Nothing is inferred
+    from DM rows, work items, seed dates or the other acceptance target.
+    """
+
+    request, record = _link_target(
+        db, project_id, request_id=request_id, record_id=record_id
+    )
+    if record is not None and record.status == "confirmed":
+        raise AcceptanceError(
+            409,
+            "BBNT đã xác nhận; không thể đổi liên kết cấu kiện",
+            "record_confirmed",
+        )
+    if not actor_id:
+        raise AcceptanceError(401, "Cần người dùng đã xác thực", "authentication_required")
+
+    component_model, stage_model, _definition_model, scope_model = _component_contract()
+    component_ids = {item.component_id for item in links}
+    components = {
+        item.id: item
+        for item in db.scalars(
+            select(component_model).where(
+                component_model.project_id == project_id,
+                component_model.id.in_(component_ids),
+            )
+        )
+    }
+    missing_component = component_ids - components.keys()
+    if missing_component:
+        raise AcceptanceError(404, "Không tìm thấy cấu kiện trong công trình", "component_not_found")
+
+    stage_ids = {item.stage_id for item in links if item.stage_id}
+    stages = {
+        item.id: item
+        for item in db.scalars(select(stage_model).where(stage_model.id.in_(stage_ids)))
+    }
+    missing_stage = stage_ids - stages.keys()
+    if missing_stage:
+        raise AcceptanceError(404, "Không tìm thấy bước thi công", "stage_not_found")
+
+    scope_ids = {item.scope_id for item in links if item.scope_id}
+    scopes = {
+        item.id: item
+        for item in db.scalars(select(scope_model).where(scope_model.id.in_(scope_ids)))
+    }
+    missing_scope = scope_ids - scopes.keys()
+    if missing_scope:
+        raise AcceptanceError(404, "Không tìm thấy phạm vi sửa chữa", "scope_not_found")
+
+    normalized: List[tuple[str, Optional[str], Optional[str]]] = []
+    seen = set()
+    for item in links:
+        component = components[item.component_id]
+        stage = stages.get(item.stage_id) if item.stage_id else None
+        scope = scopes.get(item.scope_id) if item.scope_id else None
+        if stage is not None and stage.component_id != component.id:
+            raise AcceptanceError(
+                409, "Bước thi công không thuộc cấu kiện", "stage_component_mismatch"
+            )
+        if scope is not None and scope.component_id != component.id:
+            raise AcceptanceError(
+                409, "Phạm vi không thuộc cấu kiện", "scope_component_mismatch"
+            )
+        if stage is not None and scope is not None and stage.repair_scope_id != scope.id:
+            raise AcceptanceError(
+                409, "Bước thi công không thuộc phạm vi đã chọn", "stage_scope_mismatch"
+            )
+        key = (component.id, item.stage_id, item.scope_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(key)
+
+    target_filter = (
+        ComponentAcceptanceLink.request_id == request.id
+        if request is not None
+        else ComponentAcceptanceLink.record_id == record.id
+    )
+    existing = {
+        (link.component_id, link.stage_id, link.scope_id): link
+        for link in db.scalars(
+            select(ComponentAcceptanceLink).where(
+                ComponentAcceptanceLink.project_id == project_id, target_filter
+            )
+        )
+    }
+    desired = set(normalized)
+    for key, link in existing.items():
+        if key not in desired:
+            db.delete(link)
+    for component_id, stage_id, scope_id in desired - existing.keys():
+        db.add(
+            ComponentAcceptanceLink(
+                project_id=project_id,
+                component_id=component_id,
+                stage_id=stage_id,
+                scope_id=scope_id,
+                request_id=request.id if request is not None else None,
+                record_id=record.id if record is not None else None,
+                created_by=actor_id,
+            )
+        )
+    ordered = sorted(
+        normalized,
+        key=lambda item: (
+            components[item[0]].canonical_code,
+            item[1] or "",
+            item[2] or "",
+        ),
+    )
+    _audit(
+        db,
+        project_id=project_id,
+        actor_id=actor_id,
+        action="component_links_replaced",
+        entity="AcceptanceRecord" if record is not None else "AcceptanceRequest",
+        entity_id=record.id if record is not None else request.id,
+        detail={
+            "target": "bbnt" if record is not None else "pyc",
+            "links": [
+                {"component_id": component_id, "stage_id": stage_id, "scope_id": scope_id}
+                for component_id, stage_id, scope_id in ordered
+            ],
+        },
+    )
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise AcceptanceError(
+            409, "Liên kết vừa thay đổi; hãy tải lại", "component_link_conflict"
+        ) from exc
+    return list_component_links(
+        db,
+        project_id,
+        request_id=request.id if request is not None else None,
+        record_id=record.id if record is not None else None,
+    )
 
 
 def _replace_participants(db: Session, record: AcceptanceRecord, items: Sequence[ParticipantIn]) -> None:

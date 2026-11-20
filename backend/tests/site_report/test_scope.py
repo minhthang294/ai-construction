@@ -13,8 +13,22 @@ from app.site.dependencies import (
 from app.site.router import router
 
 
+# POST routes that only read data. Viewers must be able to call these, so they
+# are exempt from the editor-role rule below.
+READ_ONLY_POST_PATHS = {
+    "/projects/{project_id}/progress/design-quantities",
+}
+
+
 def _dependency_calls(route):
     return [dependency.call for dependency in route.dependant.dependencies]
+
+
+def _is_write_route(route):
+    methods = (route.methods or set()) - (
+        {"POST"} if route.path in READ_ONLY_POST_PATHS else set()
+    )
+    return bool(methods & {"POST", "PUT", "PATCH", "DELETE"})
 
 
 def test_every_route_requires_project_membership():
@@ -26,9 +40,8 @@ def test_every_route_requires_project_membership():
 
 
 def test_write_routes_require_editor_role():
-    write_methods = {"POST", "PUT", "PATCH", "DELETE"}
     for route in router.routes:
-        if not (route.methods or set()) & write_methods:
+        if not _is_write_route(route):
             continue
         calls = _dependency_calls(route)
         assert require_site_editor in calls, f"{route.path} allows viewer writes"
@@ -36,7 +49,7 @@ def test_write_routes_require_editor_role():
 
 def test_read_routes_do_not_require_editor_role():
     for route in router.routes:
-        if (route.methods or set()) & {"POST", "PUT", "PATCH", "DELETE"}:
+        if _is_write_route(route):
             continue
         calls = _dependency_calls(route)
         assert require_project_member in calls, f"{route.path} is not read-scoped"

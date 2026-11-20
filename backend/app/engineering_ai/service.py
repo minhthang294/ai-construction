@@ -97,6 +97,10 @@ class DocumentConflict(RuntimeError):
     """Ingest cannot start because the document is already running."""
 
 
+class PageExtractionConflict(RuntimeError):
+    """Verified extraction must not be overwritten by the same version key."""
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -633,6 +637,11 @@ def save_page_extraction(
             PageExtraction.mode == payload.mode,
         )
     )
+    if row is not None and row.status == "verified":
+        raise PageExtractionConflict(
+            "Extraction đã được xác minh; không ghi đè. "
+            "Hãy tạo phiên bản mới bằng model, prompt_version hoặc mode khác."
+        )
     if row is None:
         row = PageExtraction(
             project_id=project_id,

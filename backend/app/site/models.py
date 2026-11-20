@@ -177,6 +177,23 @@ class PhotoWorkItemLink(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
 
 
+class SiteProgressBulkBatch(Base):
+    """One reviewed bulk progress update; idempotent per project and key."""
+
+    __tablename__ = "component_progress_batches"
+    __table_args__ = (
+        UniqueConstraint("project_id", "idempotency_key", name="uq_progress_batch_project_key"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    project_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    idempotency_key: Mapped[str] = mapped_column(String(120), nullable=False)
+    payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    result_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+
+
 class GeneratedDocument(Base):
     __tablename__ = "generated_documents"
 

@@ -35,6 +35,8 @@ from .dependencies import (
 from .errors import AcceptanceError
 from .models import AcceptanceGeneratedDocument
 from .schemas import (
+    ComponentLinkOut,
+    ComponentLinksIn,
     ConfirmIn,
     DailyReportLinkOut,
     ExportIn,
@@ -70,6 +72,7 @@ from .service import (
     get_record,
     get_request,
     get_request_daily_report,
+    list_component_links,
     list_exports,
     list_profiles,
     list_records,
@@ -78,6 +81,7 @@ from .service import (
     preview_request,
     preview_request_image,
     record_payload,
+    replace_component_links,
     update_numbering,
     update_profile,
     update_record,
@@ -336,6 +340,45 @@ def delete_acceptance_request(
     return None
 
 
+@router.get(
+    "/projects/{project_id}/acceptance-requests/{request_id}/component-links",
+    response_model=list[ComponentLinkOut],
+)
+def get_acceptance_request_component_links(
+    project_id: str,
+    request_id: str,
+    db: Session = Depends(get_db),
+    user=Depends(require_project_member),
+):
+    try:
+        return list_component_links(db, project_id, request_id=request_id)
+    except AcceptanceError as exc:
+        return _error(exc)
+
+
+@router.put(
+    "/projects/{project_id}/acceptance-requests/{request_id}/component-links",
+    response_model=list[ComponentLinkOut],
+)
+def put_acceptance_request_component_links(
+    project_id: str,
+    request_id: str,
+    payload: ComponentLinksIn,
+    db: Session = Depends(get_db),
+    user=Depends(require_editor),
+):
+    try:
+        return replace_component_links(
+            db,
+            project_id,
+            request_id=request_id,
+            links=payload.links,
+            actor_id=current_user_id(user),
+        )
+    except AcceptanceError as exc:
+        return _error(exc)
+
+
 @router.post(
     "/projects/{project_id}/acceptance-requests/{request_id}/exports",
     response_model=ExportOut,
@@ -453,6 +496,45 @@ def get_acceptance_record(
     if record is None:
         raise HTTPException(status_code=404, detail="Không tìm thấy BBNT trong công trình")
     return RecordOut.model_validate(record_payload(record, db))
+
+
+@router.get(
+    "/projects/{project_id}/acceptance-records/{record_id}/component-links",
+    response_model=list[ComponentLinkOut],
+)
+def get_acceptance_record_component_links(
+    project_id: str,
+    record_id: str,
+    db: Session = Depends(get_db),
+    user=Depends(require_project_member),
+):
+    try:
+        return list_component_links(db, project_id, record_id=record_id)
+    except AcceptanceError as exc:
+        return _error(exc)
+
+
+@router.put(
+    "/projects/{project_id}/acceptance-records/{record_id}/component-links",
+    response_model=list[ComponentLinkOut],
+)
+def put_acceptance_record_component_links(
+    project_id: str,
+    record_id: str,
+    payload: ComponentLinksIn,
+    db: Session = Depends(get_db),
+    user=Depends(require_editor),
+):
+    try:
+        return replace_component_links(
+            db,
+            project_id,
+            record_id=record_id,
+            links=payload.links,
+            actor_id=current_user_id(user),
+        )
+    except AcceptanceError as exc:
+        return _error(exc)
 
 
 @router.get(

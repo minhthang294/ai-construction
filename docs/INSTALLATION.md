@@ -1,5 +1,7 @@
 # Cài đặt
 
+Xem [quy trình triển khai trên Google Compute Engine](GOOGLE_VM_DEPLOYMENT.md) để đóng gói, cấu hình HTTPS, sao lưu và cập nhật VM.
+
 ## Yêu cầu
 
 Python 3.12+, Node/npm, SQLite, LibreOffice (nếu cần xuất PYC/BBNT PDF), Tesseract với dữ liệu `vie` (nếu cần OCR PDF scan tiếng Việt). AI provider bên ngoài là tùy chọn; không cần API key để chạy test và chế độ trích dẫn từ hồ sơ.

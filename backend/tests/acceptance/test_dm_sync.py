@@ -92,6 +92,78 @@ def test_sync_updates_row_when_pyc_number_changes(tmp_path, monkeypatch):
     assert ws.cell(8, 2).value is None
 
 
+def test_update_keeps_sampling_and_acceptance_dates_typed_by_a_human(
+    tmp_path, monkeypatch
+):
+    workbook_path = _dm_workbook(tmp_path / "dm.xlsx")
+    monkeypatch.setenv("ACCEPTANCE_DM_WORKBOOK", str(workbook_path))
+
+    assert sync_request_to_dm(_request()).synced is True
+
+    workbook = load_workbook(workbook_path, data_only=False)
+    ws = workbook["DM"]
+    ws.cell(7, 6).value = "12/11/2026"  # Lấy mẫu
+    ws.cell(7, 7).value = "13/11/2026"  # NT
+    ws.cell(7, 9).value = "14/11/2026"  # KẾT THÚC
+    workbook.save(workbook_path)
+
+    assert sync_request_to_dm(_request(content="Nội dung đã sửa")).synced is True
+
+    workbook = load_workbook(workbook_path, data_only=False)
+    ws = workbook["DM"]
+    assert ws.cell(7, 3).value == "Nội dung đã sửa"
+    assert [ws.cell(7, column).value for column in (6, 7, 9)] == [
+        "12/11/2026",
+        "13/11/2026",
+        "14/11/2026",
+    ]
+
+
+def test_new_row_skips_a_blank_row_that_already_has_human_dates(
+    tmp_path, monkeypatch
+):
+    workbook_path = _dm_workbook(tmp_path / "dm.xlsx")
+    monkeypatch.setenv("ACCEPTANCE_DM_WORKBOOK", str(workbook_path))
+
+    workbook = load_workbook(workbook_path, data_only=False)
+    ws = workbook["DM"]
+    ws.cell(7, 6).value = "12/11/2026"  # Lấy mẫu
+    ws.cell(7, 7).value = "13/11/2026"  # NT
+    ws.cell(7, 9).value = "14/11/2026"  # KẾT THÚC
+    workbook.save(workbook_path)
+
+    assert sync_request_to_dm(_request(number="48")).synced is True
+
+    workbook = load_workbook(workbook_path, data_only=False)
+    ws = workbook["DM"]
+    assert [ws.cell(7, column).value for column in (6, 7, 9)] == [
+        "12/11/2026",
+        "13/11/2026",
+        "14/11/2026",
+    ]
+    assert ws.cell(7, 3).value is None
+    assert ws.cell(8, 2).value == 48
+    assert ws.cell(8, 3).value == "Đục bê tông om vỡ, tẩy gỉ cốt thép dầm"
+
+
+def test_leading_zero_number_updates_the_same_row_instead_of_duplicating(
+    tmp_path, monkeypatch
+):
+    workbook_path = _dm_workbook(tmp_path / "dm.xlsx")
+    monkeypatch.setenv("ACCEPTANCE_DM_WORKBOOK", str(workbook_path))
+
+    assert sync_request_to_dm(_request(number="007")).synced is True
+    assert sync_request_to_dm(
+        _request(number="007", content="Nội dung đã sửa")
+    ).synced is True
+
+    workbook = load_workbook(workbook_path, data_only=False)
+    ws = workbook["DM"]
+    assert ws.cell(7, 3).value == "Nội dung đã sửa"
+    assert ws.cell(8, 2).value is None
+    assert ws.cell(8, 3).value is None
+
+
 def test_missing_dm_workbook_returns_warning_without_raising(tmp_path, monkeypatch):
     monkeypatch.setenv(
         "ACCEPTANCE_DM_WORKBOOK", str(tmp_path / "missing.xlsx")

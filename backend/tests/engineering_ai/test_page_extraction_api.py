@@ -99,6 +99,45 @@ def test_save_upsert_and_verify_page_extraction(client, digital_document):
     assert rejected.json()["status"] == "rejected"
 
 
+def test_verified_extraction_is_not_overwritten_by_same_version(client, digital_document):
+    saved = _post_extraction(client, digital_document["id"]).json()
+    extraction_id = saved["id"]
+    original_summary = saved["extraction"]["summary"]
+    verified = client.patch(
+        f"/api/v1/projects/p1/page-extractions/{extraction_id}",
+        json={"status": "verified", "note": "Đã đối chiếu bản gốc."},
+    )
+    assert verified.status_code == 200, verified.text
+
+    altered = _extraction("Bản sửa 75 mm")
+    altered["summary"] = "Bản sửa đổi"
+    conflict = _post_extraction(
+        client, digital_document["id"], extraction=altered, confidence=0.3
+    )
+    assert conflict.status_code == 409, conflict.text
+
+    current = client.get(f"/api/v1/projects/p1/page-extractions/{extraction_id}").json()
+    assert current["status"] == "verified"
+    assert current["confidence"] == 0.8
+    assert current["extraction"]["summary"] == original_summary
+    assert current["extraction"]["key_values"][0]["value"] == "50"
+    assert current["verified_by"] == "test-user"
+    assert current["verify_note"] == "Đã đối chiếu bản gốc."
+
+    new_version = _post_extraction(
+        client,
+        digital_document["id"],
+        extraction=altered,
+        confidence=0.3,
+        prompt_version="poc-v2",
+    )
+    assert new_version.status_code == 200, new_version.text
+    assert new_version.json()["id"] != extraction_id
+    kept = client.get(f"/api/v1/projects/p1/page-extractions/{extraction_id}").json()
+    assert kept["status"] == "verified"
+    assert kept["extraction"]["summary"] == original_summary
+
+
 def test_page_extraction_scope_and_invalid_schema(client, digital_document):
     wrong_page = _post_extraction(client, digital_document["id"], page=99)
     assert wrong_page.status_code == 404

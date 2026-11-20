@@ -65,6 +65,7 @@ from .rate_limit import RateLimitExceeded, check_rate_limit
 from .service import (
     DocumentConflict,
     DocumentValidationError,
+    PageExtractionConflict,
     ask,
     compare_versions,
     confirm_effective,
@@ -455,6 +456,8 @@ def save_page_extraction_route(
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PageExtractionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except DocumentValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

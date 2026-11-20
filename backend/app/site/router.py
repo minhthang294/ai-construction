@@ -11,23 +11,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
-try:  # shared core
-    from app.core.database import get_db as _shared_get_db  # type: ignore
-except Exception:  # pragma: no cover
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-
-    _engine = create_engine("sqlite:///:memory:", future=True)
-    _SessionLocal = sessionmaker(bind=_engine, autoflush=False, autocommit=False, future=True)
-
-    def _shared_get_db():
-        db = _SessionLocal()
-        try:
-            yield db
-        finally:
-            db.close()
-
-
+from .db import get_db
 from .dependencies import (
     current_user_id,
     get_current_user,
@@ -82,10 +66,6 @@ from .service import (
 )
 
 router = APIRouter(prefix="", tags=["site-report"])
-
-
-def get_db():
-    yield from _shared_get_db()
 
 
 def _http_error(exc: Exception) -> HTTPException:
@@ -549,6 +529,14 @@ def download_generated(
         path, media_type, os.path.basename(str(path)), disposition="attachment"
     )
 
+
+# Progress and journal routes live in their own module but share this DB
+# dependency object so dependency overrides in tests cover both routers.
+from .journal import router as journal_router  # noqa: E402
+from .progress import router as progress_router  # noqa: E402
+
+router.routes.extend(progress_router.routes)
+router.routes.extend(journal_router.routes)
 
 # Keep the dependency imported for tests/overrides that target it explicitly.
 __all__ = ["router", "get_db", "get_current_user"]

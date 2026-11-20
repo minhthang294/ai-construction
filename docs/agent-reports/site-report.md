@@ -1,6 +1,82 @@
 # Site Report Agent Report
 
-Cập nhật: 12/11/2026 (vòng 7: nạp danh mục công việc/tổ chức cho ngày chưa có báo cáo). Phạm vi chính: `backend/app/site/`, `frontend/src/features/site/`, test tương ứng và file báo cáo này. Ngoại lệ vòng 5 do coordinator giao trực tiếp: chỉ `frontend/src/app/App.tsx` + `frontend/src/app/ChangePasswordDialog.tsx` cho UI đổi mật khẩu. Không sửa `backend/app/core`, `backend/app/models`, migration, module agent khác, Excel nguồn.
+Cập nhật: 18/11/2026 (vòng 9: snapshot nhật ký đã duyệt và xuất file có chứng cứ). Phạm vi chính: `backend/app/site/`, `frontend/src/features/site/`, test tương ứng và file báo cáo này. Ngoại lệ vòng 5 do coordinator giao trực tiếp: chỉ `frontend/src/app/App.tsx` + `frontend/src/app/ChangePasswordDialog.tsx` cho UI đổi mật khẩu. Không sửa `backend/app/core`, `backend/app/models`, migration, module agent khác, Excel nguồn.
+
+## Vòng 9 — snapshot nhật ký đã duyệt và xuất file
+
+- **Preview có hash duyệt**: `GET /journals/{date}/preview` trả `preview_sha256`, `snapshot_eligible`, `blockers`, `preview_text`, danh sách chứng cứ đã xác nhận, số chứng cứ bị bỏ, số BBNT đã xác nhận. Báo cáo ngày `draft` chặn snapshot (`DAILY_REPORT_NOT_REVIEWED`).
+- **Snapshot bất biến**: `POST /journals/{date}/snapshots` bắt buộc `{reviewed: true, preview_sha256}`. Server dựng lại preview, so hash; nếu dữ liệu/ảnh đổi thì trả `409` và không ghi. Snapshot gồm JSON đã duyệt + bản sao ảnh chứng cứ tại `journals/<date>/<snapshot_id>/evidence/`, lưu bằng `GeneratedDocument(kind=journal_snapshot)`; không cần bảng mới.
+- **Chỉ chứng cứ đã xác nhận**: ảnh báo cáo/tiến độ chỉ vào snapshot khi có `confirmed_caption` hoặc `category`; ảnh chưa xác nhận/không phân giải bị bỏ, ghi `omitted_evidence_refs` và cảnh báo. Không tự liên kết lại ảnh.
+- **Không nghiệm thu giả**: chỉ BBNT `confirmed` đúng ngày xác nhận mới vào preview/snapshot/export. Ngày không có BBNT ghi rõ “Chưa có BBNT đã xác nhận trong ngày”; không suy ra từ tiến độ.
+- **Xuất từ snapshot**: `POST /journals/{date}/exports` `{snapshot_id, format: pdf|docx|zip}` đọc JSON đã đóng băng, kiểm hash file và hash ảnh; PDF/DOCX nêu danh mục chứng cứ, ZIP kèm `snapshot.json`, `journal.txt`, `journal.pdf`, `journal.docx` và bytes ảnh đã xác nhận. Không đọc lại report/progress/acceptance live.
+- **UI**: tab “Nhật ký” trong màn hình Cấu kiện; xem preview, xác nhận tạo snapshot, tải JSON, xuất PDF/DOCX/ZIP, xem lịch sử. Không sửa app shell.
+
+### File thay đổi (vòng 9)
+
+- Backend: `backend/app/site/journal.py` (mới), `backend/app/site/progress.py` (preview evidence/text/hash), `backend/app/site/router.py` (gắn route journal).
+- Test: `backend/tests/site_report/test_journal_snapshot.py` (mới).
+- Frontend: `frontend/src/features/site/components/JournalPanel.tsx` (mới), `frontend/src/features/site/lib/journal.ts` + `.test.ts` (mới), `frontend/src/features/site/lib/api.ts`, `frontend/src/features/site/index.ts`, `frontend/src/features/site/components/ComponentCatalogImport.tsx` (tab Nhật ký).
+- Hợp đồng: `docs/API_CONTRACTS.md` (snapshot/export + semantics).
+- Không sửa `frontend/src/app`, core, migration, acceptance, Excel nguồn hay DB thật.
+
+### Đối chiếu UI/API với hợp đồng shared-core
+
+- Status tiến độ dùng đúng `IN_PROGRESS|COMPLETED|BLOCKED`; view thêm `NOT_STARTED` khi chưa có event và không đổi nghĩa event core.
+- Bulk site nhận `stage_definition_id` rồi phân giải sang `ComponentStage` đã gắn; core per-component nhận `stage_id`. Cả hai ghi cùng `component_progress_events`, nên không lệch dữ liệu.
+- `acceptance_status` đọc `component_acceptance_links` và kết quả BBNT `confirmed`; không suy ra từ tiến độ. Chưa có link thì `NOT_LINKED`.
+- Hợp đồng journal trước đây chỉ có preview; vòng này bổ sung snapshot/export và đã ghi vào `docs/API_CONTRACTS.md`. Không cần sửa route core.
+
+### Shared migration cần thiết
+
+**Không cần migration mới cho vòng này.** Snapshot/export dùng bảng `generated_documents` sẵn có (`kind`, `format`, `path`, `sha256`, `report_date`, `metadata_json`) và bảng `component_progress_batches` sẵn có từ migration shared-core `b3e5f7a9c1d2`. Nếu shared-core muốn tách bảng `journal_snapshots` hoặc thêm cột `reviewed_by` thì đó là migration tùy chọn cho tương lai, không cần để chạy code hiện tại.
+
+### Kiểm thử (vòng 9)
+
+- Backend toàn bộ, DB tạm: **343 passed, 7 skipped**. Riêng site: **69 passed**.
+- Frontend: **145 passed**, `tsc --noEmit` OK, production build OK.
+- Test journal bao phủ: chặn snapshot khi report nháp; sai `preview_sha256` không ghi; snapshot lưu đúng ảnh đã xác nhận, bỏ ảnh chưa xác nhận; hash file; ZIP có snapshot + text + PDF + DOCX + bytes ảnh; PDF/DOCX tải được; sửa report/progress sau snapshot không lọt vào export; BBNT draft không vào text/export; project khác 404; lịch sử export.
+
+### Unresolved / manual review (vòng 9)
+
+- PDF/DOCX chỉ liệt kê caption chứng cứ; bytes ảnh nằm trong ZIP (theo pattern export báo cáo ngày hiện có). Nếu cần nhúng ảnh trực tiếp vào PDF/DOCX thì phải mở rộng renderer và test layout.
+- Chưa có retention/xoá snapshot/export; snapshot cũ vẫn giữ khi report thay đổi (đúng chủ đích), cần chính sách lưu trữ riêng.
+- Snapshot không yêu cầu report ngày nếu chỉ có tiến độ/BBNT; preview ghi rõ mục báo cáo trống. Đây là chủ ý để không bịa dữ liệu, nhưng cần người dùng xác nhận nghiệp vụ.
+- Chưa có render/E2E trình duyệt cho tab Nhật ký; đã test helper, API, typecheck, build.
+- Không commit/push.
+
+## Vòng 8 — tiến độ cấu kiện và nhật ký đã duyệt
+
+- **Xem/lọc tiến độ**: `GET /projects/{p}/progress` gom cấu kiện + stages + sự kiện mới nhất; lọc theo mã/alias, khu, phân đoạn, loại, nhóm, phạm vi, nguồn, bước, trạng thái thi công và trạng thái nghiệm thu.
+- **Hai trạng thái độc lập**: `construction_status` (`NOT_STARTED|IN_PROGRESS|COMPLETED|BLOCKED`) lấy từ `ProgressEvent`; `acceptance_status` chỉ lấy từ liên kết tường minh `component_acceptance_links` (`NOT_LINKED|PENDING|APPROVED|CONDITIONAL|REJECTED|CONFIRMED`) và `acceptance_count` là số BBNT đã xác nhận. Không ghi/suy ra nghiệm thu từ tiến độ.
+- **Duyệt nhiều cấu kiện chính xác**: `POST /progress/bulk-preview` kiểm tra đúng `component_ids[]` + một `stage_definition_id`, trả cấu kiện thiếu, cấu kiện chưa gắn bước và `can_commit`; không ghi DB. `POST /progress/bulk` yêu cầu `{reviewed: true, idempotency_key, ...}` và kiểm lại đúng danh sách/bước trong transaction trước khi ghi `ProgressEvent` + audit.
+- **Idempotency bulk**: bảng `component_progress_batches` (đã có trong migration shared-core `b3e5f7a9c1d2`) lưu hash/result; retry cùng key không nhân đôi sự kiện.
+- **Nhật ký ngày chỉ đọc**: `GET /projects/{p}/journals/{date}/preview` trả báo cáo ngày, sự kiện thi công, BBNT `confirmed` đúng ngày và các mục `blank_sections`/`warnings`. Không tự điền thời tiết/thiết bị/thay đổi thiết kế/môi trường/nghiệm thu; báo cáo nháp chỉ cảnh báo, không dùng để xuất.
+- **UI**: tab “Tiến độ” trong màn hình Cấu kiện (site-owned, không sửa app shell). Bộ lọc, chọn từng cấu kiện hoặc tất cả đang lọc, xem lại danh sách chính xác từ máy chủ, xác nhận rồi mới lưu. Không cho bulk theo chuỗi văn bản.
+- **Không đổi app shell**: `frontend/src/app/App.tsx` không bị sửa trong vòng này.
+
+### File thay đổi (vòng 8)
+
+- Backend: `backend/app/site/db.py` (mới, dependency DB dùng chung cho router site), `backend/app/site/progress.py` (mới), `backend/app/site/models.py` (thêm `SiteProgressBulkBatch`), `backend/app/site/router.py` (gắn route tiến độ).
+- Test: `backend/tests/site_report/test_component_progress.py` (mới).
+- Frontend: `frontend/src/features/site/lib/componentProgress.ts` + `.test.ts` (mới), `frontend/src/features/site/components/ComponentProgressPanel.tsx` (mới), `frontend/src/features/site/components/ComponentCatalogImport.tsx` (tab), `frontend/src/features/site/lib/api.ts`, `frontend/src/features/site/index.ts`.
+- Hợp đồng: `docs/API_CONTRACTS.md` (route + quy tắc trạng thái/idempotency/nhật ký).
+- Không sửa migration, `backend/app/core`, acceptance, Excel nguồn hay DB thật.
+
+### Kiểm thử (vòng 8)
+
+- Backend toàn bộ, DB tạm: **333 passed, 7 skipped**. Riêng site: **66 passed**.
+- Frontend: **143 passed**, `tsc --noEmit` OK, production build OK.
+- Migration: `alembic upgrade head` và `downgrade -1` → `upgrade head` trên SQLite tạm OK; không dùng `data/app.db`.
+- Test tiến độ bao phủ: view/filter hai trạng thái độc lập; preview không ghi DB; chọn thiếu cấu kiện/bước bị chặn; `reviewed: false` bị 422; retry cùng key idempotent; key khác payload 409; ghi `COMPLETED` không tạo acceptance; acceptance chỉ đổi khi có link/BBNT xác nhận; journal chỉ lấy đúng ngày, BBNT confirmed, không tự điền mục trống.
+
+### Unresolved / manual review (vòng 8)
+
+- UI chưa tạo StageDefinition/ComponentStage; cần tạo bước và gắn vào cấu kiện bằng API core trước khi bulk khả dụng. Cấu kiện chưa gắn bước bị từ chối, không tự gắn.
+- UI gửi `evidence_refs: []`; API đã nhận tối đa 20 tham chiếu nhưng chưa có màn hình chọn ảnh chứng cứ đã xác nhận.
+- `acceptance_status` phụ thuộc acceptance agent nhập link; nếu chưa nhập link thì đúng là `NOT_LINKED`, không phải “chưa nghiệm thu thực tế”.
+- Journal mới là preview read-only, chưa có xuất Word/PDF và chưa có màn hình xem trong UI.
+- Chưa có test render/E2E trình duyệt cho tab Tiến độ; đã kiểm bằng helper Vitest, typecheck và build.
+- Không commit/push.
 
 ## Chức năng đã hoàn thành
 

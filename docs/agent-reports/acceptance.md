@@ -344,3 +344,17 @@ Files: `backend/app/acceptance/service.py`, `backend/app/acceptance/router.py`, 
    - Install LibreOffice with headless support (`libreoffice` or `soffice` on `PATH`).
    - Or set `ACCEPTANCE_LIBREOFFICE=/path/to/libreoffice`
    - Optional timeout: `ACCEPTANCE_PDF_TIMEOUT=120`
+
+## Vòng 9 - liên kết N–N cấu kiện/bước/phạm vi với PYC/BBNT
+
+Shared contract cho `StageDefinition`/`ComponentStage` đã landed trong lúc làm; `ComponentAcceptanceLink` do acceptance sở hữu. Đã thêm API đọc/thay link cho PYC và BBNT, giữ `reviewed: true`, không tự xác nhận nghiệm thu, không đổi preview/export và không backfill từ work item/DM.
+
+- Thiết kế và handoff migration: `docs/agent-reports/acceptance-component-links-design.md`.
+- Model: `backend/app/acceptance/models.py` - `ComponentAcceptanceLink`.
+- Schema/service/router: `backend/app/acceptance/schemas.py`, `service.py`, `router.py`.
+- Test: `backend/tests/acceptance/test_component_links.py` (15 test): `15 passed`; phủ draft -> submit PYC, draft -> confirm BBNT, N-N, nhiều scope, revision, xóa force, template SHA không đổi.
+- Acceptance suite: `102 passed, 6 skipped` (skip do thiếu LibreOffice), DB SQLite tạm.
+- Site progress đọc link: `tests/site_report/test_component_progress.py` `6 passed`.
+- Toàn bộ backend: `338 passed, 7 skipped`; migration `c4f6a8b0d2e3` roundtrip `upgrade -> downgrade -> upgrade` trên DB tạm, template SHA-256 không đổi.
+- Migration `c4f6a8b0d2e3_component_acceptance_links.py` đã có và khớp model; acceptance không sửa `backend/alembic` hay DB thật.
+- Gap còn lại (route trong API contract, rollup theo scope, link sau confirm, scope VERIFIED, UI) ghi ở `docs/agent-reports/acceptance-component-links-design.md`.

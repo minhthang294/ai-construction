@@ -41,12 +41,24 @@ def _number_value(number: str) -> Any:
     return int(value) if value.isdigit() else value
 
 
-def _same_number(value: Any, number: str) -> bool:
+def _number_key(value: Any) -> Optional[str]:
+    """Normalise a number so 1, 1.0 and "001" compare equal."""
+
     if value is None:
-        return False
+        return None
     if isinstance(value, str) and value.startswith("="):
-        return False
-    return str(value).strip() == (number or "").strip()
+        return None
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    text = str(value).strip()
+    if not text:
+        return None
+    return (text.lstrip("0") or "0") if text.isdigit() else text
+
+
+def _same_number(value: Any, number: str) -> bool:
+    key = _number_key(value)
+    return key is not None and key == _number_key(number)
 
 
 def _last_data_row(ws) -> int:
@@ -82,6 +94,11 @@ def _next_empty_row(ws) -> int:
             and ws.cell(candidate, 4).value in (None, "")
             and not (
                 isinstance(ws.cell(candidate, 2).value, (int, float))
+            )
+            # E-J are human fields too; never reuse a row that already holds one.
+            and all(
+                ws.cell(candidate, column).value in (None, "")
+                for column in range(5, 11)
             )
         ):
             return candidate
@@ -129,10 +146,13 @@ def _write_request(ws, request: Any, previous_number: Optional[str]) -> int:
     else:
         ws.cell(row, 5).value = None
     # Lấy mẫu / NT / Kết thúc stay blank unless the PYC model gains those fields.
-    ws.cell(row, 6).value = None
-    ws.cell(row, 7).value = None
+    # Only a row this app creates is cleared: on an existing row a human may have
+    # typed those dates, and an update must not wipe them.
+    if new_row:
+        ws.cell(row, 6).value = None
+        ws.cell(row, 7).value = None
+        ws.cell(row, 9).value = None
     ws.cell(row, 8).value = request.inspection_time
-    ws.cell(row, 9).value = None
     ws.cell(row, 10).value = request.location
     if new_row:
         ws.row_dimensions[row].height = 60

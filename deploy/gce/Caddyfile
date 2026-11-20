@@ -1,0 +1,15 @@
+construction.example.com {
+	encode zstd gzip
+
+	@backend path /api/* /health
+	handle @backend {
+		reverse_proxy 127.0.0.1:8765
+	}
+
+	handle {
+		root * /opt/ai-construction/current/frontend/dist
+		header Cache-Control "no-cache"
+		try_files {path} /index.html
+		file_server
+	}
+}

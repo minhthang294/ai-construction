@@ -231,6 +231,31 @@ class RecordOut(OrmBase):
     updated_at: datetime
 
 
+class ComponentLinkIn(BaseModel):
+    component_id: str = Field(min_length=1, max_length=36)
+    stage_id: Optional[str] = Field(default=None, max_length=36)
+    scope_id: Optional[str] = Field(default=None, max_length=36)
+
+
+class ComponentLinksIn(BaseModel):
+    reviewed: Literal[True]
+    links: List[ComponentLinkIn] = Field(default_factory=list, max_length=500)
+
+
+class ComponentLinkOut(BaseModel):
+    id: str
+    component_id: str
+    component_code: str
+    stage_id: Optional[str] = None
+    stage_code: Optional[str] = None
+    stage_name: Optional[str] = None
+    scope_id: Optional[str] = None
+    scope_kind: Optional[str] = None
+    scope_revision: Optional[int] = None
+    request_id: Optional[str] = None
+    record_id: Optional[str] = None
+
+
 class ConfirmIn(BaseModel):
     result: ResultState
     conclusion_note: Optional[str] = None

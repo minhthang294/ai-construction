@@ -6,6 +6,7 @@ from sqlalchemy import pool
 from alembic import context
 from app.core.database import Base, DATABASE_URL
 from app.core import models as core_models  # noqa: F401
+from app.core import component_models  # noqa: F401
 from app.site import models as site_models  # noqa: F401
 from app.acceptance import models as acceptance_models  # noqa: F401
 from app.engineering_ai import models as engineering_ai_models  # noqa: F401
