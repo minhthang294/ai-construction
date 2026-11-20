@@ -255,13 +255,27 @@ export function scopeLabel(scopeKind?: string | null): string {
   return "Phạm vi";
 }
 
+/** Server `position` order; code then id keeps ties deterministic without mutating input. */
+export function sortStagesByPosition<
+  T extends { position: number; code: string; id: string },
+>(stages: ReadonlyArray<T>): T[] {
+  return [...stages].sort(
+    (left, right) =>
+      left.position - right.position ||
+      left.code.localeCompare(right.code) ||
+      left.id.localeCompare(right.id),
+  );
+}
+
 export function stageOptionsFor(
   row: ProgressRow,
   stageDefinitionId: string,
 ): ProgressStage[] {
   if (!stageDefinitionId) return [];
-  return row.stages.filter(
-    (stage) => stage.stage_definition_id === stageDefinitionId,
+  return sortStagesByPosition(
+    row.stages.filter(
+      (stage) => stage.stage_definition_id === stageDefinitionId,
+    ),
   );
 }
 
@@ -319,7 +333,7 @@ export function buildDesignQuantityEntries(
 ): DesignQuantityEntry[] {
   const entries: DesignQuantityEntry[] = [];
   for (const row of rows) {
-    for (const stage of row.stages) {
+    for (const stage of sortStagesByPosition(row.stages)) {
       if (
         stageDefinitionId &&
         stage.stage_definition_id !== stageDefinitionId

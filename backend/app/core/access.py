@@ -9,7 +9,8 @@ from .models import Project, ProjectMember
 def require_project_member(project_id: str):
     user = get_current_user()
     with SessionLocal() as db:
-        if db.get(Project, project_id) is None:
+        project = db.get(Project, project_id)
+        if project is None or project.status == Project.DELETED_STATUS:
             raise HTTPException(404, "Project not found")
         if user.role != "admin" and db.scalar(select(ProjectMember).where(
             ProjectMember.project_id == project_id, ProjectMember.user_id == user.id)) is None:

@@ -6,7 +6,8 @@ Prefix `/api/v1`. JSON UTF-8. Auth Bearer; mọi request project-scoped kiểm m
 
 | Route | Ý nghĩa |
 | --- | --- |
-| `POST/GET /projects` | Tạo và liệt kê công trình được phép |
+| `POST/GET /projects` | Tạo và liệt kê công trình được phép; `can_delete` dành cho quản trị viên và quản lý công trình |
+| `DELETE /projects/{p}` | Xóa mềm, trả `{id}`, giữ hồ sơ liên quan và ghi audit. Công trình đã xóa bị ẩn và các API theo công trình trả `404`. |
 | `POST/GET /projects/{p}/work-items` | Danh mục công việc, import có preview trước khi lưu |
 | `GET /projects/{p}/segments?zone=...` | Các phân đoạn đã nhập trong công trình |
 | `GET /projects/{p}/components?q=...` | Danh mục theo project; `q` khớp mã chuẩn hoặc alias; lọc `zone`, `segment_id`, `type`, `group_id`, `scope` |
@@ -38,6 +39,7 @@ Mỗi giá trị trả về từ `progress/design-quantities` gồm `quantity` (
 | `GET/POST /projects/{p}/manpower-presets` và `PUT/DELETE /projects/{p}/manpower-presets/{id}` | Preset nhóm nhân lực theo công trình, chỉ dùng khi người dùng chọn |
 | `POST/GET /projects/{p}/photos` | Multipart upload nhiều ảnh; metadata location/component/stage và lọc `date`, `location`, `component`, `stage` |
 | `GET /projects/{p}/photos/{id}/original` | Stream file sau kiểm quyền |
+| `DELETE /projects/{p}/photos/{id}` | Xóa ảnh cùng công trình với quyền biên tập, trả `204`. Ảnh đang làm bằng chứng trả `409`. |
 | `POST /projects/{p}/daily-reports/{date}/exports` | `format=zalo|pdf|docx|zip`, bản chụp nội dung và history |
 | `POST/GET /projects/{p}/documents` | Upload PDF, version theo hash; liệt kê trạng thái ingest |
 | `GET /projects/{p}/documents/{id}/pages/{n}` | Trang gốc/render và OCR, yêu cầu quyền |

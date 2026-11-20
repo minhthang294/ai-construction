@@ -31,6 +31,7 @@ import {
   selectedProgressRows,
   selectedStageForRow,
   selectionsForSelected,
+  sortStagesByPosition,
   stageDefinitionLabel,
   stageOptionsFor,
   todayISO,
@@ -67,10 +68,10 @@ function errorMessage(error: unknown): string {
 }
 
 const STATUS_STYLES: Record<string, string> = {
-  NOT_STARTED: "border-slate-300 bg-slate-100 text-slate-800",
+  NOT_STARTED: "border-red-300 bg-red-100 text-red-900",
   IN_PROGRESS: "border-amber-300 bg-amber-100 text-amber-950",
   COMPLETED: "border-emerald-300 bg-emerald-100 text-emerald-950",
-  BLOCKED: "border-red-300 bg-red-100 text-red-900",
+  BLOCKED: "border-violet-300 bg-violet-100 text-violet-950",
 };
 
 function StatusChip({ status }: { status: string }) {
@@ -228,10 +229,16 @@ function ProgressCard({
             </span>
           </summary>
           <ul className="space-y-1 border-t border-slate-200 p-2 text-xs text-slate-600">
-            {row.stages.map((stage) => (
-              <li key={stage.id} className="break-words">
-                {stage.name} · {constructionStatusLabel(stage.status)}
-                {stage.scope_kind ? ` · ${scopeLabel(stage.scope_kind)}` : ""}
+            {sortStagesByPosition(row.stages).map((stage) => (
+              <li
+                key={stage.id}
+                className="flex min-w-0 flex-wrap items-center gap-1 break-words"
+              >
+                <span className="min-w-0 break-words">{stage.name}</span>
+                {stage.scope_kind ? (
+                  <span>· {scopeLabel(stage.scope_kind)}</span>
+                ) : null}
+                <StatusChip status={stage.status} />
               </li>
             ))}
           </ul>
@@ -421,10 +428,7 @@ export default function ComponentProgressPanel({ projectId }: Props) {
         });
       }
     }
-    return [...known, ...derived].sort(
-      (left, right) =>
-        left.position - right.position || left.code.localeCompare(right.code),
-    );
+    return sortStagesByPosition([...known, ...derived]);
   }, [definitions, selectedRows]);
 
   const activeFilterChips = useMemo(() => {

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { ComponentCatalogImport, SiteReportPage } from "../features/site";
+import InstallAppButton, { useInstallApp } from "../features/site/components/InstallAppButton";
 import { AcceptancePage } from "../features/acceptance";
 import { EngineeringAIPage } from "../features/engineering-ai";
 import { Dashboard, ProjectSetup, WorkItemList, request } from "./CorePages";
@@ -62,6 +63,7 @@ const NAV_ITEMS: Array<{ id: PageId; icon: typeof DashboardIcon }> = [
 const MOBILE_NAV: PageId[] = ["dashboard", "components", "daily-report", "acceptance", "documents"];
 
 export default function App() {
+  const installApp = useInstallApp();
   const [token, setToken] = useState(localStorage.getItem("access_token") || "");
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState("");
@@ -326,6 +328,7 @@ export default function App() {
         </nav>
 
         <div className="border-t border-slate-200 p-3">
+          <InstallAppButton {...installApp} />
           <button
             type="button"
             className="app-nav-item"
@@ -429,6 +432,16 @@ export default function App() {
                 localStorage.setItem("last_project_id", project.id);
               }}
               onUpdated={(project) => setProjects((current) => current.map((item) => item.id === project.id ? project : item))}
+              onDeleted={(id) => {
+                const remaining = projects.filter((project) => project.id !== id);
+                setProjects(remaining);
+                if (projectId === id) {
+                  const next = pickProjectId(remaining, "", localStorage.getItem("last_project_id"));
+                  setProjectId(next);
+                  if (next) localStorage.setItem("last_project_id", next);
+                  else localStorage.removeItem("last_project_id");
+                }
+              }}
             />
           ) : !projectId ? (
             <section className="app-card app-card-pad mx-auto max-w-2xl text-center">

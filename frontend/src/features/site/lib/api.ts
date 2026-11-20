@@ -189,6 +189,20 @@ export async function patchPhoto(
   return res.json();
 }
 
+/**
+ * Delete one project photo. The server returns 204 on success and 409 when the
+ * photo is linked to progress/journal/acceptance evidence.
+ */
+export async function deletePhoto(
+  projectId: string,
+  photoId: string,
+): Promise<void> {
+  const res = await apiFetch(`/projects/${projectId}/photos/${photoId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) return fail(res);
+}
+
 /** Fetch the original photo with the bearer token and return a blob URL. */
 export async function fetchPhotoObjectUrl(
   projectId: string,

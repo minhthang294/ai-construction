@@ -38,6 +38,8 @@ from .schemas import (
 from .service import (
     MAX_PHOTO_BYTES,
     EmptyPhoto,
+    PhotoDeleteConflict,
+    PhotoDeleteFileError,
     PhotoTooLarge,
     PhotoUploadConflict,
     ProjectResourceNotFound,
@@ -47,6 +49,7 @@ from .service import (
     create_manpower_preset,
     create_photo,
     delete_manpower_preset,
+    delete_photo,
     export_metadata,
     get_generated_document,
     get_owned_report,
@@ -71,8 +74,10 @@ router = APIRouter(prefix="", tags=["site-report"])
 def _http_error(exc: Exception) -> HTTPException:
     if isinstance(exc, ProjectResourceNotFound):
         return HTTPException(status_code=404, detail=str(exc))
-    if isinstance(exc, PhotoUploadConflict):
+    if isinstance(exc, (PhotoUploadConflict, PhotoDeleteConflict)):
         return HTTPException(status_code=409, detail=str(exc))
+    if isinstance(exc, PhotoDeleteFileError):
+        return HTTPException(status_code=500, detail=str(exc))
     if isinstance(exc, PhotoTooLarge):
         return HTTPException(status_code=413, detail=str(exc))
     if isinstance(exc, EmptyPhoto):
@@ -458,6 +463,30 @@ def patch_photo_route(
     if photo is None:
         raise HTTPException(status_code=404, detail="Photo not found")
     return _to_photo_out(photo, db)
+
+
+@router.delete(
+    "/projects/{project_id}/photos/{photo_id}",
+    status_code=204,
+)
+def delete_photo_route(
+    project_id: str,
+    photo_id: str,
+    db: Session = Depends(get_db),
+    user=Depends(require_site_editor),
+):
+    try:
+        deleted = delete_photo(
+            db,
+            project_id,
+            photo_id,
+            actor_id=current_user_id(user),
+        )
+    except (ProjectResourceNotFound, PhotoDeleteConflict, PhotoDeleteFileError) as exc:
+        raise _http_error(exc) from exc
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    return None
 
 
 # ---------------------------------------------------------------------------

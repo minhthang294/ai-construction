@@ -38,6 +38,7 @@ export type PhotoQueuePayload = {
   location?: string | null;
   component?: string | null;
   stage?: string | null;
+  workItemIds?: string[] | null;
 };
 
 export type QueueItem = {

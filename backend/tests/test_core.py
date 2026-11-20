@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 from app.core import access, auth, database
 from app.core.auth import password_hash
-from app.core.models import AuditLog, User
+from app.core.models import AuditLog, Project, User, WorkItem
 from app.main import app
 
 
@@ -40,6 +40,7 @@ def test_auth_project_scope_and_work_item(tmp_path, monkeypatch):
     viewer_token = client.post("/api/v1/auth/login", json={"username": "viewer-test", "password": "viewer-password-long"}).json()["access_token"]
     viewer = {"Authorization": f"Bearer {viewer_token}"}
     assert client.get(f"/api/v1/projects/{project_id}/work-items", headers=viewer).status_code == 404
+    assert client.delete(f"/api/v1/projects/{project_id}", headers=viewer).status_code == 404
     assert client.post(f"/api/v1/projects/{project_id}/members", headers=admin, params={"user_id": user.json()["id"], "role": "viewer"}).status_code == 201
     assert client.get(f"/api/v1/projects/{project_id}/work-items", headers=viewer).status_code == 200
     assert client.patch(f"/api/v1/projects/{project_id}", headers=viewer,
@@ -101,6 +102,19 @@ def test_auth_project_scope_and_work_item(tmp_path, monkeypatch):
                             files={"file": ("synthetic.xlsx", content.getvalue())})
     assert oversized.status_code == 422
     assert oversized.json()["detail"] == "XLSX expands beyond 100 MB"
+    project_url = f"/api/v1/projects/{project_id}"
+    assert client.get("/api/v1/projects", headers=viewer).json()[0]["can_delete"] is False
+    assert client.delete(project_url, headers=viewer).status_code == 403
+    assert client.delete(project_url, headers=admin).status_code == 200
+    assert client.delete(project_url, headers=admin).status_code == 404
+    assert client.get("/api/v1/projects", headers=viewer).json() == []
+    assert [p["id"] for p in client.get("/api/v1/projects", headers=admin).json()] == [second]
+    assert client.get(f"{project_url}/work-items", headers=admin).status_code == 404
+    assert client.get(f"{project_url}/progress", headers=admin).status_code == 404
+    with factory() as db:
+        assert db.get(Project, project_id).status == Project.DELETED_STATUS
+        assert db.get(WorkItem, created_item.json()["id"]) is not None
+        assert db.query(AuditLog).filter_by(project_id=project_id, action="delete", entity="Project").count() == 1
     assert client.post("/api/v1/auth/logout", headers=viewer).status_code == 200
     assert client.get(f"/api/v1/projects/{project_id}/work-items", headers=viewer).status_code == 401
 

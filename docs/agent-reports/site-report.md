@@ -1,6 +1,168 @@
 # Site Report Agent Report
 
-Cập nhật: 18/11/2026 (vòng 9: snapshot nhật ký đã duyệt và xuất file có chứng cứ). Phạm vi chính: `backend/app/site/`, `frontend/src/features/site/`, test tương ứng và file báo cáo này. Ngoại lệ vòng 5 do coordinator giao trực tiếp: chỉ `frontend/src/app/App.tsx` + `frontend/src/app/ChangePasswordDialog.tsx` cho UI đổi mật khẩu. Không sửa `backend/app/core`, `backend/app/models`, migration, module agent khác, Excel nguồn.
+## Vòng 11 — màu trạng thái từng bước và thứ tự bước theo `position`
+
+Cập nhật: 20/11/2026. Phạm vi: chỉ `frontend/src/features/site/components/ComponentProgressPanel.tsx`, `frontend/src/features/site/lib/componentProgress.ts`, `frontend/src/features/site/lib/componentProgress.test.ts` và file báo cáo này. Không sửa backend, shared core, migration, module agent khác, `data/app.db` hay Excel nguồn. Không stage/commit/deploy.
+
+### Chức năng đã hoàn thành
+
+- **Màu trạng thái từng bước**: danh sách “Bước thi công” trong mỗi thẻ cấu kiện hiển thị chip trạng thái thay cho chữ thường: `COMPLETED` xanh lá (emerald), `IN_PROGRESS` vàng (amber), `NOT_STARTED` đỏ (red), `BLOCKED` tím (violet) để phân biệt với `NOT_STARTED`. Chip `Thi công` ở cấp cấu kiện dùng cùng bảng màu nên không mâu thuẫn.
+- **Không đổi style nghiệm thu**: `AcceptanceChip` và các màu `APPROVED|PENDING|CONDITIONAL|REJECTED|NOT_LINKED` giữ nguyên.
+- **Thứ tự bước**: helper thuần `sortStagesByPosition` sắp theo `position` của server, tie-break bằng `code` rồi `id`; không sửa mảng gốc. Áp dụng cho danh sách bước từng cấu kiện, `stageOptionsFor` (danh sách chọn phạm vi/bước trong editor) và danh sách khối lượng thiết kế; sort definition trong editor dùng lại cùng helper.
+
+### File thay đổi
+
+- `frontend/src/features/site/lib/componentProgress.ts`: thêm `sortStagesByPosition`; `stageOptionsFor` và `buildDesignQuantityEntries` trả theo thứ tự đã sort.
+- `frontend/src/features/site/components/ComponentProgressPanel.tsx`: bảng màu trạng thái, chip từng bước, dùng helper sort.
+- `frontend/src/features/site/lib/componentProgress.test.ts`: test thứ tự bước.
+- `docs/agent-reports/site-report.md`: mục này.
+
+### API / model
+
+- Không thêm API hay model. Dùng dữ liệu sẵn có từ `GET /api/v1/projects/{p}/progress` (`stages[].position/code/id/status`) và `GET /api/v1/projects/{p}/stage-definitions`.
+- Không cần migration.
+
+### Kiểm thử đã chạy
+
+```bash
+cd frontend
+npx vitest run src/features/site/lib/componentProgress.test.ts   # 14 passed
+npx tsc --noEmit                                                  # OK
+```
+
+Test bao phủ: sort theo `position`; tie-break `code` rồi `id`; không thay đổi mảng đầu vào; `stageOptionsFor` giữ đúng thứ tự. **Chưa chạy** test render/E2E trình duyệt cho màu chip và **chưa chạy** full `npm test`/`npm run build` (các thay đổi đang có của agent khác trong working tree).
+
+### Unresolved
+
+- Chưa có ảnh chụp/kiểm tra trực quan trên thiết bị thật; màu được kiểm bằng class Tailwind, không bằng test DOM.
+- Màu `NOT_STARTED` đỏ là yêu cầu nghiệp vụ của vòng này; nếu muốn quay lại xám, chỉ cần đổi `STATUS_STYLES.NOT_STARTED`.
+- Không commit/push/deploy, không đọc/ghi DB thật.
+
+### Cách chạy
+
+```bash
+cd frontend
+npx vitest run src/features/site/lib/componentProgress.test.ts
+npx tsc --noEmit
+```
+
+## Vòng 10 - ảnh hiện trường: camera/thư viện, watermark/nén, xóa ảnh
+
+Cập nhật: 20/11/2026. Phạm vi thay đổi: `frontend/src/features/site/`, test tương ứng và file báo cáo này. Không sửa `backend/`, `backend/app/core`, migration, `frontend/src/app`, DB dùng chung, hay Excel nguồn.
+
+### Chức năng đã hoàn thành
+
+- **Camera và thư viện tách riêng**: nút `Chụp ảnh` dùng input `capture="environment"`; nút `Chọn ảnh từ máy` dùng input riêng, `multiple`, `accept="image/*"`. Cả hai nguồn đi vào cùng hàng đợi xem trước rồi mới tải lên/lưu offline.
+- **Xử lý ảnh thật trước khi tải/queue**: đọc EXIF JPEG/TIFF (ngày chụp, GPS, hướng), vẽ watermark ngày giờ + vị trí lên pixel, dùng Canvas xuất JPEG. Ảnh được thu cạnh dài về tối đa 1.920 px; thử chất lượng 0,82 → 0,77 → 0,72 → 0,67 → 0,65, dừng khi ≤ 500 KB. Nếu vẫn > 500 KB ở 0,65 thì hiển thị cảnh báo, không giả vờ đã đạt.
+- **Không bịa metadata**: ảnh mới chụp lấy giờ thiết bị tại lúc xử lý và GPS thiết bị nếu người dùng cấp quyền. Ảnh có sẵn chỉ dùng EXIF đọc được và vị trí người dùng nhập; thiếu dữ liệu hiển thị và in `Chưa xác định`. Không dùng vị trí hiện tại cho ảnh lịch sử, không dùng `lastModified` thay cho giờ chụp.
+- **Nguồn metadata ở bước xem trước**: mỗi ảnh đã xử lý hiển thị thời gian, vị trí, nguồn (`EXIF`, `Giờ thiết bị khi chụp`, `Vị trí nhập`, `GPS thiết bị`, `GPS trong ảnh`), kích thước, dung lượng, chất lượng JPEG và cảnh báo > 500 KB. Người dùng có thể bỏ từng ảnh hoặc bỏ tất cả trước khi tải.
+- **Định dạng không hỗ trợ**: chặn SVG, tệp rỗng, MIME/đuôi ngoài allowlist; HEIC/HEIF được nhận nhưng nếu trình duyệt không decode được thì báo rõ cách chọn/chuyển sang JPEG/PNG.
+- **Giữ nguyên hướng ảnh**: decode bằng `createImageBitmap(..., { imageOrientation: "from-image" })` hoặc `<img>` (trình duyệt hiện đại tự áp EXIF orientation) trước khi vẽ Canvas. Ảnh đầu ra là JPEG đã chuẩn hướng.
+- **Offline fallback**: ảnh đã xử lý (không phải ảnh gốc) được queue vào IndexedDB; retry dùng đúng `client_upload_id` cũ. Lỗi validate 4xx hiển thị cho người dùng, không đẩy vào queue; lỗi mạng/5xx mới queue.
+- **Giữ field khi queue**: bổ sung `workItemIds` vào payload queue để ảnh offline không mất liên kết công việc. Các field `reportId/reportDate/category/location/component/stage` vẫn được giữ.
+- **Xóa ảnh có xác nhận**: mỗi photo card có nút `Xóa ảnh`, hỏi xác nhận trước khi gọi `DELETE /api/v1/projects/{project_id}/photos/{photo_id}`. 204 thành công thì xóa khỏi state/UI ngay; 409 hiển thị thông báo ảnh đang là bằng chứng (tiến độ/nhật ký/nghiệm thu) và không xóa. Offline thì không gửi xóa.
+- **Không tự gửi Zalo**: không thêm luồng gửi tự động nào.
+
+### File thay đổi
+
+- `frontend/src/features/site/lib/photoProcessing.ts` (mới): parse EXIF, quyết định nguồn thời gian/vị trí, watermark, resize, nén JPEG, kiểm tra định dạng, lấy GPS thiết bị.
+- `frontend/src/features/site/lib/photoProcessing.test.ts` (mới): test helper không phụ thuộc DOM.
+- `frontend/src/features/site/lib/api.ts`: thêm `deletePhoto`.
+- `frontend/src/features/site/lib/api.test.ts` (mới): test route prefix `/api/v1`, 204 và 409.
+- `frontend/src/features/site/lib/offlineDb.ts`: `PhotoQueuePayload.workItemIds`.
+- `frontend/src/features/site/hooks/useOfflineSync.ts`: gửi `workItemIds` khi sync ảnh.
+- `frontend/src/features/site/components/PhotoCapture.tsx`: tách camera/thư viện, bước xem trước ảnh đã xử lý, watermark/nén, queue ảnh đã xử lý, nút xóa ảnh.
+- `frontend/src/features/site/pages/SiteReportPage.tsx`: xóa ảnh khỏi state sau khi API thành công; gọi `syncNow` khi ảnh vào queue.
+
+### API đã dùng / cần backend đáp ứng
+
+- `POST /api/v1/projects/{project_id}/photos` (multipart, nhiều file): upload JPEG đã xử lý; `client_upload_ids` giữ idempotency.
+- `GET /api/v1/projects/{project_id}/photos` và `GET .../{photo_id}/original`: danh sách và ảnh gốc có bearer token.
+- `PATCH /api/v1/projects/{project_id}/photos/{photo_id}`: giữ nguyên luồng xác nhận chú thích/loại/vị trí.
+- `DELETE /api/v1/projects/{project_id}/photos/{photo_id}`: frontend gọi đúng prefix, chấp nhận 204 rỗng; map 409 thành thông báo ảnh đang là bằng chứng. Route này đã có trong `backend/app/site/router.py` của checkout (agent backend thêm, `status_code=204`, `PhotoDeleteConflict` → 409); frontend không sửa backend.
+- Queue offline dùng lại `POST /photos` với cùng `client_upload_ids`.
+
+### Phụ thuộc
+
+- Backend `DELETE /projects/{project_id}/photos/{photo_id}` (đã có trong router của checkout, agent backend sở hữu) trả 204/409.
+- Các API ảnh hiện có: upload/list/original/patch.
+- Không thêm thư viện npm; dùng Canvas, File/Blob, IndexedDB và Geolocation API sẵn có của trình duyệt.
+
+### Model / migration
+
+- Không cần model hay migration mới. Dùng `SitePhoto`, `PhotoWorkItemLink` và các field hiện có.
+- **Giữ metadata ảnh**: JPEG sau Canvas được chèn lại APP1 EXIF tối thiểu: `Orientation=1`, `DateTime`/`DateTimeOriginal`, GPS và `Model` (thiết bị) nếu có. Vì vậy backend vẫn đọc được `capture_time`/GPS của ảnh đã xử lý; không tạo EXIF giả khi nguồn không có dữ liệu. Các tag EXIF không cần cho nghiệp vụ (ống kính, ISO…) không được chép lại.
+
+### Kiểm thử đã chạy
+
+- `npx vitest run src/features/site/lib/photoProcessing.test.ts src/features/site/lib/api.test.ts`: **12 passed**.
+- `npm test` (toàn frontend): **29 file, 169 test passed**.
+- `npx tsc -b`: pass.
+- `npm run build`: pass (chỉ còn cảnh báo chunk >500 kB có sẵn).
+- Test đã bao phủ: scale 1.920 px, parse EXIF TIFF/JPEG APP1, ghi lại EXIF tối thiểu (orientation=1, thời gian, GPS, thiết bị), ưu tiên EXIF/GPS/giờ thiết bị, không lấy GPS cho ảnh lịch sử thiếu EXIF, format `Chưa xác định`, allowlist định dạng, thang chất lượng 0,82–0,65 và ngưỡng 500 KB, route DELETE `/api/v1`, 204, 409.
+- **Chưa test thực tế trên trình duyệt/điện thoại**: camera Safari/Chrome, quyền GPS bị từ chối, HEIC, ảnh xoay EXIF, watermark pixel thật, tốc độ nén ảnh lớn, và route DELETE thật với backend. Chưa đối chiếu EXIF do frontend tạo bằng Pillow/backend thật. Không tuyên bố các phần này đã chạy.
+
+### Unresolved / cần phối hợp
+
+- Cần chạy kiểm thử tích hợp frontend với `DELETE /projects/{project_id}/photos/{photo_id}` thật (204/409) trong môi trường backend; hiện frontend chỉ test client với fetch mock.
+- EXIF ghi lại là bộ tối thiểu (hướng, thời gian, GPS, thiết bị); các tag gốc khác không được bảo toàn.
+- Chưa có E2E/render test cho component PhotoCapture; chỉ test helper và API client.
+- Cần kiểm tra trên điện thoại thật (HTTPS) trước khi dùng công trường, đặc biệt camera iOS và ảnh HEIC.
+
+### Cách chạy
+
+```bash
+cd frontend
+npx vitest run src/features/site/lib/photoProcessing.test.ts src/features/site/lib/api.test.ts
+npm test
+npx tsc -b
+npm run build
+```
+
+Không chạy migration, không ghi `data/app.db`, không commit/stage/deploy.
+
+## Vòng 10b — xóa ảnh hiện trường (backend)
+
+Cập nhật: 20/11/2026 (backend-only). Phạm vi chính: `backend/app/site/`, test tương ứng và file báo cáo này. Không sửa `backend/app/core`, `backend/app/models`, migration, module agent khác, Excel nguồn. Vòng này không sửa frontend (agent khác sở hữu UI).
+
+- **API**: `DELETE /api/v1/projects/{p}/photos/{id}` dùng đúng route ảnh hiện tại; quyền `project editor` qua `require_site_editor`; ảnh khác project/không tồn tại trả `404`; thành công `204` không body.
+- **Chặn mất bằng chứng (`409`)**: không xóa khi ảnh còn được tham chiếu bền vững bởi:
+  - `component_progress_events.evidence_refs` (`<id>` hoặc `photo:<id>`), kể cả event cũ thiếu join cấu kiện;
+  - `daily_reports.status=reviewed` mà ảnh đang gắn qua `report_id`;
+  - snapshot nhật ký đã duyệt (`generated_documents.kind=journal_snapshot`, JSON `evidence[].photo_id`); snapshot hỏng/không đọc được bị coi là còn bằng chứng;
+  - `acceptance_checklists.evidence_refs`;
+  - PYC còn liên kết báo cáo ngày của ảnh đã xác nhận (`acceptance_requests.daily_report_id`).
+  Response `409` nêu rõ nơi đang dùng ảnh; không xóa file/DB.
+- **Files safety**: chỉ xóa file gốc khi path nằm trong `SITE_REPORT_STORAGE`; path ngoài storage bị từ chối (`404`) và không đụng file ngoài. File đã mất vẫn cho dọn metadata. File được đọc trước khi xóa và khôi phục nếu DB commit lỗi; link `photo_work_item_links` bị xóa tường minh.
+- **Audit**: thành công ghi `delete_photo` (sha256, filename, report_id, file_removed). Bị chặn ghi `delete_photo_blocked`; lỗi file/path ghi `delete_photo_failed` trong transaction riêng sau rollback để audit còn lại dù ảnh/file được giữ. Lỗi xóa file trả `500`, ảnh vẫn còn.
+- **Không cần migration shared**: dùng bảng/cột hiện có (`site_photos`, `photo_work_item_links`, `component_progress_events`, `acceptance_checklists`, `generated_documents`, `audit_logs`). Không sửa `backend/app/core`, `backend/alembic`, DB demo hay `data/app.db`.
+- **Frontend**: không thay đổi trong vòng này; API client/nút xóa do agent site frontend đảm nhiệm.
+
+### File thay đổi (vòng 10b)
+
+- Backend: `backend/app/site/service.py` (reference checks, file safety, audit, `delete_photo`), `backend/app/site/router.py` (DELETE route + error mapping).
+- Test: `backend/tests/site_report/test_photo_delete.py` (mới, 10 test).
+- Tài liệu: `docs/agent-reports/site-report.md`.
+- Không sửa migration, core, acceptance, frontend, Excel nguồn hay dữ liệu dùng chung.
+
+### Kiểm thử (vòng 10b)
+
+```bash
+cd backend
+DATABASE_URL="sqlite:////tmp/opencode/site-report-photo-$$.db" \
+  ../.venv/bin/python -m pytest tests/site_report -q
+# 82 passed (site suite, gồm 10 test xóa ảnh)
+```
+
+Bao phủ: xóa ảnh chưa liên kết (file + link + audit); lần xóa thứ hai `404`; project khác `404`; chặn theo progress (`photo:<id>` và bare id); chặn report `reviewed`, cho xóa khi report về `draft`; chặn snapshot nhật ký; chặn checklist/PYC nghiệm thu; từ chối path ngoài storage; dọn metadata khi file đã mất; lỗi khóa file trả `500`, giữ ảnh/file và audit `delete_photo_failed`.
+
+### Unresolved / manual review (vòng 10b)
+
+- Chưa có test trình duyệt/E2E cho nút xóa; frontend do agent khác làm.
+- Ảnh đang gắn báo cáo `reviewed` bị chặn kể cả khi chưa có caption/category; đây là bảo thủ để không làm mất hồ sơ đã duyệt. Nếu nghiệp vụ muốn cho xóa ảnh chưa xác nhận trong báo cáo đã duyệt, cần quyết định lại.
+- Snapshot nhật ký đã có bản sao evidence; vẫn chặn xóa ảnh gốc theo yêu cầu giữ bằng chứng, chưa có retention policy.
+- Xóa file lỗi trả `500` và giữ metadata; chưa có endpoint retry dọn file riêng.
+- Không commit/push, không deploy, không sửa `data/app.db`.
 
 ## Vòng 9 — snapshot nhật ký đã duyệt và xuất file
 
@@ -262,6 +424,7 @@ Tài liệu:
 | GET | `/projects/{p}/photos?date=&location=&component=&stage=&work_item_id=&category=&report_id=` | project member |
 | GET | `/projects/{p}/photos/{id}/original` | project member |
 | PATCH | `/projects/{p}/photos/{id}` | project editor |
+| DELETE | `/projects/{p}/photos/{id}` | project editor; `204`, giữ ảnh + trả `409` nếu còn là bằng chứng |
 | POST | `/projects/{p}/daily-reports/{date}/exports` | project editor |
 | GET | `/projects/{p}/daily-reports/{date}/exports` | project member |
 | GET | `/projects/{p}/generated-documents/{id}/download` | project member |
@@ -418,7 +581,7 @@ Biến môi trường:
 4. **Quy tắc export reviewed**: đang bắt buộc `status=reviewed` theo MASTER_ARCHITECTURE. Nếu sản phẩm muốn xuất nháp, cần quyết định lại và nới điều kiện trong `service.create_export` + UI.
 5. **GPS**: không có UI xác nhận GPS và không tự động dùng GPS làm bằng chứng; nếu cần GPS đã xác nhận phải bổ sung cột/flow riêng.
 6. **Bảo mật upload**: đã kiểm tra raster MIME allow-list, kích thước, path và không serve inline MIME lạ; chưa quét malware, chưa giới hạn số ảnh/request, chưa rate limit (thuộc shared/infra).
-7. **Xoá ảnh/báo cáo**: chưa có endpoint xoá (không nằm trong contract hiện tại).
+7. **Xoá ảnh/báo cáo**: đã có `DELETE /projects/{p}/photos/{id}` (vòng 10); chưa có endpoint xoá báo cáo ngày hoặc snapshot/export.
 8. **Excel nguồn**: không đọc/ghi/chỉnh file Excel; module site không dùng template PYC/BBNT.
 9. **Migration V2**: các cột/bảng ở mục “Schema additions” chưa có trong `backend/alembic`; Codex cần thêm migration trước khi chạy production. Agent không sửa migration.
 10. **Web Share**: nút “Chia sẻ…” phụ thuộc Web Share API của trình duyệt/thiết bị; chưa có E2E trên thiết bị thật. Fallback sao chép đã có, nhưng cần kiểm tra thủ công trên iOS/Android.

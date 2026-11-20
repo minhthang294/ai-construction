@@ -4,7 +4,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from .access import require_project_member, require_project_role
@@ -41,6 +41,7 @@ class ProjectOut(ProjectIn):
     model_config = ConfigDict(from_attributes=True)
     id: str
     status: str
+    can_delete: bool = False
 
 
 class ProjectPatch(BaseModel):
@@ -169,16 +170,38 @@ def create_project(payload: ProjectIn, db: Session = Depends(get_db)):
     db.add(ProjectMember(project_id=project.id, user_id=actor.id, role="project_manager"))
     db.add(AuditLog(project_id=project.id, actor_id=actor.id, action="create", entity="Project", entity_id=project.id))
     db.commit()
+    project.can_delete = True
     return project
 
 
 @router.get("/projects", response_model=list[ProjectOut])
 def list_projects(db: Session = Depends(get_db)):
     actor = get_current_user()
-    query = select(Project)
+    query = select(Project).where(Project.status != Project.DELETED_STATUS)
     if actor.role != "admin":
-        query = query.join(ProjectMember).where(ProjectMember.user_id == actor.id)
-    return db.scalars(query.order_by(Project.created_at.desc())).all()
+        query = query.add_columns(ProjectMember.role).join(ProjectMember).where(ProjectMember.user_id == actor.id)
+    projects = []
+    for row in db.execute(query.order_by(Project.created_at.desc())):
+        project = row[0]
+        project.can_delete = actor.role == "admin" or row[1] == "project_manager"
+        projects.append(project)
+    return projects
+
+
+@router.delete("/projects/{project_id}")
+def delete_project(project_id: str, db: Session = Depends(get_db)):
+    actor = require_project_role(project_id, {"project_manager"})
+    deleted = db.scalar(
+        update(Project)
+        .where(Project.id == project_id, Project.status != Project.DELETED_STATUS)
+        .values(status=Project.DELETED_STATUS)
+        .returning(Project.id)
+    )
+    if deleted is None:
+        raise HTTPException(404, "Project not found")
+    db.add(AuditLog(project_id=project_id, actor_id=actor.id, action="delete", entity="Project", entity_id=project_id))
+    db.commit()
+    return {"id": deleted}
 
 
 @router.patch("/projects/{project_id}", response_model=ProjectOut)
@@ -196,6 +219,7 @@ def update_project(project_id: str, payload: ProjectPatch, db: Session = Depends
     db.add(AuditLog(project_id=project_id, actor_id=actor.id, action="update", entity="Project", entity_id=project.id,
                     detail=json.dumps({"before": before, "after": changes}, ensure_ascii=False)))
     db.commit()
+    project.can_delete = True
     return project
 
 

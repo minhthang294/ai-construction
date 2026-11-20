@@ -843,7 +843,13 @@ export default function SiteReportPage({
         onUploaded={(uploaded) =>
           setPhotos((previous) => mergePhotos(previous, uploaded))
         }
-        onQueued={() => setMessage("Ảnh đã xếp hàng đồng bộ.")}
+        onQueued={() => {
+          setMessage("Ảnh đã xếp hàng đồng bộ.");
+          void syncNow();
+        }}
+        onDeleted={(photoId) =>
+          setPhotos((previous) => previous.filter((photo) => photo.id !== photoId))
+        }
       />
 
       <ExportPanel
@@ -873,7 +879,7 @@ export default function SiteReportPage({
       )}
 
       <p className="pb-2 text-center text-xs text-gray-500">
-        Ảnh gốc được bảo toàn. Không tự động gửi Zalo. Dữ liệu nhân lực 0 khác “chưa rõ”.
+        Máy chủ lưu bản ảnh đã in thông tin và nén. Không tự động gửi Zalo. Dữ liệu nhân lực 0 khác “chưa rõ”.
       </p>
 
       <div

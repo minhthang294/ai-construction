@@ -24,7 +24,8 @@ from datetime import date, datetime, time as dt_time, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from .manpower import (
@@ -128,6 +129,14 @@ class UnsupportedPhotoType(SiteError):
 
 class ReportNotReviewed(SiteError):
     """Exports require a reviewed report snapshot."""
+
+
+class PhotoDeleteConflict(SiteError):
+    """The photo is still referenced as evidence and must be kept."""
+
+
+class PhotoDeleteFileError(SiteError):
+    """The original photo file could not be removed; metadata was kept."""
 
 
 def ensure_storage() -> Path:
@@ -1097,6 +1106,346 @@ def patch_photo(
     db.refresh(photo)
     _attach_links(db, [photo])
     return photo
+
+
+def _photo_ref_matches(ref: Any, photo_id: str) -> bool:
+    """Match a stored evidence reference to one photo id.
+
+    The shared contract accepts both ``<photo_id>`` and ``photo:<photo_id>``.
+    Matching is case-insensitive; a bare id must not carry a type prefix so
+    references such as ``report_photo:<id>`` are not mistaken for evidence.
+    """
+
+    value = str(ref or "").strip()
+    if value.lower().startswith("photo:"):
+        value = value.split(":", 1)[1].strip()
+    return value.casefold() == photo_id.casefold()
+
+
+def _optional_table_missing(exc: Exception) -> bool:
+    """True when an optional module table is absent in an isolated deployment."""
+
+    return isinstance(exc, OperationalError) and "no such table" in str(exc).lower()
+
+
+def _json_ref_list(raw: Optional[str]) -> List[str]:
+    try:
+        value = json.loads(raw or "[]")
+    except (TypeError, ValueError) as exc:
+        raise PhotoDeleteConflict("Photo references could not be verified") from exc
+    if not isinstance(value, list):
+        raise PhotoDeleteConflict("Photo references could not be verified")
+    return [str(item) for item in value if str(item or "").strip()]
+
+
+def _progress_photo_usages(
+    db: Session, project_id: str, photo_id: str
+) -> List[str]:
+    try:
+        from app.core.component_models import ProgressEvent, StructuralComponent
+
+        rows = db.execute(
+            select(ProgressEvent.id, ProgressEvent.evidence_refs)
+            .outerjoin(
+                StructuralComponent,
+                ProgressEvent.component_id == StructuralComponent.id,
+            )
+            .where(
+                ProgressEvent.evidence_refs.contains(photo_id),
+                or_(
+                    StructuralComponent.id.is_(None),
+                    StructuralComponent.project_id == project_id,
+                ),
+            )
+        ).all()
+    except Exception as exc:
+        if _optional_table_missing(exc):
+            return []
+        raise PhotoDeleteConflict("Progress evidence could not be verified") from exc
+    return [
+        f"progress event {event_id}"
+        for event_id, raw_refs in rows
+        if any(_photo_ref_matches(ref, photo_id) for ref in _json_ref_list(raw_refs))
+    ]
+
+
+def _acceptance_photo_usages(
+    db: Session, project_id: str, photo: SitePhoto
+) -> List[str]:
+    usages: List[str] = []
+    try:
+        from app.acceptance.models import AcceptanceChecklist
+
+        rows = db.execute(
+            select(
+                AcceptanceChecklist.id,
+                AcceptanceChecklist.item,
+                AcceptanceChecklist.evidence_refs,
+            ).where(
+                AcceptanceChecklist.project_id == project_id,
+                AcceptanceChecklist.evidence_refs.contains(photo.id),
+            )
+        ).all()
+        usages.extend(
+            f"acceptance checklist {item or checklist_id}"
+            for checklist_id, item, raw_refs in rows
+            if any(
+                _photo_ref_matches(ref, photo.id)
+                for ref in _json_ref_list(raw_refs)
+            )
+        )
+    except PhotoDeleteConflict:
+        raise
+    except Exception as exc:
+        if _optional_table_missing(exc):
+            pass
+        else:
+            raise PhotoDeleteConflict("Acceptance evidence could not be verified") from exc
+
+    # Acceptance requests reuse confirmed photos of their linked daily report.
+    # Keep the photo when such a persistent link exists.
+    if photo.report_id and photo_evidence_ready(photo):
+        try:
+            from app.acceptance.models import AcceptanceRequest
+
+            request_id = db.scalar(
+                select(AcceptanceRequest.id).where(
+                    AcceptanceRequest.project_id == project_id,
+                    AcceptanceRequest.daily_report_id == photo.report_id,
+                )
+            )
+            if request_id:
+                usages.append(f"acceptance request {request_id}")
+        except Exception as exc:
+            if _optional_table_missing(exc):
+                pass
+            else:
+                raise PhotoDeleteConflict("Daily report links could not be verified") from exc
+    return usages
+
+
+def _journal_photo_usages(
+    db: Session, project_id: str, photo_id: str
+) -> List[str]:
+    docs = db.scalars(
+        select(GeneratedDocument).where(
+            GeneratedDocument.project_id == project_id,
+            GeneratedDocument.kind == "journal_snapshot",
+        )
+    ).all()
+    usages: List[str] = []
+    for doc in docs:
+        try:
+            path = resolve_generated_path(doc)
+            snapshot = json.loads(path.read_bytes())
+        except (OSError, SiteError, ValueError):
+            # A missing or unreadable snapshot cannot prove the photo is unused;
+            # remove the photo only after a human resolves the broken snapshot.
+            usages.append(f"unreadable journal snapshot {doc.id}")
+            continue
+        evidence = snapshot.get("evidence") if isinstance(snapshot, dict) else None
+        if not isinstance(evidence, list):
+            usages.append(f"unreadable journal snapshot {doc.id}")
+            continue
+        if any(
+            isinstance(item, dict) and str(item.get("photo_id") or "") == photo_id
+            for item in evidence
+        ):
+            usages.append(f"journal snapshot {doc.id}")
+    return usages
+
+
+def _reviewed_report_usage(db: Session, project_id: str, photo: SitePhoto) -> List[str]:
+    if not photo.report_id:
+        return []
+    report = db.get(DailyReport, photo.report_id)
+    if (
+        report is not None
+        and report.project_id == project_id
+        and report.status == "reviewed"
+    ):
+        return [f"daily report {report.report_date.isoformat()}"]
+    return []
+
+
+def photo_evidence_usages(
+    db: Session, project_id: str, photo: SitePhoto
+) -> List[str]:
+    """Return persistent places that still use ``photo`` as evidence."""
+
+    return [
+        *(_progress_photo_usages(db, project_id, photo.id)),
+        *(_reviewed_report_usage(db, project_id, photo)),
+        *(_journal_photo_usages(db, project_id, photo.id)),
+        *(_acceptance_photo_usages(db, project_id, photo)),
+    ]
+
+
+def _safe_delete_path(photo: SitePhoto) -> Optional[Path]:
+    """Return the original file to delete, or ``None`` when it is already gone.
+
+    A path that exists outside the private storage root is refused instead of
+    deleting an arbitrary file.  A missing file is allowed so a broken metadata
+    row can still be cleaned up.
+    """
+
+    path = Path(photo.original_path)
+    project_photos = STORAGE_ROOT.resolve() / "projects" / photo.project_id / "photos"
+    if not path.resolve().is_relative_to(project_photos):
+        raise ProjectResourceNotFound("Original photo file is outside project storage")
+    if not path.exists():
+        return None
+    if not path.is_file():
+        raise ProjectResourceNotFound("Original photo file is not a regular file")
+    return path
+
+
+def _record_photo_delete_failure(
+    db: Session,
+    *,
+    project_id: str,
+    actor_id: Optional[str],
+    photo: SitePhoto,
+    action: str,
+    detail: Dict[str, Any],
+) -> None:
+    """Persist a failed-delete audit in its own transaction.
+
+    The delete transaction is rolled back first, so the audit survives even
+    though the photo and file are intentionally left in place.
+    """
+
+    db.rollback()
+    try:
+        _audit(
+            db,
+            project_id=project_id,
+            actor_id=actor_id,
+            action=action,
+            entity="SitePhoto",
+            entity_id=photo.id,
+            detail=json.dumps(detail, ensure_ascii=False, sort_keys=True),
+        )
+        db.commit()
+    except Exception:  # pragma: no cover - audit must not hide the real error
+        db.rollback()
+
+
+def delete_photo(
+    db: Session,
+    project_id: str,
+    photo_id: str,
+    actor_id: Optional[str] = None,
+) -> bool:
+    """Delete one project photo and its original file.
+
+    The photo is kept (``PhotoDeleteConflict`` -> 409) when any persistent
+    reference still uses it as evidence.  The file is removed before the DB
+    commit and restored if the commit fails, so a failed delete never leaves a
+    live metadata row pointing at a missing original.
+    """
+
+    photo = get_photo(db, project_id, photo_id)
+    if photo is None:
+        return False
+
+    usages = photo_evidence_usages(db, project_id, photo)
+    if usages:
+        _record_photo_delete_failure(
+            db,
+            project_id=project_id,
+            actor_id=actor_id,
+            photo=photo,
+            action="delete_photo_blocked",
+            detail={
+                "reason": "referenced_as_evidence",
+                "usages": usages,
+                "sha256": photo.sha256,
+            },
+        )
+        raise PhotoDeleteConflict(
+            "Photo is still used as evidence: " + "; ".join(usages)
+        )
+
+    try:
+        path = _safe_delete_path(photo)
+    except ProjectResourceNotFound as exc:
+        _record_photo_delete_failure(
+            db,
+            project_id=project_id,
+            actor_id=actor_id,
+            photo=photo,
+            action="delete_photo_failed",
+            detail={
+                "reason": str(exc),
+                "sha256": photo.sha256,
+                "path": photo.original_path,
+            },
+        )
+        raise
+
+    file_bytes: Optional[bytes] = None
+    try:
+        if path is not None:
+            file_bytes = path.read_bytes()
+
+        db.execute(
+            PhotoWorkItemLink.__table__.delete().where(
+                PhotoWorkItemLink.photo_id == photo.id
+            )
+        )
+        db.delete(photo)
+        db.flush()
+        _audit(
+            db,
+            project_id=project_id,
+            actor_id=actor_id,
+            action="delete_photo",
+            entity="SitePhoto",
+            entity_id=photo.id,
+            detail=json.dumps(
+                {
+                    "sha256": photo.sha256,
+                    "filename": photo.filename,
+                    "report_id": photo.report_id,
+                    "file_removed": path is not None,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+        )
+        if path is not None:
+            path.unlink(missing_ok=True)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        if (
+            path is not None
+            and file_bytes is not None
+            and not path.exists()
+        ):
+            try:
+                path.write_bytes(file_bytes)
+            except OSError:
+                pass
+        _record_photo_delete_failure(
+            db,
+            project_id=project_id,
+            actor_id=actor_id,
+            photo=photo,
+            action="delete_photo_failed",
+            detail={
+                "reason": type(exc).__name__,
+                "sha256": photo.sha256,
+                "path": photo.original_path,
+            },
+        )
+        if isinstance(exc, OSError):
+            raise PhotoDeleteFileError(
+                "Photo file could not be deleted; the photo record was kept"
+            ) from exc
+        raise
+    return True
 
 
 # ---------------------------------------------------------------------------

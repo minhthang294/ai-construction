@@ -11,7 +11,7 @@ import {
   WorkIcon,
 } from "./AppIcons";
 
-export type Project = { id: string; name: string; client?: string; location?: string; report_title?: string };
+export type Project = { id: string; name: string; client?: string; location?: string; report_title?: string; can_delete?: boolean };
 type WorkItem = { id: string; code: string; name: string; location?: string; component?: string; status: string };
 type PreviewItem = Omit<WorkItem, "id" | "status"> & { source_row: number };
 const workStatuses = { planned: "Dự kiến", in_progress: "Đang thi công", completed: "Hoàn thành", pending_acceptance: "Chờ nghiệm thu", rectify: "Cần khắc phục" } as const;
@@ -46,12 +46,14 @@ export function ProjectSetup({
   currentProjectId,
   onCreated,
   onUpdated,
+  onDeleted,
 }: {
   token: string;
   projects: Project[];
   currentProjectId?: string;
   onCreated: (project: Project) => void;
   onUpdated: (project: Project) => void;
+  onDeleted: (id: string) => void;
 }) {
   const [name, setName] = useState("");
   const [client, setClient] = useState("");
@@ -59,6 +61,8 @@ export function ProjectSetup({
   const [reportTitle, setReportTitle] = useState("");
   const [error, setError] = useState("");
   const [editingId, setEditingId] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
   async function create(event: React.FormEvent) {
     event.preventDefault();
     try {
@@ -80,6 +84,20 @@ export function ProjectSetup({
       onUpdated(project); reset(); setError("");
     } catch (cause) { setError((cause as Error).message); }
   }
+  async function remove(project: Project) {
+    if (deleting || !window.confirm(`Xóa công trình “${project.name}” khỏi danh sách? Hồ sơ và lịch sử của công trình sẽ được lưu lại.`)) return;
+    setDeleting(true);
+    setDeleteError("");
+    try {
+      await request(`/projects/${project.id}`, token, { method: "DELETE" });
+      if (editingId === project.id) reset();
+      onDeleted(project.id);
+    } catch (cause) {
+      setDeleteError((cause as Error).message);
+    } finally {
+      setDeleting(false);
+    }
+  }
   return (
     <div className="space-y-6">
       <PageHeader
@@ -98,6 +116,7 @@ export function ProjectSetup({
               + Tạo mới
             </button>
           </div>
+          {deleteError && <p role="alert" className="mt-3 text-sm text-red-700">{deleteError}</p>}
           <div className="mt-4 space-y-2">
             {projects.length === 0 && (
               <p className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-600">
@@ -120,9 +139,16 @@ export function ProjectSetup({
                       {project.client || "Chưa có chủ đầu tư"} · {project.location || "Chưa có địa điểm"}
                     </p>
                   </div>
-                  <button type="button" onClick={() => edit(project)} className="app-button app-button-secondary min-h-10 px-3">
-                    Sửa
-                  </button>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" onClick={() => edit(project)} className="app-button app-button-secondary min-h-10 px-3">
+                      Sửa
+                    </button>
+                    {project.can_delete && (
+                      <button type="button" disabled={deleting} onClick={() => void remove(project)} className="app-button app-button-danger min-h-10 px-3">
+                        Xóa công trình
+                      </button>
+                    )}
+                  </div>
                 </article>
               );
             })}

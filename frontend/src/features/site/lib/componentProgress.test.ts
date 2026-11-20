@@ -13,11 +13,13 @@ import {
   groupDesignQuantityEntries,
   newProgressIdempotencyKey,
   selectedProgressRows,
+  sortStagesByPosition,
   stageOptionsFor,
   todayISO,
   type DesignQuantity,
   type ProgressPreview,
   type ProgressRow,
+  type ProgressStage,
 } from "./componentProgress";
 
 function row(overrides: Partial<ProgressRow> = {}): ProgressRow {
@@ -138,6 +140,49 @@ describe("exact selection", () => {
     expect(selectedProgressRows(rows, ["c2", "missing"]).map((item) => item.id)).toEqual([
       "c2",
     ]);
+  });
+});
+
+describe("stage ordering", () => {
+  const stage = (
+    id: string,
+    position: number,
+    code = id,
+  ): ProgressStage => ({
+    id,
+    stage_definition_id: "sd1",
+    code,
+    name: `Bước ${id}`,
+    position,
+    status: "NOT_STARTED",
+    latest_event_at: null,
+  });
+
+  it("sorts by server position, then code and id without mutating input", () => {
+    const input = [
+      stage("s3", 2, "B"),
+      stage("s2", 1, "B"),
+      stage("s1", 1, "A"),
+      stage("s4", 1, "B"),
+    ];
+    expect(sortStagesByPosition(input).map((item) => item.id)).toEqual([
+      "s1",
+      "s2",
+      "s4",
+      "s3",
+    ]);
+    expect(input.map((item) => item.id)).toEqual(["s3", "s2", "s1", "s4"]);
+  });
+
+  it("keeps work selection options in the same position order", () => {
+    const options = [
+      stage("s3", 2, "B"),
+      stage("s1", 1, "A"),
+      stage("s2", 1, "B"),
+    ];
+    expect(
+      stageOptionsFor(row({ stages: options }), "sd1").map((item) => item.id),
+    ).toEqual(["s1", "s2", "s3"]);
   });
 });
 

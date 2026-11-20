@@ -1,10 +1,24 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  ApiError,
+  deletePhoto,
   fetchPhotoObjectUrl,
   patchPhoto,
   uploadPhotos,
 } from "../lib/api";
 import { enqueue, photoQueueId } from "../lib/offlineDb";
+import {
+  formatPhotoBytes,
+  getCurrentGpsPosition,
+  PhotoProcessingError,
+  photoFileSupport,
+  photoLocationSourceLabel,
+  photoLocationValue,
+  photoTimeSourceLabel,
+  photoTimeValue,
+  preparePhotoForUpload,
+} from "../lib/photoProcessing";
+import type { LocationFix, PhotoWatermarkInfo, PhotoSource } from "../lib/photoProcessing";
 import {
   EMPTY_PHOTO_FILTERS,
   PHOTO_CATEGORIES,
@@ -26,9 +40,23 @@ type Props = {
   onFiltersChange: (filters: PhotoFilters) => void;
   onUploaded: (photos: SitePhoto[]) => void;
   onQueued?: () => void;
+  onDeleted?: (photoId: string) => void;
 };
 
 type QueuedPreview = { id: string; url: string; name: string };
+
+type PreparedPreview = {
+  id: string;
+  url: string;
+  info: PhotoWatermarkInfo;
+} & {
+  file: File;
+  width: number;
+  height: number;
+  bytes: number;
+  quality: number;
+  overTarget: boolean;
+};
 
 function AuthenticatedImage({ projectId, photo }: { projectId: string; photo: SitePhoto }) {
   const [url, setUrl] = useState<string | null>(null);
@@ -73,11 +101,15 @@ function AuthenticatedImage({ projectId, photo }: { projectId: string; photo: Si
 function PhotoCard({
   projectId,
   photo,
+  online,
   onPatched,
+  onDeleted,
 }: {
   projectId: string;
   photo: SitePhoto;
+  online: boolean;
   onPatched: (photo: SitePhoto) => void;
+  onDeleted: (photoId: string) => void;
 }) {
   const [caption, setCaption] = useState(photo.confirmed_caption ?? "");
   const [category, setCategory] = useState(photo.category ?? "");
@@ -85,6 +117,7 @@ function PhotoCard({
   const [component, setComponent] = useState(photo.component ?? "");
   const [stage, setStage] = useState(photo.stage ?? "");
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -112,7 +145,7 @@ function PhotoCard({
       });
       onPatched(updated);
       setMessage("Đã xác nhận chú thích.");
-    } catch (error) {
+    } catch {
       setMessage("Không lưu được chú thích.");
     } finally {
       setSaving(false);
@@ -166,6 +199,39 @@ function PhotoCard({
       URL.revokeObjectURL(url);
     } catch {
       setMessage("Không tải được ảnh gốc.");
+    }
+  }
+
+  async function removePhoto() {
+    if (!online) {
+      setMessage("Cần kết nối mạng để xóa ảnh.");
+      return;
+    }
+    if (
+      !window.confirm(
+        "Xóa ảnh này khỏi máy chủ? Ảnh đã dùng làm bằng chứng sẽ không xóa được.",
+      )
+    ) {
+      return;
+    }
+    setDeleting(true);
+    setMessage(null);
+    try {
+      await deletePhoto(projectId, photo.id);
+      onDeleted(photo.id);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) {
+        setMessage(
+          "Ảnh đang được dùng làm bằng chứng (tiến độ/nhật ký/nghiệm thu); không thể xóa.",
+        );
+      } else if (error instanceof ApiError && error.status === 404) {
+        setMessage("Ảnh không còn trên máy chủ; đã làm mới danh sách.");
+        onDeleted(photo.id);
+      } else {
+        setMessage("Không xóa được ảnh.");
+      }
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -230,7 +296,7 @@ function PhotoCard({
           <button
             type="button"
             className="min-h-9 flex-1 rounded-lg bg-gray-800 px-2 text-xs font-medium text-white disabled:opacity-50"
-            disabled={saving}
+            disabled={saving || deleting}
             onClick={() => void saveCaption()}
           >
             Lưu chú thích
@@ -238,7 +304,7 @@ function PhotoCard({
           <button
             type="button"
             className="min-h-9 flex-1 rounded-lg bg-gray-700 px-2 text-xs font-medium text-white disabled:opacity-50"
-            disabled={saving}
+            disabled={saving || deleting}
             onClick={() => void saveMetadata()}
           >
             Lưu vị trí
@@ -246,9 +312,18 @@ function PhotoCard({
           <button
             type="button"
             className="min-h-9 rounded-lg border border-gray-300 px-2 text-xs"
+            disabled={deleting}
             onClick={() => void downloadOriginal()}
           >
             Ảnh gốc
+          </button>
+          <button
+            type="button"
+            className="min-h-9 rounded-lg border border-red-200 px-2 text-xs text-red-700 disabled:opacity-50"
+            disabled={deleting}
+            onClick={() => void removePhoto()}
+          >
+            {deleting ? "Đang xóa…" : "Xóa ảnh"}
           </button>
         </div>
         {photo.gps_lat != null && photo.gps_lon != null && (
@@ -274,6 +349,7 @@ export default function PhotoCapture({
   onFiltersChange,
   onUploaded,
   onQueued,
+  onDeleted,
 }: Props) {
   const [category, setCategory] = useState("");
   const [workItemId, setWorkItemId] = useState("");
@@ -283,9 +359,12 @@ export default function PhotoCapture({
   const [filterDraft, setFilterDraft] = useState<PhotoFilters>(filters);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [prepared, setPrepared] = useState<PreparedPreview[]>([]);
   const [queuedPreviews, setQueuedPreviews] = useState<QueuedPreview[]>([]);
+  const preparedUrls = useRef<string[]>([]);
   const previewUrls = useRef<string[]>([]);
-  const inputRef = useRef<HTMLInputElement | null>(null);
+  const cameraRef = useRef<HTMLInputElement | null>(null);
+  const galleryRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     setFilterDraft(filters);
@@ -293,6 +372,7 @@ export default function PhotoCapture({
 
   useEffect(() => {
     return () => {
+      preparedUrls.current.forEach((url) => URL.revokeObjectURL(url));
       previewUrls.current.forEach((url) => URL.revokeObjectURL(url));
     };
   }, []);
@@ -305,72 +385,171 @@ export default function PhotoCapture({
     }
   }, [online, pendingCount, queuedPreviews]);
 
-  async function queueFiles(files: File[], ids: string[]) {
-    for (const [index, file] of files.entries()) {
-      const bytes = await file.arrayBuffer();
-      const id = ids[index];
+  function releasePrepared(items: PreparedPreview[]) {
+    const urls = new Set(items.map((item) => item.url));
+    items.forEach((item) => URL.revokeObjectURL(item.url));
+    preparedUrls.current = preparedUrls.current.filter((url) => !urls.has(url));
+    const ids = new Set(items.map((item) => item.id));
+    setPrepared((previous) => previous.filter((item) => !ids.has(item.id)));
+  }
+
+  function removePrepared(id: string) {
+    const item = prepared.find((entry) => entry.id === id);
+    if (item) releasePrepared([item]);
+  }
+
+  function clearPrepared() {
+    releasePrepared(prepared);
+  }
+
+  async function queuePrepared(items: PreparedPreview[]) {
+    for (const [index, item] of items.entries()) {
+      const bytes = await item.file.arrayBuffer();
       await enqueue({
-        id,
+        id: item.id,
         projectId,
         kind: "photo",
         payload: {
           bytes,
-          filename: file.name || "photo.jpg",
-          type: file.type || "image/jpeg",
+          // Queue the actual watermarked JPEG, not the original file.
+          filename: item.file.name || "photo.jpg",
+          type: item.file.type || "image/jpeg",
           reportId: reportId ?? null,
           reportDate: reportDate ?? null,
           category: category || null,
           location: location.trim() || null,
           component: component.trim() || null,
           stage: stage || null,
+          workItemIds: workItemId ? [workItemId] : null,
         },
-        createdAt: Date.now(),
+        createdAt: Date.now() + index,
         attempts: 0,
       });
-      const url = URL.createObjectURL(file);
+      const url = URL.createObjectURL(item.file);
       previewUrls.current.push(url);
-      setQueuedPreviews((previous) => [...previous, { id, url, name: file.name }]);
+      setQueuedPreviews((previous) => [
+        ...previous,
+        { id: item.id, url, name: item.file.name },
+      ]);
     }
-    onQueued?.();
   }
 
-  async function handleFiles(fileList: FileList | null) {
+  async function handleFiles(fileList: FileList | null, source: PhotoSource) {
     if (!fileList || fileList.length === 0) return;
     const files = Array.from(fileList);
-    // Generate the idempotency ids before the request.  If the response is lost
-    // after the server saved the photo, the queued retry reuses the same id.
-    const clientIds = files.map(() => photoQueueId());
+    const capturedAt = source === "camera" ? new Date() : undefined;
+    setBusy(true);
+    setMessage(null);
+    const errors: string[] = [];
+    try {
+      let deviceGps: LocationFix | null = null;
+      if (source === "camera") {
+        setMessage("Đang lấy vị trí GPS (nếu được phép)…");
+        deviceGps = await getCurrentGpsPosition();
+      }
+      const next: PreparedPreview[] = [];
+      for (const file of files) {
+        const support = photoFileSupport(file);
+        if (!support.ok) {
+          errors.push(`${file.name}: ${support.reason}`);
+          continue;
+        }
+        try {
+          const result = await preparePhotoForUpload(file, {
+            source,
+            capturedAt,
+            enteredLocation: location,
+            deviceGps,
+          });
+          const url = URL.createObjectURL(result.file);
+          preparedUrls.current.push(url);
+          next.push({ id: photoQueueId(), url, ...result });
+        } catch (error) {
+          const reason =
+            error instanceof PhotoProcessingError
+              ? error.message
+              : "Không đọc được ảnh trên trình duyệt này (có thể là HEIC/HEIF). Hãy chọn ảnh JPEG/PNG hoặc chuyển định dạng rồi thử lại.";
+          errors.push(`${file.name}: ${reason}`);
+        }
+      }
+      if (next.length > 0) {
+        setPrepared((previous) => [...previous, ...next]);
+      }
+      if (errors.length > 0) {
+        setMessage(errors.join(" "));
+      } else if (next.length > 0) {
+        setMessage(
+          `Đã xử lý ${next.length} ảnh. Kiểm tra ngày giờ/vị trí rồi tải lên.`,
+        );
+      }
+    } finally {
+      setBusy(false);
+      if (cameraRef.current) cameraRef.current.value = "";
+      if (galleryRef.current) galleryRef.current.value = "";
+    }
+  }
+
+  async function uploadPrepared() {
+    const items = prepared;
+    if (items.length === 0) return;
     setBusy(true);
     setMessage(null);
     try {
       if (!online) {
-        await queueFiles(files, clientIds);
-        setMessage("Đã lưu ảnh vào hàng đợi, sẽ tải lên khi có mạng.");
+        try {
+          await queuePrepared(items);
+          clearPrepared();
+          setMessage("Đã lưu ảnh đã xử lý vào hàng đợi, sẽ tải lên khi có mạng.");
+          onQueued?.();
+        } catch {
+          setMessage(
+            "Không lưu được hàng đợi offline trên thiết bị này. Ảnh vẫn đang chờ để thử lại.",
+          );
+        }
         return;
       }
-      const uploaded = await uploadPhotos(projectId, files, {
-        reportId: reportId ?? undefined,
-        category: category || undefined,
-        location: location.trim() || undefined,
-        component: component.trim() || undefined,
-        stage: stage || undefined,
-        workItemIds: workItemId ? [workItemId] : undefined,
-        clientUploadIds: clientIds,
-      });
-      onUploaded(uploaded);
-      setMessage(
-        reportId
-          ? `Đã tải ${uploaded.length} ảnh.`
-          : `Đã tải ${uploaded.length} ảnh (chưa gắn báo cáo; lưu báo cáo rồi tải lại nếu cần).`,
-      );
-    } catch {
-      // Network failure despite navigator.onLine: keep the originals queued
-      // with the same idempotency ids used by the failed request.
-      await queueFiles(files, clientIds);
-      setMessage("Mất kết nối khi tải ảnh. Đã xếp hàng để thử lại.");
+
+      try {
+        const uploaded = await uploadPhotos(
+          projectId,
+          items.map((item) => item.file),
+          {
+            reportId: reportId ?? undefined,
+            category: category || undefined,
+            location: location.trim() || undefined,
+            component: component.trim() || undefined,
+            stage: stage || undefined,
+            workItemIds: workItemId ? [workItemId] : undefined,
+            clientUploadIds: items.map((item) => item.id),
+          },
+        );
+        onUploaded(uploaded);
+        clearPrepared();
+        setMessage(
+          reportId
+            ? `Đã tải ${uploaded.length} ảnh.`
+            : `Đã tải ${uploaded.length} ảnh (chưa gắn báo cáo; lưu báo cáo rồi tải lại nếu cần).`,
+        );
+      } catch (error) {
+        if (error instanceof ApiError && error.status < 500) {
+          setMessage(error.message);
+          return;
+        }
+        // Network failure despite navigator.onLine: keep the processed bytes
+        // queued with the same idempotency ids used by the failed request.
+        try {
+          await queuePrepared(items);
+          clearPrepared();
+          setMessage("Mất kết nối khi tải ảnh. Đã xếp hàng ảnh đã xử lý để thử lại.");
+          onQueued?.();
+        } catch {
+          setMessage(
+            "Mất kết nối và không lưu được hàng đợi offline. Ảnh vẫn đang chờ để thử lại.",
+          );
+        }
+      }
     } finally {
       setBusy(false);
-      if (inputRef.current) inputRef.current.value = "";
     }
   }
 
@@ -379,8 +558,9 @@ export default function PhotoCapture({
       <div>
         <h3 className="text-lg font-semibold">Ảnh hiện trường</h3>
         <p className="text-xs text-gray-500">
-          Ảnh gốc được giữ nguyên. Ảnh chỉ vào báo cáo xuất khi có chú thích hoặc phân
-          loại do người dùng xác nhận.
+          Ảnh tải lên được in ngày giờ/vị trí, xoay đúng hướng, thu cạnh dài về
+          1.920 px và nén JPEG mục tiêu 500 KB. Ảnh chỉ vào báo cáo xuất khi có
+          chú thích hoặc phân loại do người dùng xác nhận.
         </p>
       </div>
 
@@ -416,6 +596,7 @@ export default function PhotoCapture({
           className="min-h-11 w-full rounded-lg border border-gray-300 px-2 text-sm"
           placeholder="Vị trí ảnh (vd: Trụ T1)"
           value={location}
+          disabled={busy || prepared.length > 0}
           onChange={(event) => setLocation(event.target.value)}
         />
         <input
@@ -439,6 +620,7 @@ export default function PhotoCapture({
         <button
           type="button"
           className="min-h-11 rounded-lg border border-gray-300 text-xs"
+          disabled={busy || prepared.length > 0}
           onClick={() => {
             setLocation("");
             setComponent("");
@@ -450,6 +632,122 @@ export default function PhotoCapture({
           Xoá metadata
         </button>
       </div>
+      <p className="text-xs text-gray-500">
+        Nhập vị trí trước khi chụp/chọn ảnh nếu muốn in vị trí đó lên ảnh. Ảnh
+        chọn từ máy không có EXIF sẽ ghi “Chưa xác định”, không tự lấy vị trí hiện tại.
+      </p>
+
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          className="min-h-12 rounded-xl border-2 border-blue-400 bg-white px-3 text-sm font-medium text-blue-700 disabled:opacity-60"
+          disabled={busy}
+          onClick={() => cameraRef.current?.click()}
+        >
+          Chụp ảnh
+        </button>
+        <button
+          type="button"
+          className="min-h-12 rounded-xl border-2 border-blue-400 bg-white px-3 text-sm font-medium text-blue-700 disabled:opacity-60"
+          disabled={busy}
+          onClick={() => galleryRef.current?.click()}
+        >
+          Chọn ảnh từ máy
+        </button>
+      </div>
+      <input
+        ref={cameraRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        disabled={busy}
+        onChange={(event) => void handleFiles(event.target.files, "camera")}
+      />
+      <input
+        ref={galleryRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        disabled={busy}
+        onChange={(event) => void handleFiles(event.target.files, "gallery")}
+      />
+
+      {message && <p className="rounded-lg bg-white p-3 text-sm shadow-sm">{message}</p>}
+
+      {prepared.length > 0 && (
+        <div className="space-y-2 rounded-xl border border-blue-200 bg-blue-50 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-sm font-semibold text-blue-900">
+              Ảnh đã xử lý ({prepared.length})
+            </p>
+            <button
+              type="button"
+              className="min-h-9 rounded-lg border border-blue-300 bg-white px-2 text-xs"
+              disabled={busy}
+              onClick={clearPrepared}
+            >
+              Bỏ tất cả
+            </button>
+          </div>
+          <p className="text-xs text-blue-800">Để đổi vị trí in trên ảnh, bỏ ảnh xem trước rồi nhập vị trí và chọn lại ảnh.</p>
+          <div className="grid grid-cols-2 gap-2">
+            {prepared.map((item) => (
+              <div
+                key={item.id}
+                className="overflow-hidden rounded-lg border border-gray-200 bg-white"
+              >
+                <img
+                  src={item.url}
+                  alt={item.file.name}
+                  className="h-32 w-full object-cover"
+                />
+                <div className="space-y-1 p-2 text-xs">
+                  <p className="font-medium">
+                    Thời gian: {photoTimeValue(item.info)}
+                  </p>
+                  <p>Vị trí: {photoLocationValue(item.info)}</p>
+                  <p className="text-gray-500">
+                    Nguồn: {photoTimeSourceLabel(item.info)} ·{" "}
+                    {photoLocationSourceLabel(item.info)}
+                  </p>
+                  <p className="text-gray-500">
+                    {item.width}×{item.height} · {formatPhotoBytes(item.bytes)} · JPEG{" "}
+                    {Math.round(item.quality * 100)}%
+                  </p>
+                  {item.overTarget && (
+                    <p className="text-amber-700">
+                      Vẫn trên 500 KB sau khi nén chất lượng tối thiểu; kiểm tra lại
+                      ảnh.
+                    </p>
+                  )}
+                  <button
+                    type="button"
+                    className="min-h-9 w-full rounded-lg border border-red-200 text-red-700"
+                    disabled={busy}
+                    onClick={() => removePrepared(item.id)}
+                  >
+                    Bỏ ảnh
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+          <button
+            type="button"
+            className="min-h-12 w-full rounded-xl bg-blue-600 text-sm font-semibold text-white disabled:opacity-60"
+            disabled={busy}
+            onClick={() => void uploadPrepared()}
+          >
+            {busy
+              ? "Đang xử lý…"
+              : online
+                ? `Tải lên ${prepared.length} ảnh`
+                : `Lưu ${prepared.length} ảnh vào hàng đợi`}
+          </button>
+        </div>
+      )}
 
       <details className="rounded-xl bg-white p-3 shadow-sm">
         <summary className="cursor-pointer text-sm font-semibold">Lọc ảnh</summary>
@@ -528,29 +826,6 @@ export default function PhotoCapture({
         </div>
       </details>
 
-      <label
-        className={`flex min-h-24 w-full cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed bg-white p-4 text-center ${
-          busy ? "border-gray-300 opacity-60" : "border-blue-400"
-        }`}
-      >
-        <input
-          ref={inputRef}
-          type="file"
-          accept="image/*"
-          capture="environment"
-          multiple
-          className="hidden"
-          disabled={busy}
-          onChange={(event) => void handleFiles(event.target.files)}
-        />
-        <span className="text-base font-medium text-blue-700">
-          {busy ? "Đang xử lý…" : "Chụp / chọn ảnh"}
-        </span>
-        <span className="text-xs text-gray-500">Hỗ trợ nhiều ảnh, lưu offline</span>
-      </label>
-
-      {message && <p className="rounded-lg bg-white p-3 text-sm shadow-sm">{message}</p>}
-
       {queuedPreviews.length > 0 && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
           <p className="text-sm text-amber-800">
@@ -575,9 +850,9 @@ export default function PhotoCapture({
             key={photo.id}
             projectId={projectId}
             photo={photo}
-            onPatched={(updated) =>
-              onUploaded([updated])
-            }
+            online={online}
+            onPatched={(updated) => onUploaded([updated])}
+            onDeleted={(photoId) => onDeleted?.(photoId)}
           />
         ))}
       </div>

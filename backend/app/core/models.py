@@ -32,6 +32,7 @@ class ApiToken(Base):
 
 class Project(Base):
     __tablename__ = "projects"
+    DELETED_STATUS = "deleted"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     client: Mapped[str | None] = mapped_column(String(255))

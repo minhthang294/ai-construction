@@ -100,6 +100,9 @@ export function useOfflineSync(projectId: string, onChanged?: () => void) {
               location: payload.location ?? undefined,
               component: payload.component ?? undefined,
               stage: payload.stage ?? undefined,
+              workItemIds: payload.workItemIds?.length
+                ? payload.workItemIds
+                : undefined,
               clientUploadIds: [item.id],
             });
           }
