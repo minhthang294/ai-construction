@@ -70,7 +70,12 @@ def main():
     with closing(sqlite3.connect(uri, uri=True)) as db, db:
         if args.apply:
             db.execute("BEGIN IMMEDIATE")
-        project, = db.execute("SELECT id FROM projects WHERE name LIKE 'DAP - %'").fetchone()
+        projects = db.execute(
+            "SELECT DISTINCT project_id FROM component_stage_definitions WHERE code LIKE 'DAP-%'"
+        ).fetchall()
+        if len(projects) != 1:
+            parser.exit(1, f"Expected one project with DAP stages, found {len(projects)}\n")
+        project, = projects[0]
         changes = []
         unknown = set()
         for sid, kind, name, position in db.execute(
