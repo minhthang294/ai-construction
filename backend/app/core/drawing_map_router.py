@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+from datetime import datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -11,7 +12,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .access import require_project_member
-from .component_models import DesignGroup, RepairScope, Segment, StructuralComponent, StructureZone
+from .component_models import (ComponentStage, DesignGroup, ProgressEvent, RepairScope,
+                               Segment, StageDefinition, StructuralComponent, StructureZone)
 from .database import get_db
 from .insights_router import _latest_events
 
@@ -87,6 +89,23 @@ def drawing_map(project_id: str, db: Session = Depends(get_db)):
         RepairScope.verification == "VERIFIED",
     )))
     latest = _latest_events(db, project_id)
+    current_work: dict[str, tuple[datetime, str, str, str]] = {}
+    if unique_components:
+        stage_events = db.execute(
+            select(ComponentStage.component_id, ComponentStage.id, ComponentStage.stage_definition_id, StageDefinition.name,
+                   ProgressEvent.status, ProgressEvent.created_at, ProgressEvent.id)
+            .join(ProgressEvent, ProgressEvent.component_stage_id == ComponentStage.id)
+            .join(StageDefinition, StageDefinition.id == ComponentStage.stage_definition_id)
+            .where(ComponentStage.component_id.in_(list(unique_components.values())))
+            .order_by(ProgressEvent.created_at, ProgressEvent.id)
+        ).all()
+        latest_by_stage = {}
+        for component_id, stage_id, definition_id, name, status, created_at, event_id in stage_events:
+            latest_by_stage[(component_id, stage_id)] = (definition_id, name, status, created_at, event_id)
+        for (component_id, _), (definition_id, name, status, created_at, event_id) in latest_by_stage.items():
+            current = current_work.get(component_id)
+            if status == "IN_PROGRESS" and (current is None or (created_at, event_id) > (current[0], current[1])):
+                current_work[component_id] = (created_at, event_id, name, definition_id)
     review_count = len(manifest.review)
     position_review_count = 0
     sheets = []
@@ -105,6 +124,8 @@ def drawing_map(project_id: str, db: Session = Depends(get_db)):
             event = latest.get(component_id)
             markers.append({**marker.model_dump(), "component_id": component_id,
                             "design_group": group_name,
+                            "current_work": current_work.get(component_id, (None, None, None))[2],
+                            "current_work_definition_id": current_work.get(component_id, (None, None, None, None))[3],
                             "origin": "ADDITIONAL_SCOPE" if component_id in additional_ids else "DESIGN_SCOPE",
                             "construction_status": event.status if event else "NOT_STARTED"})
         sheets.append({**sheet.model_dump(exclude={"image", "markers"}), "markers": markers,

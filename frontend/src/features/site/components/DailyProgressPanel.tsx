@@ -15,6 +15,7 @@ import {
   type StageDefinition,
 } from "../lib/componentProgress";
 import type { ComponentSegment } from "../lib/componentImport";
+import DrawingMapPanel from "./DrawingMapPanel";
 import { formatISODate } from "../lib/datetime";
 import {
   addDailyProgressLine,
@@ -42,7 +43,12 @@ import {
   type DailyProgressPreviewResponse,
 } from "../lib/dailyProgress";
 
-type Props = { projectId: string };
+type Props = {
+  projectId: string;
+  initialComponentId?: string | null;
+  initialStageDefinitionId?: string | null;
+  onInitialComponentHandled?: () => void;
+};
 
 const FOCUS_RING =
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-600 focus-visible:ring-offset-2";
@@ -77,8 +83,9 @@ function StatusChip({ status }: { status: string }) {
   );
 }
 
-export default function DailyProgressPanel({ projectId }: Props) {
+export default function DailyProgressPanel({ projectId, initialComponentId, initialStageDefinitionId, onInitialComponentHandled }: Props) {
   const [rows, setRows] = useState<ProgressRow[]>([]);
+  const [rowsLoaded, setRowsLoaded] = useState(false);
   const [definitions, setDefinitions] = useState<StageDefinition[]>([]);
   const [segments, setSegments] = useState<ComponentSegment[]>([]);
   const [filters, setFilters] = useState<DailyProgressFilters>({
@@ -96,6 +103,10 @@ export default function DailyProgressPanel({ projectId }: Props) {
   const [busy, setBusy] = useState<"load" | "preview" | "save" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [pendingComponentId, setPendingComponentId] = useState<string | null>(null);
+  const [mapLineIndex, setMapLineIndex] = useState<number | null>(null);
+  const [activeLineIndex, setActiveLineIndex] = useState(0);
+  const [listLineIndex, setListLineIndex] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setBusy("load");
@@ -107,10 +118,12 @@ export default function DailyProgressPanel({ projectId }: Props) {
         listSegments(projectId),
       ]);
       setRows(progressRows);
+      setRowsLoaded(true);
       setDefinitions(sortStagesByPosition(stageDefinitions));
       setSegments(segmentRows);
     } catch (err) {
       setError(errorMessage(err));
+      setRowsLoaded(true);
     } finally {
       setBusy(null);
     }
@@ -119,6 +132,32 @@ export default function DailyProgressPanel({ projectId }: Props) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (!initialComponentId || !rowsLoaded) return;
+    const row = rows.find((item) => item.id === initialComponentId);
+    if (!row) {
+      setError("Không tìm thấy cấu kiện vừa chọn trên mặt bằng trong danh mục tiến độ.");
+    } else {
+      setFilters({ zone: row.zone, segment_id: row.segment_id });
+      setPendingComponentId(row.id);
+      const currentStage = initialStageDefinitionId
+        ? row.stages.find((stage) => stage.stage_definition_id === initialStageDefinitionId)
+        : null;
+      if (currentStage) {
+        setDraft((current) => ({
+          ...current,
+          lines: updateDailyProgressLine(current.lines, 0, {
+            stage_definition_id: currentStage.stage_definition_id,
+          }),
+        }));
+        setMessage(`Đã chọn ${row.canonical_code} và bước đang làm “${currentStage.name}” từ mặt bằng.`);
+      } else {
+        setMessage(`Đã chọn ${row.canonical_code} từ mặt bằng. Chọn bước thi công để ghi tiến độ.`);
+      }
+    }
+    onInitialComponentHandled?.();
+  }, [initialComponentId, initialStageDefinitionId, onInitialComponentHandled, rows, rowsLoaded]);
 
   // Keep every selected id inside the current zone/segment and stage definition.
   useEffect(() => {
@@ -194,6 +233,29 @@ export default function DailyProgressPanel({ projectId }: Props) {
       ),
     [draft.lines, rows, filters],
   );
+
+  useEffect(() => {
+    if (!pendingComponentId) return;
+    const lineIndex = draft.lines.findIndex((line) =>
+      eligibleRowsForLine(rows, line.stage_definition_id, filters)
+        .some((row) => row.id === pendingComponentId),
+    );
+    if (lineIndex < 0) return;
+    setActiveLineIndex(lineIndex);
+    const target = rows.find((row) => row.id === pendingComponentId);
+    setDraft((current) => {
+      const line = current.lines[lineIndex];
+      if (!line || line.selected_ids.includes(pendingComponentId)) return current;
+      return {
+        ...current,
+        lines: updateDailyProgressLine(current.lines, lineIndex, {
+          selected_ids: [...line.selected_ids, pendingComponentId],
+        }),
+      };
+    });
+    if (target) setMessage(`Đã thêm ${target.canonical_code} vào dòng ${lineIndex + 1}. Kiểm tra bước cụ thể trước khi xem lại.`);
+    setPendingComponentId(null);
+  }, [draft.lines, filters, pendingComponentId, rows]);
 
   const totalSelected = dailyProgressSelectedCount(draft);
   const commitReady = canCommitDailyProgressPreview(
@@ -313,6 +375,7 @@ export default function DailyProgressPanel({ projectId }: Props) {
       return;
     }
     setBusy("preview");
+    setMapLineIndex(null);
     setError(null);
     setMessage(null);
     try {
@@ -353,6 +416,7 @@ export default function DailyProgressPanel({ projectId }: Props) {
       setConfirmed(false);
       setIdempotencyKey(null);
       setDraft(createDailyProgressDraft(draft.event_date));
+      setMapLineIndex(null);
       await load();
     } catch (err) {
       // Keep the same preview and key so an identical retry stays idempotent.
@@ -449,6 +513,16 @@ export default function DailyProgressPanel({ projectId }: Props) {
           {message}
         </p>
       ) : null}
+      {pendingComponentId ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50 p-2 text-sm text-blue-950" role="status">
+          <span>
+            Đã chọn {rows.find((row) => row.id === pendingComponentId)?.canonical_code ?? "cấu kiện"} từ mặt bằng. Chọn bước thi công để ghi.
+          </span>
+          <button type="button" className={SECONDARY_BUTTON} onClick={() => setPendingComponentId(null)}>
+            Bỏ cấu kiện
+          </button>
+        </div>
+      ) : null}
 
       {!preview ? (
         <>
@@ -458,30 +532,40 @@ export default function DailyProgressPanel({ projectId }: Props) {
             return (
               <div
                 key={index}
-                className="space-y-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm"
+                  className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"
               >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <h5 className="text-base font-semibold text-slate-900">
-                      Dòng {index + 1}
-                    </h5>
-                    <p className="text-xs text-slate-600">
-                      {line.selected_ids.length}/{eligible.length} cấu kiện đã chọn
-                    </p>
-                  </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    className={`min-h-11 min-w-0 flex-1 rounded-lg text-left ${FOCUS_RING}`}
+                    aria-expanded={activeLineIndex === index}
+                    onClick={() => setActiveLineIndex((current) => current === index ? -1 : index)}
+                  >
+                    <span className="block truncate text-sm font-semibold text-slate-900">
+                      {index + 1}. {stageDefinitionLabelFor(definitionOptions, line.stage_definition_id) || "Chọn công tác"}
+                    </span>
+                    <span className="block truncate text-xs text-slate-600">
+                      {line.selected_ids.length}/{eligible.length} cấu kiện · {line.status ? constructionStatusLabel(line.status) : "Chưa chọn trạng thái"}
+                      {line.selected_ids.length ? ` · ${line.selected_ids.slice(0, 4).map((id) => rows.find((row) => row.id === id)?.canonical_code ?? "").filter(Boolean).join(", ")}${line.selected_ids.length > 4 ? ` +${line.selected_ids.length - 4}` : ""}` : ""}
+                    </span>
+                  </button>
                   {draft.lines.length > 1 ? (
                     <button
                       type="button"
                       className={`${SECONDARY_BUTTON} shrink-0 ${FOCUS_RING}`}
                       disabled={busy !== null}
-                      onClick={() =>
-                        setLines(removeDailyProgressLine(draft.lines, index))
-                      }
+                      onClick={() => {
+                        setLines(removeDailyProgressLine(draft.lines, index));
+                        setMapLineIndex(null);
+                      }}
                     >
                       Xóa dòng
                     </button>
                   ) : null}
                 </div>
+
+                {activeLineIndex === index ? (
+                <div className="mt-3 space-y-3">
 
                 <label className="block text-xs font-medium text-slate-700">
                   Bước thi công
@@ -505,6 +589,26 @@ export default function DailyProgressPanel({ projectId }: Props) {
                   <p className="text-xs text-amber-800">
                     Chưa có công tác theo bộ lọc đang chọn.
                   </p>
+                ) : null}
+
+                <button
+                  type="button"
+                  className={`${SECONDARY_BUTTON} w-full ${FOCUS_RING}`}
+                  disabled={busy !== null || (!line.stage_definition_id && mapLineIndex !== index)}
+                  onClick={() => setMapLineIndex((current) => current === index ? null : index)}
+                >
+                  {mapLineIndex === index ? "Ẩn sơ đồ" : line.stage_definition_id ? "Chọn cấu kiện trên sơ đồ" : "Chọn bước thi công trước"}
+                </button>
+                {mapLineIndex === index ? (
+                  <DrawingMapPanel
+                    projectId={projectId}
+                    selection={{
+                      selectedIds: line.selected_ids,
+                      selectableIds: eligible.map((row) => row.id),
+                      disabled: busy !== null,
+                      onToggle: (componentId) => toggleComponent(index, componentId),
+                    }}
+                  />
                 ) : null}
 
                 {line.stage_definition_id ? (
@@ -538,7 +642,17 @@ export default function DailyProgressPanel({ projectId }: Props) {
                       ) : null}
                     </div>
 
-                    {eligible.length ? (
+                    <button
+                      type="button"
+                      className={`${SECONDARY_BUTTON} w-full ${FOCUS_RING}`}
+                      disabled={busy !== null || eligible.length === 0}
+                      aria-expanded={listLineIndex === index}
+                      onClick={() => setListLineIndex((current) => current === index ? null : index)}
+                    >
+                      {listLineIndex === index ? "Ẩn danh sách" : `Chọn theo danh sách · ${line.selected_ids.length}/${eligible.length}`}
+                    </button>
+
+                    {eligible.length && listLineIndex === index ? (
                       <div className="max-h-80 space-y-2 overflow-auto">
                         {eligible.map((row) => {
                           const selected = selectedSet.has(row.id);
@@ -683,18 +797,23 @@ export default function DailyProgressPanel({ projectId }: Props) {
                     </label>
                   </div>
                 </div>
+                </div>
+                ) : null}
               </div>
             );
           })}
 
-          <div className="flex flex-col gap-2 sm:flex-row">
+          <div className="sticky bottom-0 z-20 -mx-1 flex flex-col gap-2 border-t border-slate-200 bg-white/95 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] shadow-[0_-6px_16px_rgba(15,23,42,0.08)] backdrop-blur sm:static sm:mx-0 sm:flex-row sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none sm:backdrop-blur-none">
             <button
               type="button"
               className={`${SECONDARY_BUTTON} ${FOCUS_RING}`}
               disabled={
                 busy !== null || draft.lines.length >= MAX_DAILY_PROGRESS_LINES
               }
-              onClick={() => setLines(addDailyProgressLine(draft.lines))}
+              onClick={() => {
+                setLines(addDailyProgressLine(draft.lines));
+                setActiveLineIndex(draft.lines.length);
+              }}
             >
               Thêm công tác
             </button>

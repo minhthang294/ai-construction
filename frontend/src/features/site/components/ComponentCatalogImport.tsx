@@ -157,6 +157,12 @@ export default function ComponentCatalogImport({ projectId }: Props) {
   const [view, setView] = useState<(typeof COMPONENT_VIEWS)[number]["id"]>(
     "daily",
   );
+  const [progressRequest, setProgressRequest] = useState<{ componentId: string; stageDefinitionId?: string | null } | null>(null);
+  const requestDailyProgress = useCallback((componentId: string, stageDefinitionId?: string | null) => {
+    setProgressRequest({ componentId, stageDefinitionId });
+    setView("daily");
+  }, []);
+  const clearProgressRequest = useCallback(() => setProgressRequest(null), []);
 
   const loadCatalog = useCallback(
     async (query: string) => {
@@ -370,13 +376,18 @@ export default function ComponentCatalogImport({ projectId }: Props) {
         className="space-y-3"
       >
       {view === "daily" ? (
-        <DailyProgressPanel projectId={projectId} />
+        <DailyProgressPanel
+          projectId={projectId}
+          initialComponentId={progressRequest?.componentId}
+          initialStageDefinitionId={progressRequest?.stageDefinitionId}
+          onInitialComponentHandled={clearProgressRequest}
+        />
       ) : view === "progress" ? (
         <ComponentProgressPanel projectId={projectId} />
       ) : view === "journal" ? (
         <JournalPanel projectId={projectId} />
       ) : view === "map" ? (
-        <DrawingMapPanel projectId={projectId} />
+        <DrawingMapPanel projectId={projectId} onRequestProgress={requestDailyProgress} />
       ) : (
         <>
           <div className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm">

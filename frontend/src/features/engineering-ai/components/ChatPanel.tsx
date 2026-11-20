@@ -44,7 +44,7 @@ export default function ChatPanel({ projectId, onOpenCitation }: Props) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [search, setSearch] = useState("");
   const [scope, setScope] = useState<"effective" | "history">("effective");
-  const [useVision, setUseVision] = useState(false);
+  const useVision = false;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -326,15 +326,7 @@ export default function ChatPanel({ projectId, onOpenCitation }: Props) {
                     <option value="history">Toàn bộ lịch sử</option>
                   </select>
                 </label>
-                <label className="flex min-h-11 items-center gap-2 text-sm leading-5 text-slate-700">
-                  <input
-                    type="checkbox"
-                    className="h-5 w-5 shrink-0 rounded border-slate-300 accent-[#405e9b]"
-                    checked={useVision}
-                    onChange={(event) => setUseVision(event.target.checked)}
-                  />
-                  Phân tích một trang top-1 (nếu Vision được cấu hình)
-                </label>
+
               </div>
             </div>
           </div>

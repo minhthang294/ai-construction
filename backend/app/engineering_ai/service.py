@@ -1643,48 +1643,13 @@ def ask(
 
     page_action = None
     warnings: List[str] = []
-    navigation = answer_page_navigation(db, project_id, message, scope)
-    if navigation is not None:
-        answer = navigation.answer
-        citations = navigation.citations
-        warnings = list(navigation.warnings)
-        no_source = navigation.no_source
-        confidence = navigation.confidence
-        page_action = navigation.page_action
-        used = []
-    else:
-        component_query = parse_component_query(message)
-        if component_query is not None:
-            answer, citations, component_warnings, no_source, confidence = (
-                answer_component_query(
-                    db, project_id, message, component_query, scope
-                )
-            )
-            warnings.extend(component_warnings)
-            used = []
-        else:
-            warnings = [UNVERIFIED_KB_NOTE]
-            results = search_chunks(
-                db, project_id, message, top_k, embedding_provider, scope=scope
-            )
-            if results:
-                answer, used, provider_warnings = _grounded_answer(
-                    provider, message, results
-                )
-                warnings.extend(provider_warnings)
-                warnings.extend(answer.warnings)
-            else:
-                answer = ProviderAnswer(text=NO_SOURCE_ANSWER)
-                used = []
-
-            no_source = answer.text.strip() == NO_SOURCE_ANSWER
-            if no_source:
-                used = []
-            low_ocr = low_confidence_citations(used, LOW_OCR_THRESHOLD)
-            if low_ocr:
-                warnings.append(LOW_OCR_WARNING)
-            citations = [citation_to_out(result) for result in used]
-            confidence = 0.0 if no_source else _confidence(used, low_ocr)
+    from .database_chat import answer_database_question
+    answer, database_warnings = answer_database_question(db, project_id, message, provider)
+    citations = []
+    warnings.extend(database_warnings)
+    no_source = answer.text.strip() == NO_SOURCE_ANSWER
+    confidence = 0.0 if no_source else 0.8
+    used = []
     vision_used = False
     vision_note = None
     if use_vision and used:

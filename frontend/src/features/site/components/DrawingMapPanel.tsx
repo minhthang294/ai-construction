@@ -35,7 +35,18 @@ import {
   type View,
 } from "../lib/drawingMap";
 
-type Props = { projectId: string };
+type Selection = {
+  selectedIds: string[];
+  selectableIds: string[];
+  disabled?: boolean;
+  onToggle: (componentId: string) => void;
+};
+
+type Props = {
+  projectId: string;
+  selection?: Selection;
+  onRequestProgress?: (componentId: string, stageDefinitionId?: string | null) => void;
+};
 
 type LoadState = "loading" | "ready" | "pending" | "error";
 type ImageState = "idle" | "loading" | "ready" | "error";
@@ -119,7 +130,7 @@ type GestureState = {
   pinchStartZoom: number;
 };
 
-export default function DrawingMapPanel({ projectId }: Props) {
+export default function DrawingMapPanel({ projectId, selection, onRequestProgress }: Props) {
   const [map, setMap] = useState<DrawingMap | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -501,6 +512,11 @@ export default function DrawingMapPanel({ projectId }: Props) {
             {map.sheets.length} trang bản vẽ · {allMarkerCount} vị trí đã gắn
           </p>
         ) : null}
+        {selection ? (
+          <p className="mt-2 rounded-lg border border-blue-200 bg-blue-50 p-2 text-xs text-blue-950" role="status">
+            Đã chọn {selection.selectedIds.length} cấu kiện. Chạm vòng trên sơ đồ để chọn hoặc bỏ chọn; cấu kiện mờ không thuộc công việc này.
+          </p>
+        ) : null}
         {reviewCount > 0 ? (
           <p
             role="status"
@@ -817,9 +833,11 @@ export default function DrawingMapPanel({ projectId }: Props) {
                               className="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
                             >
                               {mapTargets.map(({ marker, points, x, y }) => {
-                                const selected =
-                                  detailMarker?.component_id ===
-                                  marker.component_id;
+                                const selected = selection
+                                  ? selection.selectedIds.includes(marker.component_id)
+                                  : detailMarker?.component_id === marker.component_id;
+                                const selectable = !selection || selection.selectableIds.includes(marker.component_id);
+                                const opacity = selection && !selectable ? 0.2 : 1;
                                 const color =
                                   designGroupColor(marker.design_group) ??
                                   (marker.type === "beam" ? "#0f766e" : "#0369a1");
@@ -831,12 +849,14 @@ export default function DrawingMapPanel({ projectId }: Props) {
                                         <polyline points={path} fill="none" stroke="white"
                                           strokeWidth={selected ? 3.5 : 2.25}
                                           strokeLinecap="round" strokeLinejoin="round"
+                                          opacity={opacity}
                                           vectorEffect="non-scaling-stroke" />
                                         <polyline points={path} fill="none"
                                           stroke={selected ? "#111827" : color}
                                           strokeWidth={selected ? 2 : 1.25}
                                           strokeLinecap="round" strokeLinejoin="round"
                                           strokeDasharray={marker.location_review ? "2 3" : isAdditionalScope(marker) ? "5 3" : undefined}
+                                          opacity={opacity}
                                           vectorEffect="non-scaling-stroke" />
                                       </>
                                     ) : (
@@ -849,6 +869,7 @@ export default function DrawingMapPanel({ projectId }: Props) {
                                         stroke={selected ? "#111827" : color}
                                         strokeWidth={selected ? 2 : 1.25}
                                         strokeDasharray={marker.location_review ? "1.5 2" : isAdditionalScope(marker) ? "2 2" : undefined}
+                                        opacity={opacity}
                                         vectorEffect="non-scaling-stroke"
                                       />
                                     )}
@@ -865,16 +886,20 @@ export default function DrawingMapPanel({ projectId }: Props) {
                                 const dy = Math.abs(y - other.y) * imageBox.height;
                                 diameter = Math.min(diameter, Math.max(dx, dy));
                               }
-                              const selected =
-                                detailMarker?.component_id ===
-                                marker.component_id;
+                              const selected = selection
+                                ? selection.selectedIds.includes(marker.component_id)
+                                : detailMarker?.component_id === marker.component_id;
+                              const selectable = !selection || selection.selectableIds.includes(marker.component_id);
                               return (
                                 <button
                                   key={`${marker.component_id}-${marker.code}`}
                                   type="button"
-                                  aria-label={`Mở chi tiết ${markerLabel(marker)}`}
+                                  aria-label={selection
+                                    ? `${selected ? "Bỏ chọn" : "Chọn"} ${markerLabel(marker)}${selectable ? "" : ", không phù hợp công việc"}`
+                                    : `Mở chi tiết ${markerLabel(marker)}${marker.current_work ? `, đang làm ${marker.current_work}` : ""}`}
                                   aria-pressed={selected}
                                   className={`absolute z-10 -translate-x-1/2 -translate-y-1/2 rounded-full bg-transparent ${FOCUS_RING}`}
+                                  disabled={Boolean(selection && (selection.disabled || !selectable))}
                                   style={{
                                     left: `${x * 100}%`,
                                     top: `${y * 100}%`,
@@ -884,8 +909,26 @@ export default function DrawingMapPanel({ projectId }: Props) {
                                   onPointerDown={(event) =>
                                     event.stopPropagation()
                                   }
-                                  onClick={() => void openDetail(marker)}
-                                />
+                                  onClick={() => selection
+                                    ? selection.onToggle(marker.component_id)
+                                    : void openDetail(marker)}
+                                >
+                                  {view.zoom >= 3 && marker.current_work ? (
+                                    <span
+                                      aria-hidden="true"
+                                      className="pointer-events-none absolute left-1/2 top-full z-20 -translate-x-1/2 whitespace-normal rounded border border-slate-300 bg-white/95 px-1 py-0.5 text-center font-sans font-medium text-slate-800 shadow-sm"
+                                      style={{
+                                        width: `${132 / view.zoom}px`,
+                                        marginTop: `${3 / view.zoom}px`,
+                                        fontSize: `${10 / view.zoom}px`,
+                                        lineHeight: `${12 / view.zoom}px`,
+                                      }}
+                                    >
+                                      <span className="block font-bold">{marker.code}</span>
+                                      <span className="block">Đang làm: {marker.current_work}</span>
+                                    </span>
+                                  ) : null}
+                                </button>
                               );
                             })}
                           </div>
@@ -910,7 +953,7 @@ export default function DrawingMapPanel({ projectId }: Props) {
                 </div>
               ) : null}
 
-              {detailMarker ? (
+              {detailMarker && !selection ? (
                 <section
                   aria-labelledby={detailHeadingId}
                   className="rounded-xl border border-slate-300 bg-white p-3 shadow-sm"
@@ -945,6 +988,16 @@ export default function DrawingMapPanel({ projectId }: Props) {
                       Đóng
                     </button>
                   </div>
+
+                  {onRequestProgress ? (
+                    <button
+                      type="button"
+                      className={`${PRIMARY_BUTTON} mt-3 w-full ${FOCUS_RING}`}
+                      onClick={() => onRequestProgress(detailMarker.component_id, detailMarker.current_work_definition_id)}
+                    >
+                      Ghi tiến độ theo ngày
+                    </button>
+                  ) : null}
 
                   {detailState === "loading" ? (
                     <p className="mt-3 text-sm text-slate-600">

@@ -8,6 +8,8 @@ export type DrawingMarker = {
   type: "pile" | "beam";
   design_group?: string | null;
   location_review?: boolean;
+  current_work?: string | null;
+  current_work_definition_id?: string | null;
   points: Array<[number, number]>;
   origin: string;
   construction_status: string;
