@@ -6,6 +6,8 @@ export type DrawingMarker = {
   component_id: string;
   code: string;
   type: "pile" | "beam";
+  design_group?: string | null;
+  location_review?: boolean;
   points: Array<[number, number]>;
   origin: string;
   construction_status: string;
@@ -23,6 +25,7 @@ export type DrawingSheet = {
 export type DrawingMap = {
   sheets: DrawingSheet[];
   review_count: number;
+  position_review_count?: number;
 };
 
 export type DrawingFilters = {
@@ -117,6 +120,14 @@ export function originLabel(origin: string): string {
 
 export function isAdditionalScope(marker: DrawingMarker): boolean {
   return marker.origin === "ADDITIONAL_SCOPE";
+}
+
+export function designGroupColor(group: string | null | undefined): string | null {
+  const name = (group ?? "").normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
+  if (/\bnhom\s*(?:i|1)\b/.test(name)) return "#0f766e";
+  if (/\bnhom\s*(?:ii|2)\b/.test(name)) return "#b45309";
+  if (/\bnhom\s*(?:iii|3)\b/.test(name)) return "#7e22ce";
+  return null;
 }
 
 function clampUnit(value: number): number {

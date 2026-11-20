@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .access import require_project_member
-from .component_models import RepairScope, Segment, StructuralComponent, StructureZone
+from .component_models import DesignGroup, RepairScope, Segment, StructuralComponent, StructureZone
 from .database import get_db
 from .insights_router import _latest_events
 
@@ -29,6 +29,9 @@ class Marker(BaseModel):
     code: str
     type: Literal["pile", "beam"]
     points: list[tuple[Coordinate, Coordinate]] = Field(min_length=1, max_length=30)
+    zone: str = "Cầu chính"
+    segment: int = 2
+    location_review: bool = False
 
 
 class Sheet(BaseModel):
@@ -62,39 +65,51 @@ def drawing_map(project_id: str, db: Session = Depends(get_db)):
     require_project_member(project_id)
     manifest = _manifest(project_id)
     if manifest is None:
-        return {"sheets": [], "review_count": 0}
-    rows = db.scalars(
-        select(StructuralComponent)
+        return {"sheets": [], "review_count": 0, "position_review_count": 0}
+    marker_keys = {(marker.type, marker.code, marker.zone, marker.segment)
+                   for sheet in manifest.sheets for marker in sheet.markers}
+    rows = db.execute(
+        select(StructuralComponent, DesignGroup.name, StructureZone.name, Segment.number)
         .join(Segment, Segment.id == StructuralComponent.segment_id)
         .join(StructureZone, StructureZone.id == Segment.zone_id)
+        .outerjoin(DesignGroup, DesignGroup.id == StructuralComponent.design_group_id)
         .where(StructuralComponent.project_id == project_id,
-               StructuralComponent.verification == "VERIFIED",
-               StructureZone.project_id == project_id, StructureZone.name == "Cầu chính",
-               Segment.number == 2)
+               StructuralComponent.verification == "VERIFIED")
     ).all()
-    components = {(row.type, row.canonical_code): row.id for row in rows}
+    components: dict[tuple[str, str, str, int], list[tuple[StructuralComponent, str | None]]] = {}
+    for component, group_name, zone_name, segment_number in rows:
+        key = (component.type, component.canonical_code, zone_name, segment_number)
+        if key in marker_keys:
+            components.setdefault(key, []).append((component, group_name))
+    unique_components = {key: value[0][0].id for key, value in components.items() if len(value) == 1}
     additional_ids = set(db.scalars(select(RepairScope.component_id).where(
-        RepairScope.component_id.in_(list(components.values())), RepairScope.kind == "ADDITIONAL_SCOPE",
+        RepairScope.component_id.in_(list(unique_components.values())), RepairScope.kind == "ADDITIONAL_SCOPE",
         RepairScope.verification == "VERIFIED",
     )))
     latest = _latest_events(db, project_id)
     review_count = len(manifest.review)
+    position_review_count = 0
     sheets = []
     for sheet in manifest.sheets:
         markers = []
         for marker in sheet.markers:
-            component_id = components.get((marker.type, marker.code))
+            key = (marker.type, marker.code, marker.zone, marker.segment)
+            matches = components.get(key, [])
+            component_id = unique_components.get(key)
             valid_shape = len(marker.points) == 1 if marker.type == "pile" else len(marker.points) >= 2
             if not component_id or not valid_shape:
                 review_count += 1
                 continue
+            component, group_name = matches[0]
+            position_review_count += int(marker.location_review)
             event = latest.get(component_id)
             markers.append({**marker.model_dump(), "component_id": component_id,
+                            "design_group": group_name,
                             "origin": "ADDITIONAL_SCOPE" if component_id in additional_ids else "DESIGN_SCOPE",
                             "construction_status": event.status if event else "NOT_STARTED"})
         sheets.append({**sheet.model_dump(exclude={"image", "markers"}), "markers": markers,
                        "image_url": f"/projects/{project_id}/drawing-map/{sheet.id}/image"})
-    return {"sheets": sheets, "review_count": review_count}
+    return {"sheets": sheets, "review_count": review_count, "position_review_count": position_review_count}
 
 
 @router.get("/projects/{project_id}/drawing-map/{sheet_id}/image")

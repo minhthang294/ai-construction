@@ -17,6 +17,7 @@ import {
   constructionStatusLabel,
   containBox,
   countMarkers,
+  designGroupColor,
   fetchComponentDetail,
   fetchDrawingMap,
   fetchDrawingSheetImageUrl,
@@ -216,7 +217,9 @@ export default function DrawingMapPanel({ projectId }: Props) {
     const [x, y] = points[middle];
     const [endX, endY] = points[middle + 1] ?? points[middle];
     return [{ marker, points, x: (x + endX) / 2, y: (y + endY) / 2 }];
-  }), [activeSheet]);
+  }).sort(
+    (a, b) => Number(a.points.length === 1) - Number(b.points.length === 1),
+  ), [activeSheet]);
   const allMarkerCount = useMemo(
     () => countMarkers(map?.sheets ?? []),
     [map],
@@ -504,6 +507,14 @@ export default function DrawingMapPanel({ projectId }: Props) {
             className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs leading-5 text-amber-950"
           >
             {reviewCount} mục cần rà soát và không hiển thị trên bản đồ.
+          </p>
+        ) : null}
+        {(map?.position_review_count ?? 0) > 0 ? (
+          <p
+            role="status"
+            className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs leading-5 text-amber-950"
+          >
+            {map?.position_review_count} vị trí Bunke đang hiển thị dạng nét đứt để chờ rà soát theo bản vẽ.
           </p>
         ) : null}
       </div>
@@ -809,20 +820,23 @@ export default function DrawingMapPanel({ projectId }: Props) {
                                 const selected =
                                   detailMarker?.component_id ===
                                   marker.component_id;
+                                const color =
+                                  designGroupColor(marker.design_group) ??
+                                  (marker.type === "beam" ? "#0f766e" : "#0369a1");
                                 const path = points.map(([px, py]) => `${px},${py}`).join(" ");
                                 return (
                                   <g key={`${marker.component_id}-${marker.code}`}>
                                     {points.length > 1 ? (
                                       <>
                                         <polyline points={path} fill="none" stroke="white"
-                                          strokeWidth={selected ? 4.5 : 3.5}
+                                          strokeWidth={selected ? 3.5 : 2.25}
                                           strokeLinecap="round" strokeLinejoin="round"
                                           vectorEffect="non-scaling-stroke" />
                                         <polyline points={path} fill="none"
-                                          stroke={selected ? "#a21caf" : "#c2410c"}
-                                          strokeWidth={selected ? 2.75 : 2}
+                                          stroke={selected ? "#111827" : color}
+                                          strokeWidth={selected ? 2 : 1.25}
                                           strokeLinecap="round" strokeLinejoin="round"
-                                          strokeDasharray={isAdditionalScope(marker) ? "5 3" : undefined}
+                                          strokeDasharray={marker.location_review ? "2 3" : isAdditionalScope(marker) ? "5 3" : undefined}
                                           vectorEffect="non-scaling-stroke" />
                                       </>
                                     ) : (
@@ -832,9 +846,9 @@ export default function DrawingMapPanel({ projectId }: Props) {
                                         rx={0.004}
                                         ry={0.004 * imageBox.width / imageBox.height}
                                         fill="none"
-                                        stroke={selected ? "#a21caf" : "#0284c7"}
+                                        stroke={selected ? "#111827" : color}
                                         strokeWidth={selected ? 2 : 1.25}
-                                        strokeDasharray={isAdditionalScope(marker) ? "2 2" : undefined}
+                                        strokeDasharray={marker.location_review ? "1.5 2" : isAdditionalScope(marker) ? "2 2" : undefined}
                                         vectorEffect="non-scaling-stroke"
                                       />
                                     )}
@@ -883,9 +897,11 @@ export default function DrawingMapPanel({ projectId }: Props) {
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-slate-200 p-3 text-xs text-slate-600">
                     <span>Kéo để di chuyển.</span>
                     <span>Chụm hai ngón hoặc dùng nút +/− để thu phóng.</span>
-                    <span className="inline-flex items-center gap-1">
-                      <span className="h-0.5 w-3 bg-orange-700" /> Dầm
-                    </span>
+                    <span className="inline-flex items-center gap-1"><span className="h-0.5 w-3 bg-teal-700" /> Dầm · nét mảnh</span>
+                    <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full border border-teal-700" /> Nhóm 1</span>
+                    <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full border border-amber-700" /> Nhóm 2</span>
+                    <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full border border-purple-700" /> Nhóm 3</span>
+                    <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full border border-dashed border-slate-600" /> Vị trí chờ rà soát</span>
                     <span className="inline-flex items-center gap-1">
                       <span className="h-2.5 w-2.5 rounded-full border border-dashed border-sky-600" />
                       Nét đứt: phạm vi phát sinh.

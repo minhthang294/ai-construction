@@ -26,7 +26,7 @@ Prefix `/api/v1`. JSON UTF-8. Auth Bearer; mọi request project-scoped kiểm m
 | `POST /projects/{p}/progress/bulk` | Ghi hàng loạt sau khi duyệt: `{reviewed: true, idempotency_key, ...bulk-preview}`; kiểm lại đúng danh sách, `stage_selections`, bước và evidence trong transaction; mơ hồ/không khớp trả `409`; ghi `ProgressEvent` và audit; trả `201` |
 | `POST /projects/{p}/progress/daily-preview` | Xem trước nhiều công tác cùng ngày. Nhận `{event_date, lines:[{stage_definition_id, component_ids, stage_selections?, status, group_quantity?, group_unit?}]}`; trả `{can_commit, lines, warnings}`. |
 | `POST /projects/{p}/progress/daily` | Ghi toàn bộ công tác trong một giao dịch. Thêm `reviewed: true` và `idempotency_key` vào payload preview. Trả `{created, lines}`. Khối lượng cấp nhóm giữ ở bản ghi nhóm, khối lượng từng cấu kiện để trống. |
-| `GET /projects/{p}/drawing-map` | Mặt bằng đã đối chiếu. Mỗi sheet có trang, mã bản vẽ, URL ảnh và các marker theo ID cấu kiện cùng dự án. |
+| `GET /projects/{p}/drawing-map` | Mặt bằng theo project/zone/segment. Marker trả `design_group`, `location_review`; phản hồi có `review_count` (mã chưa đặt được) và `position_review_count` (tọa độ đang chờ duyệt). |
 | `GET /projects/{p}/drawing-map/{sheet_id}/image` | Trả ảnh riêng cho thành viên dự án. |
 | `GET /projects/{p}/progress/summary` | Tổng hợp project-scoped trên cấu kiện đã duyệt: tổng/đã duyệt/chờ duyệt, số có phạm vi phát sinh, 4 trạng thái thi công + tỷ lệ, liên kết/xác nhận nghiệm thu + tỷ lệ; hai tỷ lệ độc lập |
 
