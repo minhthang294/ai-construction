@@ -1,6 +1,7 @@
 """Component progress, exact bulk review and reviewed journal preview."""
 
-from datetime import date, datetime, timezone
+import json
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import func, select
@@ -22,7 +23,9 @@ from app.core.component_models import (
     StructuralComponent,
     StructureZone,
 )
+from app.core.models import AuditLog
 from app.site.models import SitePhoto, SiteProgressBulkBatch
+from app.site.schemas import LOCAL_TZ
 
 
 def _bulk(**overrides):
@@ -45,6 +48,46 @@ def _commit(**overrides):
         **_bulk(),
         "reviewed": True,
         "idempotency_key": "bulk-1",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _daily_line(**overrides):
+    line = {
+        "stage_definition_id": "sd1",
+        "component_ids": ["c1"],
+        "status": "COMPLETED",
+        "group_quantity": 12.5,
+        "group_unit": "m3",
+    }
+    line.update(overrides)
+    return line
+
+
+def _daily(**overrides):
+    payload = {
+        "event_date": "2026-11-18",
+        "lines": [
+            _daily_line(),
+            _daily_line(
+                stage_definition_id="sd2",
+                component_ids=["c2"],
+                status="IN_PROGRESS",
+                group_quantity=0.0,
+                group_unit="m3",
+            ),
+        ],
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _daily_commit(**overrides):
+    payload = {
+        **_daily(),
+        "reviewed": True,
+        "idempotency_key": "daily-1",
     }
     payload.update(overrides)
     return payload
@@ -645,3 +688,218 @@ def test_bulk_evidence_must_resolve_in_the_project(client, seeded):
     first = client.post(commit_url, json=_commit(component_ids=["c1"], evidence_refs=["photo:ph1"]))
     assert first.status_code == 201, first.text
     assert first.json()["events"][0]["evidence_refs"] == ["photo:ph1"]
+
+
+def test_daily_preview_is_read_only_and_project_scoped(client, seeded):
+    response = client.post(
+        "/api/v1/projects/p1/progress/daily-preview", json=_daily()
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["can_commit"] is True
+    assert [line["line_index"] for line in data["lines"]] == [0, 1]
+    assert data["lines"][0]["group_quantity"] == 12.5
+    assert data["lines"][0]["group_unit"] == "m3"
+    assert data["lines"][0]["components"][0]["id"] == "c1"
+    assert data["lines"][1]["components"][0]["id"] == "c2"
+
+    with seeded() as db:
+        assert db.scalar(select(func.count(SiteProgressBulkBatch.id))) == 0
+        assert db.scalar(select(func.count(ProgressEvent.id))) == 0
+
+    scoped = client.post(
+        "/api/v1/projects/p1/progress/daily-preview",
+        json=_daily(
+            lines=[
+                *_daily()["lines"],
+                _daily_line(stage_definition_id="sd1", component_ids=["c-other"]),
+            ]
+        ),
+    )
+    assert scoped.status_code == 200, scoped.text
+    scoped_data = scoped.json()
+    assert scoped_data["can_commit"] is False
+    assert scoped_data["lines"][2]["missing_component_ids"] == ["c-other"]
+    assert scoped_data["warnings"]
+    assert client.post(
+        "/api/v1/projects/p1/progress/daily",
+        json=_daily_commit(
+            idempotency_key="daily-scoped",
+            lines=[_daily_line(component_ids=["c-other"])],
+        ),
+    ).status_code == 409
+
+    foreign_stage = client.post(
+        "/api/v1/projects/p1/progress/daily-preview",
+        json=_daily(lines=[_daily_line(stage_definition_id="sd-other")]),
+    )
+    assert foreign_stage.status_code == 200, foreign_stage.text
+    assert foreign_stage.json()["can_commit"] is False
+    assert foreign_stage.json()["lines"][0]["missing_stage_component_ids"] == ["c1"]
+    assert any(
+        "không thuộc công trình" in warning
+        for warning in foreign_stage.json()["warnings"]
+    )
+
+
+def test_daily_rejects_duplicate_resolved_stage_ids_across_lines(client, seeded):
+    lines = [_daily_line(), _daily_line()]
+    preview = client.post(
+        "/api/v1/projects/p1/progress/daily-preview",
+        json=_daily(lines=lines),
+    )
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["can_commit"] is False
+    assert any("trùng" in warning for warning in preview.json()["warnings"])
+
+    conflict = client.post(
+        "/api/v1/projects/p1/progress/daily",
+        json=_daily_commit(lines=lines),
+    )
+    assert conflict.status_code == 409, conflict.text
+    with seeded() as db:
+        assert db.scalar(select(func.count(ProgressEvent.id))) == 0
+        assert db.scalar(select(func.count(SiteProgressBulkBatch.id))) == 0
+
+
+def test_daily_commit_keeps_group_quantity_off_events_and_is_idempotent(
+    client, seeded
+):
+    first = client.post("/api/v1/projects/p1/progress/daily", json=_daily_commit())
+    assert first.status_code == 201, first.text
+    first_data = first.json()
+    assert first_data["created"] == 2
+    assert [line["created"] for line in first_data["lines"]] == [1, 1]
+    assert [line["group_quantity"] for line in first_data["lines"]] == [12.5, 0.0]
+    assert all(
+        event["quantity"] is None and event["unit"] is None
+        for line in first_data["lines"]
+        for event in line["events"]
+    )
+
+    retry = client.post("/api/v1/projects/p1/progress/daily", json=_daily_commit())
+    assert retry.status_code == 201, retry.text
+    assert retry.json() == first_data
+
+    with seeded() as db:
+        assert db.scalar(select(func.count(ProgressEvent.id))) == 2
+        assert all(
+            event.quantity is None and event.unit is None
+            for event in db.scalars(select(ProgressEvent))
+        )
+        batches = list(db.scalars(select(SiteProgressBulkBatch)))
+        sentinel = next(
+            batch for batch in batches if batch.idempotency_key == "daily-1"
+        )
+        stored = json.loads(sentinel.result_json)
+        assert stored["created"] == 2
+        assert stored["lines"][0]["group_quantity"] == 12.5
+        assert stored["lines"][0]["group_unit"] == "m3"
+        assert stored["lines"][1]["group_quantity"] == 0.0
+        audit = db.scalar(
+            select(AuditLog).where(
+                AuditLog.action == "component_progress_daily_recorded"
+            )
+        )
+        detail = json.loads(audit.detail)
+        assert detail["lines"][0]["group_quantity"] == 12.5
+        assert detail["lines"][0]["group_unit"] == "m3"
+        assert detail["lines"][1]["group_quantity"] == 0.0
+        assert detail["lines"][0]["stage_ids"] == {"c1": "st1"}
+
+    rows = {
+        row["canonical_code"]: row
+        for row in client.get("/api/v1/projects/p1/progress").json()
+    }
+    assert rows["I36"]["construction_status"] == "COMPLETED"
+    assert rows["I-40-42"]["construction_status"] == "IN_PROGRESS"
+    assert rows["I36"]["acceptance_status"] == "NOT_LINKED"
+
+    changed = _daily_commit()
+    changed["lines"] = [
+        {**changed["lines"][0], "group_quantity": 99},
+        changed["lines"][1],
+    ]
+    assert client.post(
+        "/api/v1/projects/p1/progress/daily", json=changed
+    ).status_code == 409
+    with seeded() as db:
+        assert db.scalar(select(func.count(ProgressEvent.id))) == 2
+
+
+def test_daily_commit_rolls_back_all_lines_when_a_later_line_fails(
+    client, seeded, monkeypatch
+):
+    from app.site import progress as progress_module
+
+    original = progress_module.commit_bulk
+    calls = {"count": 0}
+
+    def flaky_commit(*args, **kwargs):
+        calls["count"] += 1
+        if calls["count"] == 2:
+            raise progress_module.ProgressSelectionConflict("forced failure")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(progress_module, "commit_bulk", flaky_commit)
+    response = client.post("/api/v1/projects/p1/progress/daily", json=_daily_commit())
+    assert response.status_code == 409, response.text
+
+    with seeded() as db:
+        assert db.scalar(select(func.count(ProgressEvent.id))) == 0
+        assert db.scalar(select(func.count(SiteProgressBulkBatch.id))) == 0
+        assert db.scalar(
+            select(func.count(AuditLog.id)).where(
+                AuditLog.action == "component_progress_daily_recorded"
+            )
+        ) == 0
+
+
+def test_daily_commit_honours_explicit_stage_selection(client, seeded):
+    _add_repeated_scope_component(seeded)
+    line = _daily_line(
+        stage_definition_id="sd1",
+        component_ids=["c3"],
+        stage_selections=[{"component_id": "c3", "stage_id": "st4"}],
+    )
+    preview = client.post(
+        "/api/v1/projects/p1/progress/daily-preview",
+        json=_daily(lines=[line]),
+    )
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["can_commit"] is True
+    assert preview.json()["lines"][0]["components"][0]["stage_id"] == "st4"
+
+    saved = client.post(
+        "/api/v1/projects/p1/progress/daily",
+        json=_daily_commit(lines=[line], idempotency_key="daily-amb"),
+    )
+    assert saved.status_code == 201, saved.text
+    assert saved.json()["lines"][0]["events"][0]["stage_id"] == "st4"
+
+
+def test_daily_rejects_strict_date_and_workload_caps(client):
+    tomorrow = (datetime.now(LOCAL_TZ).date() + timedelta(days=1)).isoformat()
+    assert client.post(
+        "/api/v1/projects/p1/progress/daily-preview",
+        json={**_daily(), "event_date": tomorrow},
+    ).status_code == 422
+    assert client.post(
+        "/api/v1/projects/p1/progress/daily-preview",
+        json={**_daily(), "event_date": "18/11/2026"},
+    ).status_code == 422
+
+    too_many_lines = [_daily_line() for _ in range(51)]
+    assert client.post(
+        "/api/v1/projects/p1/progress/daily-preview",
+        json=_daily(lines=too_many_lines),
+    ).status_code == 422
+
+    too_many_components = [
+        _daily_line(component_ids=[f"x{i}" for i in range(251)]),
+        _daily_line(component_ids=[f"y{i}" for i in range(251)]),
+    ]
+    assert client.post(
+        "/api/v1/projects/p1/progress/daily-preview",
+        json=_daily(lines=too_many_components),
+    ).status_code == 422

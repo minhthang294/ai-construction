@@ -24,6 +24,8 @@ export type ProgressStage = {
   scope_kind?: string | null;
   status: ConstructionStatus;
   latest_event_at: string | null;
+  inferred_from_stage_id?: string | null;
+  inference_conflict?: boolean;
 };
 
 export type ProgressLatestEvent = {

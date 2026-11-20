@@ -1,5 +1,240 @@
 # Site Report Agent Report
 
+## Vòng 13 — ghi tiến độ nhiều công tác trong ngày (backend)
+
+Cập nhật: 20/11/2026. Phạm vi thay đổi: `backend/app/site/progress.py`, `backend/tests/site_report/test_component_progress.py` và file báo cáo này. Không sửa shared core, migration, module agent khác, frontend, `data/app.db`, dữ liệu dùng chung hay Excel nguồn. Không commit/push/deploy. Giữ nguyên các thay đổi suy luận tiến độ (`progress_inference.py`, import và lời gọi `apply_inferred_progress`) đã có trong `progress.py`.
+
+### Chức năng đã hoàn thành
+
+- **`POST /api/v1/projects/{p}/progress/daily-preview`** nhận `{event_date, lines:[...]}`. Mỗi dòng được kiểm bằng chính `preview_bulk` hiện có, trả đúng dữ liệu xem trước theo dòng (`components`, `stage_options`, `stage_id`, `missing_*`, `warnings`, `can_commit`, `count`, `ready_count`) kèm `line_index`, `group_quantity`, `group_unit`. Endpoint chỉ đọc, không ghi DB.
+- **`POST /api/v1/projects/{p}/progress/daily`** nhận thêm `reviewed: true` và `idempotency_key`. Trả `{created, lines}`; `created` là tổng số event, mỗi dòng là kết quả ghi của dòng đó.
+- **Một transaction thật sự**: toàn bộ dòng được xem trước/kiểm tra trước khi ghi; sau đó mỗi dòng gọi `commit_bulk(..., commit=False)` để dùng lại đúng logic kiểm/ghi cũ. Chỉ một `db.commit()` ở cuối. Mọi lỗi giữa các dòng (kể cả lỗi giả lập ở dòng thứ hai) đều `rollback`, không còn event/batch/audit dở dang.
+- **Chống trùng bước giữa các dòng**: tập `stage_id` đã phân giải được gom qua tất cả các dòng. Trùng ở preview làm `can_commit=false` và thêm cảnh báo; trùng ở commit trả `409`. Kiểm tra lại ngay sau khi mỗi dòng ghi để chặn trường hợp dữ liệu đổi giữa preview và commit.
+- **Khối lượng cấp nhóm không nhân bản**: `group_quantity`/`group_unit` chỉ nằm trong `result_json` của batch ngày và audit `component_progress_daily_recorded`; event của từng cấu kiện luôn có `quantity=null`, `unit=null`. Giá trị `0` được giữ là `0`, không bị đổi thành `null`.
+- **Idempotency theo cả yêu cầu**: hash toàn bộ payload (trừ `reviewed`/`idempotency_key`) lưu ở batch ngày. Retry cùng payload trả nguyên kết quả đã lưu, không tạo thêm event; cùng key nhưng payload khác trả `409`.
+- **Strict date**: `event_date` là ngày lịch sử dụng chung cho mọi dòng, từ chối ngày tương lai theo `Asia/Ho_Chi_Minh` và từ chối định dạng không phải `YYYY-MM-DD` (422).
+- **Giới hạn tải**: tối đa 50 dòng mỗi lần và 500 cấu kiện cộng dồn; vượt trả 422. Mỗi dòng vẫn giữ giới hạn 500 `component_ids`/`stage_selections` và tối đa 500 lựa chọn bước.
+- **Project-scoped**: dependency `require_site_editor` cho cả preview/commit; component, stage definition và stage selection được kiểm trong project qua `preview_bulk`/`commit_bulk`. Cấu kiện ngoài project làm preview `can_commit=false`, commit `409`, không ghi dữ liệu.
+- **Không đổi hành vi API cũ**: `preview_bulk`/`commit_bulk` vẫn như trước; `commit_bulk` chỉ thêm tham số keyword `commit=True` mặc định. `bulk-preview`/`bulk` giữ nguyên route, payload, mã lỗi và kết quả.
+- Không tạo/sửa acceptance, không suy ra nghiệm thu, không ghi đè ảnh gốc, không tự gửi Zalo.
+
+### File thay đổi
+
+- `backend/app/site/progress.py`: model daily, helper dùng chung cho validate `component_ids`/`stage_selections`, `preview_daily`, `commit_daily`, hai route mới, tham số `commit` của `commit_bulk`.
+- `backend/tests/site_report/test_component_progress.py`: thêm 6 test daily (preview/scoping, trùng bước, ghi + nhóm + retry, rollback, stage selection, date/cap).
+- `docs/agent-reports/site-report.md`: mục này.
+
+### API / model cần dùng
+
+- `POST /projects/{p}/progress/daily-preview` → `{can_commit, lines:[ProgressPreview + line_index/group_quantity/group_unit], warnings}`.
+- `POST /projects/{p}/progress/daily` → `{created, lines:[ProgressSaveResult + line_index/stage_definition_id/group_quantity/group_unit]}`.
+- Dùng lại bảng hiện có `component_progress_events` và `component_progress_batches` (`SiteProgressBulkBatch`). Batch ngày dùng đúng `idempotency_key` của người gọi; các batch nội bộ của từng dòng dùng key dẫn xuất `daily-<hash>-<line_index>`.
+- Đọc `StageDefinition`, `ComponentStage`, `StructuralComponent`, `ProgressEvent` từ shared core; ghi audit qua `AuditLog`. **Không cần model hay migration mới**.
+- Frontend mobile cho luồng này: xem **Vòng 13b** bên dưới (`DailyProgressPanel` + helper/tests).
+
+### Kiểm thử đã chạy
+
+Tất cả lệnh đặt `DATABASE_URL` trỏ SQLite tạm; không chạy migration, không mở/ghi `data/app.db`.
+
+```bash
+cd backend
+$env:DATABASE_URL="sqlite:///$env:TEMP/site-report-daily2.db"
+..\.venv\Scripts\python.exe -m pytest tests/site_report/test_component_progress.py -q
+# 15 passed
+
+$env:DATABASE_URL="sqlite:///$env:TEMP/site-report-full.db"
+..\.venv\Scripts\python.exe -m pytest tests/site_report -q
+# 92 passed
+
+$env:DATABASE_URL="sqlite:///$env:TEMP/site-report-root.db"
+..\.venv\Scripts\python.exe -m pytest tests/test_component_progress.py tests/test_dap_stage_order.py -q
+# 4 passed
+```
+
+Test daily bao phủ: preview không ghi DB và cấu kiện ngoài project; trùng `stage_id` giữa hai dòng bị chặn ở preview và commit; `group_quantity` 12.5 và `0` chỉ nằm ở batch/audit, event null; retry cùng key trả cùng kết quả, key cũ payload đổi trả 409; rollback toàn bộ khi dòng thứ hai lỗi sau khi dòng đầu đã ghi tạm; `stage_selections` mơ hồ được dùng đúng; ngày tương lai/định dạng sai và vượt 50 dòng/500 cấu kiện trả 422.
+
+**Chưa kiểm**: DB production/shared, dữ liệu DAP thật, đồng thời nhiều request trên nhiều process, UI mobile và E2E frontend. Test dùng SQLite in-memory qua fixture và SQLite tạm qua `DATABASE_URL`.
+
+### Phụ thuộc / tích hợp
+
+- Dùng FastAPI, Pydantic v2, SQLAlchemy sẵn có; không thêm dependency.
+- `app/site/router.py` tự gắn `progress.router`; không cần sửa shared router.
+- Idempotency key dùng chung không gian `project_id + idempotency_key` với `/progress/bulk` (ràng buộc cũ của `component_progress_batches`). Dùng lại cùng key cho hai endpoint khác payload sẽ trả 409; client nên tạo key riêng cho từng thao tác.
+- Nếu frontend cần hiển thị “khối lượng nhóm”, đọc `group_quantity`/`group_unit` từ response dòng hoặc từ batch ngày; không lấy từ event cấu kiện.
+
+### Unresolved
+
+- UI mobile-first cho nhập nhiều công tác trong một ngày nằm ở **Vòng 13b** (agent frontend); vòng backend này không chạy test DOM/E2E với UI đó.
+- Chặn ngày tương lai là quyết định của endpoint daily. Nếu nghiệp vụ cần ghi kế hoạch ngày tương lai, dùng `next_day_plans`, không nới validator này khi chưa có yêu cầu.
+- Giới hạn 50 dòng/500 cấu kiện là hằng số trong `progress.py`; cần điều chỉnh nếu công trình thực tế vượt.
+- Trên SQLite, hai request ghi đồng thời có thể nhận 409; client cần preview lại rồi thử lại. Chưa có retry tự động.
+- `_audit` hiện bỏ qua khi không có `actor_id` (hành vi có sẵn); endpoint production luôn có user qua dependency.
+- Chưa xác minh hiệu năng với 500 cấu kiện thật; mỗi dòng được tải/kiểm hai lần (preview trước, commit sau) để đổi lấy tính nguyên tử.
+
+### Cách chạy kiểm tra
+
+```bash
+cd backend
+$env:DATABASE_URL="sqlite:///$env:TEMP/site-report-daily.db"
+..\.venv\Scripts\python.exe -m pytest tests/site_report/test_component_progress.py -q
+..\.venv\Scripts\python.exe -m pytest tests/site_report -q
+```
+
+## Vòng 13b — nhập tiến độ theo ngày, nhiều dòng (frontend)
+
+Cập nhật: 20/11/2026. Phạm vi thay đổi: chỉ `frontend/src/features/site/components/DailyProgressPanel.tsx` (mới), `frontend/src/features/site/lib/dailyProgress.ts` (mới), `frontend/src/features/site/lib/dailyProgress.test.ts` (mới) và file báo cáo này. Không sửa `frontend/src/features/site/lib/api.ts`, catalog, `frontend/src/app`, `frontend/src/features/site/index.ts`, backend, shared core, migration, module agent khác, `data/app.db` hay Excel nguồn. Không commit/push/deploy. Không chạy migration.
+
+### Chức năng đã hoàn thành
+
+- **Component độc lập**: default export `DailyProgressPanel({ projectId })`; Codex tự gắn import/tab. Không phụ thuộc page shell.
+- **Ngày mặc định hôm nay**: `createDailyProgressDraft()` dùng `todayISO()` (Asia/Ho_Chi_Minh); input `type=date` có `max` hôm nay; helper từ chối ngày tương lai.
+- **Khu/phân đoạn từ dữ liệu thật**: tải `listSegments(projectId)` và `listComponentProgress(projectId)` qua `apiFetch`; phân đoạn lọc theo khu, fallback dựng từ `ProgressRow.segment_id/segment_number` nếu danh sách segment trống.
+- **Chọn công tác có thật**: select lấy từ `listStageDefinitions` (fallback từ stage đã gắn trên cấu kiện), chỉ hiện định nghĩa đang có cấu kiện khả dụng theo khu/phân đoạn; nhãn gồm loại, tên bước, nhóm thiết kế và số cấu kiện.
+- **Chọn cấu kiện bằng checkbox**: mỗi dòng có danh sách cấu kiện thực sự gắn bước đã chọn, checkbox, số đã chọn/tổng, “Chọn tất cả”, “Bỏ chọn”. Không có ô nhập tự do hay chọn theo chuỗi văn bản.
+- **Sao chép dòng trước**: chỉ sao chép các `component_ids` của dòng trước còn khả dụng cho bước/definition và khu/phân đoạn hiện tại; giữ `stage_id` đã chọn nếu vẫn khớp, bỏ các lựa chọn không còn hợp lệ.
+- **Bước cụ thể khi mơ hồ**: nếu một cấu kiện có nhiều `ComponentStage` cùng `stage_definition_id`, bắt buộc chọn đúng `stage_id`; không tự chọn bước đầu tiên. `stage_selections` được gửi đúng component.
+- **Mỗi dòng**: trạng thái `IN_PROGRESS|COMPLETED|BLOCKED`, khối lượng nhóm và đơn vị tùy chọn. Khối lượng/đơn vị nhóm chỉ nằm ở dòng, không tự gán vào từng event; helper bỏ field rỗng thay vì gửi chuỗi rỗng.
+- **Giới hạn khớp backend**: tối đa 50 dòng và 500 cấu kiện mỗi lần ghi; nút “Thêm công tác” dừng ở 50 dòng.
+- **Preview chỉ đọc**: `POST /progress/daily-preview` trả `{can_commit, lines, warnings}`. UI hiển thị đúng danh sách component server trả, `line_index`, bước đã chọn, cảnh báo từng dòng/cả request; không ghi DB và không cho sửa trong màn preview.
+- **Lưu tất cả sau khi duyệt**: `POST /progress/daily` chỉ gọi khi đã tick xác nhận và mọi dòng `can_commit`; body có `reviewed: true` + `idempotency_key`. Nếu lưu lỗi, preview và key được giữ nguyên để retry đúng cùng payload; thành công mới xóa preview/key và tải lại danh sách.
+- **Cảnh báo trùng bước giữa các dòng**: backend trả `can_commit: false` và warning khi nhiều dòng cùng resolve một `stage_id`; UI hiển thị warning và khóa nút lưu, không tự sửa dữ liệu.
+- **An toàn dữ liệu**: mọi lời gọi đều project-scoped qua `projectId` và `apiFetch` có bearer; không sửa ảnh gốc, không gửi Zalo tự động, không ghi nhân lực. Panel không đụng `manpower`, nên quy ước `0` khác `null` của màn báo cáo hiện có không bị thay đổi.
+
+### File thay đổi
+
+- `frontend/src/features/site/lib/dailyProgress.ts` (mới): type hợp đồng ngày, state/selection helpers, validation 50 dòng/500 cấu kiện/ngày tương lai, build payload, preview/save qua `apiFetch`.
+- `frontend/src/features/site/lib/dailyProgress.test.ts` (mới): 15 test helper/state thuần + API client.
+- `frontend/src/features/site/components/DailyProgressPanel.tsx` (mới): UI mobile-first nhiều dòng, checkbox, chọn bước cụ thể, preview read-only, lưu có xác nhận.
+- `docs/agent-reports/site-report.md`: mục này.
+
+### API / model cần dùng
+
+- `POST /api/v1/projects/{p}/progress/daily-preview`
+  - Body: `{event_date, lines:[{stage_definition_id, component_ids, stage_selections?, status, group_quantity?, group_unit?}]}`.
+  - Response: `{can_commit, lines:[ProgressPreview & {line_index, group_quantity, group_unit}], warnings}`.
+  - Quyền backend: `require_site_editor`; chỉ đọc, không ghi DB.
+- `POST /api/v1/projects/{p}/progress/daily`
+  - Body: như preview + `reviewed: true`, `idempotency_key`.
+  - Response: `{created, lines:[ProgressSaveResult & {line_index, stage_definition_id, group_quantity, group_unit}]}`.
+  - Backend lưu batch idempotency; retry cùng key/payload trả cùng kết quả; khác payload trả `409`.
+- Dùng lại API sẵn có qua `apiFetch`: `GET /projects/{p}/progress`, `GET /projects/{p}/segments`, `GET /projects/{p}/stage-definitions`.
+- Type frontend dùng lại `ProgressRow`, `ProgressStage`, `StageDefinition`, `ProgressPreview`, `ProgressSaveResult`; thêm type dòng ngày trong `dailyProgress.ts`.
+- **Không cần model/migration mới**. Backend dùng `component_progress_events` và `component_progress_batches` sẵn có; `group_quantity/group_unit` chỉ nằm trong kết quả batch/audit, không copy vào từng event.
+
+### Kiểm thử đã chạy
+
+```bash
+cd frontend
+npx vitest run src/features/site/lib/dailyProgress.test.ts   # 15 passed
+npx vitest run                                              # 31 files, 194 tests passed
+npm run build                                               # tsc -b OK; Vite build OK (cảnh báo chunk > 500 kB có sẵn)
+```
+
+```powershell
+# DB tạm, không dùng data/app.db
+$env:DATABASE_URL = "sqlite:///<temp>/site-report-daily-<guid>.db"
+..\.venv\Scripts\python.exe -m pytest tests/site_report/test_component_progress.py -q
+# 15 passed
+```
+
+Test helper bao phủ: lọc cấu kiện khả dụng theo definition/khu/phân đoạn; sao chép id hợp lệ và giữ `stage_id` khớp; xóa lựa chọn/bước khi đổi definition hoặc bộ lọc; toggle checkbox; validation ngày/trạng thái/khối lượng/đơn vị/khu/phân đoạn/50 dòng/500 cấu kiện/ngày tương lai; payload giữ đúng `component_ids` + `stage_selections` và bỏ group field rỗng; preview chỉ commit khi mọi dòng sẵn sàng; key idempotency có prefix và ≤120 ký tự. Test API client kiểm đúng route/project scope, body preview, `reviewed: true` + `idempotency_key` khi lưu, và map lỗi 409 từ `detail` thay vì báo thành công.
+
+Backend test hiện có xác nhận: preview không ghi DB; `line_index`/group quantity đúng; cấu kiện project khác bị cảnh báo; trùng stage giữa dòng bị chặn; commit idempotent; group quantity không lọt vào event.
+
+**Chưa chạy**: test render/DOM hoặc thao tác trình duyệt cho `DailyProgressPanel`; chưa bấm thử UI với backend/DB thật; chưa test trên điện thoại thật. Không có E2E frontend → API thật trong vòng này; phần API được xác nhận bằng backend test hiện có + typecheck, không phải bằng thao tác UI.
+
+### Phụ thuộc / tích hợp
+
+- Backend hai route daily đã có trong working tree (agent/Codex sở hữu backend); frontend chỉ gọi qua `apiFetch`, không sửa backend.
+- Codex cần import `./features/site/components/DailyProgressPanel` và gắn tab/nút; chưa export trong `index.ts` để giữ ranh giới chỉ-file-mới.
+- Dùng React 19, Vitest và các helper site sẵn có; không thêm dependency, không sửa `api.ts`/catalog.
+- `line_index` được dùng để ghép preview với dòng biểu mẫu; UI vẫn kiểm tra số dòng server trả.
+
+### Unresolved / cần theo dõi
+
+- Chưa có test render/DOM/trình duyệt hay E2E UI → backend thật; chưa xác nhận trực quan trên mobile.
+- Trùng `stage_id` giữa các dòng chỉ được phát hiện sau khi gọi preview (backend warning + khóa lưu); UI chưa chặn trước khi bấm “Xem lại”.
+- Nếu backend đổi shape `ProgressPreview`/`line_index`, UI sẽ báo lệch số dòng nhưng cần cập nhật type theo hợp đồng mới.
+- Panel này chỉ ghi tiến độ; không chọn ảnh chứng cứ, không sửa nhân lực/báo cáo ngày và không tự gửi Zalo.
+- Không commit/push/deploy; không ghi `data/app.db`.
+
+### Cách chạy kiểm tra
+
+```bash
+cd frontend
+npx vitest run src/features/site/lib/dailyProgress.test.ts
+npx vitest run
+npm run build
+```
+
+## Vòng 12 — mặt bằng cấu kiện trên bản vẽ (pilot, frontend)
+
+Cập nhật: 20/11/2026. Phạm vi thay đổi: chỉ `frontend/src/features/site/components/DrawingMapPanel.tsx` (mới), `frontend/src/features/site/lib/drawingMap.ts` (mới), `frontend/src/features/site/lib/drawingMap.test.ts` (mới) và file báo cáo này. Không sửa backend, shared core, migration, module agent khác, `frontend/src/app`, `frontend/src/features/site/index.ts`, DB dùng chung hay Excel nguồn. Không commit/push/deploy.
+
+### Chức năng đã hoàn thành
+
+- **Component độc lập**: `DrawingMapPanel({ projectId })` tự tải dữ liệu, không phụ thuộc toggle hay page shell. Codex tự gắn import/nút bật/tắt khi tích hợp.
+- **Tải dữ liệu project-scoped**: `GET /api/v1/projects/{p}/drawing-map` qua `apiFetch` có bearer. Hiển thị số trang, tổng vị trí và `review_count`; các mục cần rà soát được cảnh báo là không hiển thị trên bản đồ.
+- **Ảnh bản vẽ private**: tải `image_url` bằng `apiFetch` có bearer rồi dùng blob URL; thu hồi object URL khi đổi trang/unmount. Không chép ảnh nguồn vào repo, không tạo static mount, không sửa ảnh gốc.
+- **SVG overlay đúng tỉ lệ**: đo `naturalWidth/naturalHeight` và kích thước hiển thị của ảnh `object-fit: contain`, tính hộp ảnh thực tế (kể cả letterbox), rồi vẽ điểm/đoạn theo tọa độ chuẩn hóa `[0,1]` trong hộp đó. Điểm được làm tròn theo cả hai trục pixel; dầm nhiều nhịp vẽ polyline; phạm vi phát sinh có viền/nét đứt màu vàng.
+- **Tìm và lọc**: tìm theo mã cấu kiện hoặc mã/tên/trang bản vẽ; lọc loại (cọc/dầm), trạng thái thi công (`NOT_STARTED|IN_PROGRESS|COMPLETED|BLOCKED`) và phạm vi (`DESIGN_SCOPE|ADDITIONAL_SCOPE`). Xóa lọc một chạm. Bộ lọc chỉ thay đổi hiển thị, không ghi dữ liệu.
+- **Thu phóng/kéo trên di động**: nút +/− (giới hạn 1×–4×), “Vừa khung”, lăn chuột có `preventDefault`, kéo một ngón và chụm hai ngón. Pan bị giới hạn để ảnh không bị kéo khỏi khung nhìn. `touch-action: none` chỉ đặt trên vùng bản đồ.
+- **Mở chi tiết cấu kiện**: chạm marker hoặc chọn trong danh sách gọi `GET /api/v1/projects/{p}/components/{id}`; hiển thị mã gốc/chuẩn, bí danh, trạng thái duyệt, nguồn bản ghi, nhóm thiết kế, phạm vi sửa chữa, bước thi công, dòng DM và nguồn seed. Có đóng, thử lại, Escape và focus vào tiêu đề chi tiết.
+- **Danh sách thay thế truy cập được**: danh sách cấu kiện theo từng trang bản vẽ, cùng bộ lọc, mỗi mục là button mở chi tiết; không phụ thuộc thao tác chạm/zoom trên ảnh.
+- **Trạng thái rỗng/chờ/lỗi**: endpoint 404/405/501 hiển thị “đang được chuẩn bị”; mảng `sheets` rỗng hiển thị chưa có bản đồ; lỗi khác có thông báo và nút thử lại; ảnh lỗi có nút thử lại riêng.
+- **Không tự gửi Zalo, không sửa dữ liệu**: toàn bộ màn hình chỉ đọc.
+
+### File thay đổi
+
+- `frontend/src/features/site/lib/drawingMap.ts` (mới): type hợp đồng, hàm lọc, đo hộp ảnh contain, clamp zoom/pan, pinch zoom, chuẩn hóa điểm, `fetchDrawingMap`, `fetchDrawingSheetImageUrl`, `fetchComponentDetail`.
+- `frontend/src/features/site/lib/drawingMap.test.ts` (mới): 10 test helper thuần.
+- `frontend/src/features/site/components/DrawingMapPanel.tsx` (mới): UI mobile-first, SVG overlay, zoom/pan/pinch, chi tiết và danh sách thay thế.
+- `docs/agent-reports/site-report.md`: mục này.
+
+### API / model cần dùng
+
+- `GET /api/v1/projects/{p}/drawing-map` → `{sheets:[{id,title,drawing,page,image_url,markers:[{component_id,code,type,points,origin,construction_status}]}],review_count}`.
+- `image_url` được gọi qua `apiFetch` với bearer; helper chấp nhận cả dạng `/projects/...` và `/api/v1/projects/...`. Backend hiện trả route ảnh riêng tư `/projects/{p}/drawing-map/{sheet_id}/image`.
+- `GET /api/v1/projects/{p}/components/{id}` cho chi tiết cấu kiện.
+- Không cần model hay migration mới ở frontend. Không cần thay đổi shared core. Điểm chuẩn hóa do backend cung cấp; frontend chỉ kẹp giá trị phòng thủ.
+
+### Kiểm thử đã chạy
+
+```bash
+cd frontend
+npx vitest run src/features/site/lib/drawingMap.test.ts   # 10 passed
+npm test                                                   # 30 files, 179 tests passed
+npx tsc --noEmit                                           # OK
+npm run build                                              # OK (Vite báo chunk > 500 kB, không phải lỗi)
+```
+
+Test bao phủ: lọc theo mã/loại/trạng thái/phạm vi và tổ hợp tìm kiếm; giữ trang khi không có bộ lọc; bỏ trang không còn marker khớp; letterbox `object-contain`; kẹp/loại điểm sai; giới hạn zoom 1–4; clamp pan; pinch zoom; chuẩn hóa tiền tố `/api/v1` của `image_url`.
+
+**Chưa chạy**: test DOM/tương tác trình duyệt, test trên điện thoại thật, E2E với backend/DB thật hoặc ảnh pilot thật. Không chạy migration hay test backend trong vòng này, nên không xác nhận trực tiếp dữ liệu `drawing-map` thực tế ngoài việc đọc router hiện có.
+
+### Phụ thuộc / tích hợp
+
+- Dùng React 19, `apiFetch`/`ApiError` sẵn có của site và Vitest; không thêm dependency.
+- Chưa export `DrawingMapPanel` trong `frontend/src/features/site/index.ts` để giữ đúng ranh giới “chỉ file mới”. Codex có thể import trực tiếp `./features/site/components/DrawingMapPanel` khi làm toggle.
+- Không thay đổi `frontend/src/app`, không tự thêm route hay nút vào page.
+
+### Unresolved
+
+- Chưa xác minh trực quan trên thiết bị thật: vị trí marker, thao tác chụm/kéo và vùng chạm 44 px mới được kiểm bằng code/type/build, chưa bằng trình duyệt.
+- Marker chồng nhau ở mức zoom thấp có thể che nhau; chưa có clustering. Danh sách thay thế là cách mở các marker bị che.
+- Pinch zoom neo theo tâm khung nhìn, không neo theo điểm giữa hai ngón; chưa có double-tap zoom.
+- Chưa hỗ trợ `image_url` tuyệt đối (`http(s)://`); hợp đồng hiện tại là đường dẫn API-relative và helper xử lý đúng hợp đồng đó.
+- `review_count` chỉ được hiển thị theo số backend trả; frontend không tự tính lại hoặc sửa dữ liệu rà soát.
+
+### Cách chạy kiểm tra
+
+```bash
+cd frontend
+npx vitest run src/features/site/lib/drawingMap.test.ts
+npm test
+npx tsc --noEmit
+```
+
 ## Vòng 11 — màu trạng thái từng bước và thứ tự bước theo `position`
 
 Cập nhật: 20/11/2026. Phạm vi: chỉ `frontend/src/features/site/components/ComponentProgressPanel.tsx`, `frontend/src/features/site/lib/componentProgress.ts`, `frontend/src/features/site/lib/componentProgress.test.ts` và file báo cáo này. Không sửa backend, shared core, migration, module agent khác, `data/app.db` hay Excel nguồn. Không stage/commit/deploy.

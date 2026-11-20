@@ -618,6 +618,16 @@ def component_detail(project_id: str, component_id: str, db: Session = Depends(g
         current = latest.get(event.component_stage_id)
         if current is None or (event.created_at, event.id) > (current.created_at, current.id):
             latest[event.component_stage_id] = event
+    from app.site.progress_inference import apply_inferred_progress
+
+    stages = apply_inferred_progress(component.type, [
+        {"id": stage.id, "stage_definition_id": definition.id,
+         "repair_scope_id": stage.repair_scope_id, "code": definition.code,
+         "name": definition.name, "position": definition.position,
+         "status": latest[stage.id].status if stage.id in latest else "NOT_STARTED",
+         "latest_event_at": latest[stage.id].created_at if stage.id in latest else None}
+        for stage, definition in stage_rows
+    ])
     return {"id": component.id, "type": component.type, "raw_code": component.raw_code,
             "canonical_code": component.canonical_code, "verification": component.verification,
             "record_origin": component.record_origin,
@@ -629,12 +639,7 @@ def component_detail(project_id: str, component_id: str, db: Session = Depends(g
             "design_group": {"name": group.name, "drawing": group.drawing, "source": group.source,
                              "source_page": group.source_page} if group else None,
             "scopes": [scope_data(scope) for scope in scopes],
-            "stages": [{"id": stage.id, "stage_definition_id": definition.id,
-                        "repair_scope_id": stage.repair_scope_id, "code": definition.code,
-                        "name": definition.name, "position": definition.position,
-                        "status": latest[stage.id].status if stage.id in latest else "NOT_STARTED",
-                        "latest_event_at": latest[stage.id].created_at.isoformat() if stage.id in latest else None}
-                       for stage, definition in stage_rows],
+            "stages": stages,
             "progress_events": [event_data(event) for event in events],
             "work_links": [{"dm_row": link.dm_row, "seed_sheet": link.seed_sheet, "seed_row": link.seed_row,
                             "source_sha256": link.source_hash, "work": link.work, "raw_location": link.raw_location}

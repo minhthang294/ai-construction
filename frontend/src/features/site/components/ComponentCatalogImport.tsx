@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import ComponentProgressPanel from "./ComponentProgressPanel";
+import DrawingMapPanel from "./DrawingMapPanel";
+import DailyProgressPanel from "./DailyProgressPanel";
 import JournalPanel from "./JournalPanel";
 import {
   ApiError,
@@ -33,9 +35,11 @@ type Props = { projectId: string };
 
 const PAGE_SIZE = 100;
 const COMPONENT_VIEWS = [
-  { id: "progress", label: "Tiến độ" },
+  { id: "daily", label: "Ghi theo ngày" },
+  { id: "progress", label: "Theo cấu kiện" },
   { id: "catalog", label: "Danh mục" },
   { id: "journal", label: "Nhật ký" },
+  { id: "map", label: "Mặt bằng" },
 ] as const;
 const FOCUS_RING =
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2";
@@ -150,8 +154,8 @@ export default function ComponentCatalogImport({ projectId }: Props) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const loadedCatalogProject = useRef<string | null>(null);
   const tabId = useId();
-  const [view, setView] = useState<"progress" | "catalog" | "journal">(
-    "progress",
+  const [view, setView] = useState<(typeof COMPONENT_VIEWS)[number]["id"]>(
+    "daily",
   );
 
   const loadCatalog = useCallback(
@@ -323,9 +327,9 @@ export default function ComponentCatalogImport({ projectId }: Props) {
   return (
     <section className="space-y-4">
       <div
-        className="flex gap-2 rounded-xl border border-gray-200 bg-white p-1 shadow-sm"
+        className="grid grid-cols-3 gap-1 rounded-xl border border-gray-200 bg-white p-1 shadow-sm sm:grid-cols-5"
         role="tablist"
-        aria-label="Tiến độ, danh mục và nhật ký cấu kiện"
+        aria-label="Tiến độ, danh mục, nhật ký và mặt bằng cấu kiện"
         onKeyDown={(event) => {
           const current = COMPONENT_VIEWS.findIndex((item) => item.id === view);
           const last = COMPONENT_VIEWS.length - 1;
@@ -365,10 +369,14 @@ export default function ComponentCatalogImport({ projectId }: Props) {
         aria-labelledby={`${tabId}-${view}`}
         className="space-y-3"
       >
-      {view === "progress" ? (
+      {view === "daily" ? (
+        <DailyProgressPanel projectId={projectId} />
+      ) : view === "progress" ? (
         <ComponentProgressPanel projectId={projectId} />
       ) : view === "journal" ? (
         <JournalPanel projectId={projectId} />
+      ) : view === "map" ? (
+        <DrawingMapPanel projectId={projectId} />
       ) : (
         <>
           <div className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm">

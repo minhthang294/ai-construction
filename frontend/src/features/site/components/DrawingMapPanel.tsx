@@ -1,0 +1,1152 @@
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { ApiError } from "../lib/api";
+import {
+  EMPTY_DRAWING_FILTERS,
+  MAX_ZOOM,
+  MIN_ZOOM,
+  clampPan,
+  clampZoom,
+  componentTypeLabel,
+  constructionStatusLabel,
+  containBox,
+  countMarkers,
+  fetchComponentDetail,
+  fetchDrawingMap,
+  fetchDrawingSheetImageUrl,
+  filterDrawingSheets,
+  isAdditionalScope,
+  originLabel,
+  pinchZoom,
+  sanitizePoints,
+  type ComponentDetail,
+  type DrawingFilters,
+  type DrawingMap,
+  type DrawingMarker,
+  type ImageBox,
+  type Pan,
+  type View,
+} from "../lib/drawingMap";
+
+type Props = { projectId: string };
+
+type LoadState = "loading" | "ready" | "pending" | "error";
+type ImageState = "idle" | "loading" | "ready" | "error";
+type DetailState = "idle" | "loading" | "ready" | "error";
+
+const FOCUS_RING =
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-700 focus-visible:ring-offset-2";
+
+const FIELD =
+  "mt-1 min-h-11 w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 text-base text-slate-900 focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-300 sm:text-sm";
+
+const BUTTON =
+  "min-h-11 rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 active:bg-slate-100 disabled:bg-slate-100 disabled:text-slate-400";
+
+const PRIMARY_BUTTON =
+  "min-h-11 rounded-lg bg-slate-800 px-4 text-sm font-semibold text-white active:bg-slate-900 disabled:bg-slate-300";
+
+const STATUS_CHIP: Record<string, string> = {
+  NOT_STARTED: "border-slate-300 bg-slate-100 text-slate-800",
+  IN_PROGRESS: "border-amber-300 bg-amber-100 text-amber-950",
+  COMPLETED: "border-emerald-300 bg-emerald-100 text-emerald-950",
+  BLOCKED: "border-violet-300 bg-violet-100 text-violet-950",
+};
+
+function errorMessage(error: unknown): string {
+  if (error instanceof ApiError) return error.message;
+  if (error instanceof Error) return error.message;
+  return "Không xác định được lỗi.";
+}
+
+function isPending(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    (error.status === 404 || error.status === 405 || error.status === 501)
+  );
+}
+
+function StatusChip({ status }: { status: string }) {
+  return (
+    <span
+      className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${
+        STATUS_CHIP[status] ?? "border-slate-300 bg-slate-100 text-slate-800"
+      }`}
+    >
+      {constructionStatusLabel(status)}
+    </span>
+  );
+}
+
+function verificationLabel(value: string): string {
+  if (value === "VERIFIED") return "Đã duyệt";
+  if (value === "NEEDS_REVIEW") return "Chờ duyệt";
+  return value;
+}
+
+function recordOriginLabel(value: string): string {
+  if (value === "SEED_IMPORT") return "Nhập từ danh mục";
+  if (value === "MANUAL_ENTRY") return "Nhập thủ công";
+  return value;
+}
+
+function shortSha(value?: string | null): string {
+  return value ? `${value.slice(0, 12)}…` : "—";
+}
+
+function markerLabel(marker: DrawingMarker): string {
+  return [
+    marker.code,
+    componentTypeLabel(marker.type),
+    constructionStatusLabel(marker.construction_status),
+    originLabel(marker.origin),
+  ].join(" · ");
+}
+
+type GestureState = {
+  mode: "none" | "drag" | "pinch";
+  pointers: Map<number, Pan>;
+  start: Pan;
+  startPan: Pan;
+  pinchDistance: number;
+  pinchStartZoom: number;
+};
+
+export default function DrawingMapPanel({ projectId }: Props) {
+  const [map, setMap] = useState<DrawingMap | null>(null);
+  const [loadState, setLoadState] = useState<LoadState>("loading");
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [filters, setFilters] = useState<DrawingFilters>({
+    ...EMPTY_DRAWING_FILTERS,
+  });
+  const [activeSheetId, setActiveSheetId] = useState("");
+
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [imageState, setImageState] = useState<ImageState>("idle");
+  const [imageError, setImageError] = useState<string | null>(null);
+  const [imageReloadKey, setImageReloadKey] = useState(0);
+  const [imageBox, setImageBox] = useState<ImageBox | null>(null);
+
+  const [view, setViewState] = useState<View>({
+    zoom: 1,
+    pan: { x: 0, y: 0 },
+  });
+  const viewRef = useRef<View>(view);
+  const setView = useCallback((next: View | ((current: View) => View)) => {
+    const value = typeof next === "function" ? next(viewRef.current) : next;
+    viewRef.current = value;
+    setViewState(value);
+  }, []);
+
+  const [detailMarker, setDetailMarker] = useState<DrawingMarker | null>(null);
+  const [detail, setDetail] = useState<ComponentDetail | null>(null);
+  const [detailState, setDetailState] = useState<DetailState>("idle");
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const detailRequest = useRef(0);
+
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const imageRef = useRef<HTMLImageElement>(null);
+  const detailHeadingRef = useRef<HTMLHeadingElement>(null);
+  const detailHeadingId = useId();
+  const gesture = useRef<GestureState>({
+    mode: "none",
+    pointers: new Map(),
+    start: { x: 0, y: 0 },
+    startPan: { x: 0, y: 0 },
+    pinchDistance: 0,
+    pinchStartZoom: 1,
+  });
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setLoadState("loading");
+    setLoadError(null);
+    setMap(null);
+    fetchDrawingMap(projectId, controller.signal)
+      .then((data) => {
+        if (controller.signal.aborted) return;
+        setMap(data);
+        setLoadState("ready");
+        setActiveSheetId((current) =>
+          data.sheets.some((sheet) => sheet.id === current)
+            ? current
+            : data.sheets[0]?.id ?? "",
+        );
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        if (isPending(error)) {
+          setLoadState("pending");
+          return;
+        }
+        setLoadError(errorMessage(error));
+        setLoadState("error");
+      });
+    return () => controller.abort();
+  }, [projectId, reloadKey]);
+
+  const filteredSheets = useMemo(
+    () => (map ? filterDrawingSheets(map.sheets, filters) : []),
+    [map, filters],
+  );
+  const activeSheet = useMemo(
+    () =>
+      filteredSheets.find((sheet) => sheet.id === activeSheetId) ??
+      filteredSheets[0] ??
+      null,
+    [filteredSheets, activeSheetId],
+  );
+  const visibleMarkerCount = useMemo(
+    () => countMarkers(filteredSheets),
+    [filteredSheets],
+  );
+  const activeImageUrl = activeSheet?.image_url ?? "";
+  const activeSheetKey = activeSheet?.id ?? "";
+  const mapTargets = useMemo(() => (activeSheet?.markers ?? []).flatMap((marker) => {
+    const points = sanitizePoints(marker.points);
+    if (!points.length) return [];
+    const middle = Math.floor((points.length - 1) / 2);
+    const [x, y] = points[middle];
+    const [endX, endY] = points[middle + 1] ?? points[middle];
+    return [{ marker, points, x: (x + endX) / 2, y: (y + endY) / 2 }];
+  }), [activeSheet]);
+  const allMarkerCount = useMemo(
+    () => countMarkers(map?.sheets ?? []),
+    [map],
+  );
+  const hasFilters = Boolean(
+    filters.query.trim() ||
+      filters.type ||
+      filters.status ||
+      filters.origin,
+  );
+
+  useEffect(() => {
+    if (!activeImageUrl) {
+      setImageUrl(null);
+      setImageState("idle");
+      setImageError(null);
+      setImageBox(null);
+      return;
+    }
+    const controller = new AbortController();
+    let created: string | null = null;
+    setImageUrl(null);
+    setImageState("loading");
+    setImageError(null);
+    setImageBox(null);
+    setView({ zoom: 1, pan: { x: 0, y: 0 } });
+    fetchDrawingSheetImageUrl(activeImageUrl, controller.signal)
+      .then((url) => {
+        if (controller.signal.aborted) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        created = url;
+        setImageUrl(url);
+        setImageState("ready");
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        setImageError(errorMessage(error));
+        setImageState("error");
+      });
+    return () => {
+      controller.abort();
+      if (created) URL.revokeObjectURL(created);
+    };
+  }, [activeImageUrl, imageReloadKey, setView]);
+
+  useEffect(() => {
+    if (imageState !== "ready") return;
+    const image = imageRef.current;
+    if (!image) return;
+    const measure = () => {
+      setImageBox(
+        containBox(
+          image.naturalWidth,
+          image.naturalHeight,
+          image.clientWidth,
+          image.clientHeight,
+        ),
+      );
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", measure);
+      return () => window.removeEventListener("resize", measure);
+    }
+    const observer = new ResizeObserver(measure);
+    observer.observe(image);
+    return () => observer.disconnect();
+  }, [imageState, imageUrl]);
+
+  useEffect(() => {
+    if (imageState !== "ready" || !activeSheetKey) return;
+    const element = viewportRef.current;
+    if (!element) return;
+    function handleWheel(event: WheelEvent) {
+      if (!element) return;
+      event.preventDefault();
+      const next = clampZoom(viewRef.current.zoom + (event.deltaY < 0 ? 0.25 : -0.25));
+      setView((current) => ({
+        zoom: next,
+        pan: clampPan(
+          current.pan,
+          next,
+          element.clientWidth,
+          element.clientHeight,
+        ),
+      }));
+    }
+    element.addEventListener("wheel", handleWheel, { passive: false });
+    return () => element.removeEventListener("wheel", handleWheel);
+  }, [activeSheetKey, imageState, setView]);
+
+  useEffect(() => {
+    setFilters({ ...EMPTY_DRAWING_FILTERS });
+    setActiveSheetId("");
+  }, [projectId]);
+
+  useEffect(() => {
+    detailRequest.current += 1;
+    setDetailMarker(null);
+    setDetail(null);
+    setDetailState("idle");
+    setDetailError(null);
+  }, [projectId]);
+
+  useEffect(
+    () => () => {
+      detailRequest.current += 1;
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (!detailMarker) return;
+    const heading = detailHeadingRef.current;
+    if (!heading) return;
+    heading.focus({ preventScroll: true });
+    heading.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [detailMarker]);
+
+  const closeDetail = useCallback(() => {
+    detailRequest.current += 1;
+    setDetailMarker(null);
+    setDetail(null);
+    setDetailState("idle");
+    setDetailError(null);
+  }, []);
+
+  useEffect(() => {
+    if (!detailMarker) return;
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") closeDetail();
+    }
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [detailMarker, closeDetail]);
+
+  function updateFilter(patch: Partial<DrawingFilters>) {
+    setFilters((current) => ({ ...current, ...patch }));
+  }
+
+  function clearFilters() {
+    setFilters({ ...EMPTY_DRAWING_FILTERS });
+  }
+
+  async function openDetail(marker: DrawingMarker) {
+    const requestId = ++detailRequest.current;
+    setDetailMarker(marker);
+    setDetail(null);
+    setDetailState("loading");
+    setDetailError(null);
+    try {
+      const data = await fetchComponentDetail(projectId, marker.component_id);
+      if (requestId !== detailRequest.current) return;
+      setDetail(data);
+      setDetailState("ready");
+    } catch (error) {
+      if (requestId !== detailRequest.current) return;
+      setDetailError(errorMessage(error));
+      setDetailState("error");
+    }
+  }
+
+  function viewportSize(): { width: number; height: number } {
+    const element = viewportRef.current;
+    return {
+      width: element?.clientWidth ?? 0,
+      height: element?.clientHeight ?? 0,
+    };
+  }
+
+  function zoomBy(delta: number) {
+    const next = clampZoom(viewRef.current.zoom + delta);
+    const { width, height } = viewportSize();
+    setView((current) => ({
+      zoom: next,
+      pan: clampPan(current.pan, next, width, height),
+    }));
+  }
+
+  function resetView() {
+    setView({ zoom: 1, pan: { x: 0, y: 0 } });
+  }
+
+  function beginDrag(point: Pan) {
+    gesture.current.mode = "drag";
+    gesture.current.start = point;
+    gesture.current.startPan = viewRef.current.pan;
+  }
+
+  function pointerDistance(a: Pan, b: Pan): number {
+    return Math.hypot(a.x - b.x, a.y - b.y);
+  }
+
+  function handlePointerDown(event: React.PointerEvent<HTMLDivElement>) {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    const element = event.currentTarget;
+    element.setPointerCapture?.(event.pointerId);
+    const state = gesture.current;
+    const point = { x: event.clientX, y: event.clientY };
+    state.pointers.set(event.pointerId, point);
+    if (state.pointers.size === 1) {
+      beginDrag(point);
+      return;
+    }
+    if (state.pointers.size === 2) {
+      const [first, second] = Array.from(state.pointers.values());
+      state.mode = "pinch";
+      state.pinchDistance = pointerDistance(first, second);
+      state.pinchStartZoom = viewRef.current.zoom;
+    }
+  }
+
+  function handlePointerMove(event: React.PointerEvent<HTMLDivElement>) {
+    const state = gesture.current;
+    if (!state.pointers.has(event.pointerId)) return;
+    state.pointers.set(event.pointerId, {
+      x: event.clientX,
+      y: event.clientY,
+    });
+    const { width, height } = viewportSize();
+    if (state.mode === "pinch" && state.pointers.size >= 2) {
+      const [first, second] = Array.from(state.pointers.values());
+      const next = pinchZoom(
+        state.pinchStartZoom,
+        state.pinchDistance,
+        pointerDistance(first, second),
+      );
+      setView((current) => ({
+        zoom: next,
+        pan: clampPan(current.pan, next, width, height),
+      }));
+      return;
+    }
+    if (state.mode === "drag" && state.pointers.size === 1) {
+      setView((current) => ({
+        zoom: current.zoom,
+        pan: clampPan(
+          {
+            x: state.startPan.x + (event.clientX - state.start.x),
+            y: state.startPan.y + (event.clientY - state.start.y),
+          },
+          current.zoom,
+          width,
+          height,
+        ),
+      }));
+    }
+  }
+
+  function endPointer(event: React.PointerEvent<HTMLDivElement>) {
+    const state = gesture.current;
+    state.pointers.delete(event.pointerId);
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    if (state.pointers.size === 1) {
+      beginDrag(Array.from(state.pointers.values())[0]);
+    } else if (state.pointers.size === 0) {
+      state.mode = "none";
+    }
+  }
+
+  const reviewCount = map?.review_count ?? 0;
+
+  return (
+    <section className="mx-auto w-full max-w-4xl space-y-3">
+      <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+        <h3 className="text-base font-semibold text-slate-900 sm:text-lg">
+          Mặt bằng cấu kiện trên bản vẽ
+        </h3>
+        <p className="mt-1 text-xs leading-5 text-slate-600">
+          Bản đồ thử nghiệm cho các vị trí đã đối chiếu. Ảnh bản vẽ được tải
+          riêng theo quyền công trình và không được lưu vào mã nguồn.
+        </p>
+        {loadState === "ready" && map ? (
+          <p className="mt-2 text-xs text-slate-600">
+            {map.sheets.length} trang bản vẽ · {allMarkerCount} vị trí đã gắn
+          </p>
+        ) : null}
+        {reviewCount > 0 ? (
+          <p
+            role="status"
+            className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs leading-5 text-amber-950"
+          >
+            {reviewCount} mục cần rà soát và không hiển thị trên bản đồ.
+          </p>
+        ) : null}
+      </div>
+
+      {loadState === "loading" ? (
+        <p className="rounded-xl border border-slate-200 bg-white p-3 text-sm text-slate-600">
+          Đang tải mặt bằng bản vẽ…
+        </p>
+      ) : null}
+
+      {loadState === "pending" ? (
+        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <h4 className="text-base font-semibold text-slate-900">
+            Mặt bằng bản vẽ đang được chuẩn bị
+          </h4>
+          <p className="mt-1 text-sm leading-6 text-slate-600">
+            Công trình này chưa có dữ liệu mặt bằng đã đối chiếu. Dữ liệu bản vẽ
+            gốc không được tạo tự động.
+          </p>
+          <button
+            type="button"
+            className={`${BUTTON} mt-3 ${FOCUS_RING}`}
+            onClick={() => setReloadKey((current) => current + 1)}
+          >
+            Kiểm tra lại
+          </button>
+        </div>
+      ) : null}
+
+      {loadState === "error" ? (
+        <div
+          role="alert"
+          className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-900"
+        >
+          <p>Không tải được mặt bằng bản vẽ: {loadError}</p>
+          <button
+            type="button"
+            className={`${BUTTON} mt-3 ${FOCUS_RING}`}
+            onClick={() => setReloadKey((current) => current + 1)}
+          >
+            Thử lại
+          </button>
+        </div>
+      ) : null}
+
+      {loadState === "ready" && map && map.sheets.length === 0 ? (
+        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <h4 className="text-base font-semibold text-slate-900">
+            Chưa có bản đồ bản vẽ
+          </h4>
+          <p className="mt-1 text-sm leading-6 text-slate-600">
+            Công trình chưa có trang bản vẽ nào được gắn vị trí cấu kiện.
+          </p>
+        </div>
+      ) : null}
+
+      {loadState === "ready" && map && map.sheets.length > 0 ? (
+        <>
+          <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <label className="min-w-0 text-xs font-medium text-slate-700 sm:col-span-2">
+                Tìm mã cấu kiện hoặc bản vẽ
+                <input
+                  type="search"
+                  inputMode="search"
+                  className={FIELD}
+                  value={filters.query}
+                  placeholder="Ví dụ F-24-25 hoặc TK-32"
+                  onChange={(event) =>
+                    updateFilter({ query: event.target.value })
+                  }
+                />
+              </label>
+              <label className="min-w-0 text-xs font-medium text-slate-700">
+                Loại cấu kiện
+                <select
+                  className={FIELD}
+                  value={filters.type}
+                  onChange={(event) =>
+                    updateFilter({ type: event.target.value })
+                  }
+                >
+                  <option value="">Tất cả loại</option>
+                  <option value="pile">Cọc</option>
+                  <option value="beam">Dầm</option>
+                </select>
+              </label>
+              <label className="min-w-0 text-xs font-medium text-slate-700">
+                Trạng thái thi công
+                <select
+                  className={FIELD}
+                  value={filters.status}
+                  onChange={(event) =>
+                    updateFilter({ status: event.target.value })
+                  }
+                >
+                  <option value="">Tất cả trạng thái</option>
+                  <option value="NOT_STARTED">Chưa bắt đầu</option>
+                  <option value="IN_PROGRESS">Đang thi công</option>
+                  <option value="COMPLETED">Hoàn thành</option>
+                  <option value="BLOCKED">Tạm dừng</option>
+                </select>
+              </label>
+              <label className="min-w-0 text-xs font-medium text-slate-700">
+                Phạm vi sửa chữa
+                <select
+                  className={FIELD}
+                  value={filters.origin}
+                  onChange={(event) =>
+                    updateFilter({ origin: event.target.value })
+                  }
+                >
+                  <option value="">Tất cả phạm vi</option>
+                  <option value="DESIGN_SCOPE">Thiết kế</option>
+                  <option value="ADDITIONAL_SCOPE">Phát sinh</option>
+                </select>
+              </label>
+              <div className="flex flex-wrap items-end justify-between gap-2 sm:col-span-2">
+                <p aria-live="polite" className="text-xs text-slate-600">
+                  {visibleMarkerCount} vị trí khớp bộ lọc
+                </p>
+                {hasFilters ? (
+                  <button
+                    type="button"
+                    className={`${BUTTON} ${FOCUS_RING}`}
+                    onClick={clearFilters}
+                  >
+                    Xóa lọc
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          </div>
+
+          {filteredSheets.length === 0 ? (
+            <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600 shadow-sm">
+              Không có cấu kiện khớp bộ lọc.
+            </div>
+          ) : (
+            <>
+              <div
+                role="group"
+                aria-label="Chọn trang bản vẽ"
+                className="flex gap-2 overflow-x-auto pb-1"
+              >
+                {filteredSheets.map((sheet) => {
+                  const selected = sheet.id === activeSheet?.id;
+                  return (
+                    <button
+                      key={sheet.id}
+                      type="button"
+                      aria-pressed={selected}
+                      className={`min-h-11 min-w-0 shrink-0 rounded-lg border px-3 text-left text-sm ${
+                        selected
+                          ? "border-slate-700 bg-slate-800 text-white"
+                          : "border-slate-300 bg-white text-slate-800"
+                      } ${FOCUS_RING}`}
+                      onClick={() => setActiveSheetId(sheet.id)}
+                    >
+                      <span className="block max-w-56 truncate font-semibold">
+                        {sheet.title}
+                      </span>
+                      <span
+                        className={`block text-xs ${
+                          selected ? "text-slate-200" : "text-slate-500"
+                        }`}
+                      >
+                        {sheet.drawing} · trang {sheet.page}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {activeSheet ? (
+                <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                  <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-slate-200 p-3">
+                    <div className="min-w-0">
+                      <h4 className="break-words text-sm font-semibold text-slate-900">
+                        {activeSheet.title}
+                      </h4>
+                      <p className="mt-0.5 text-xs text-slate-600">
+                        Bản vẽ {activeSheet.drawing} · trang {activeSheet.page} ·{" "}
+                        {activeSheet.markers.length} vị trí
+                      </p>
+                    </div>
+                  </div>
+
+                  <div
+                    ref={viewportRef}
+                    className="relative h-[62vh] min-h-64 max-h-[38rem] touch-none select-none overflow-hidden bg-slate-100"
+                    role="group"
+                    aria-label="Bản đồ bản vẽ tương tác"
+                    onPointerDown={handlePointerDown}
+                    onPointerMove={handlePointerMove}
+                    onPointerUp={endPointer}
+                    onPointerCancel={endPointer}
+                  >
+                    <div
+                      className="absolute right-2 top-2 z-20 flex flex-wrap items-center justify-end gap-1"
+                      onPointerDown={(event) => event.stopPropagation()}
+                    >
+                      <button
+                        type="button"
+                        aria-label="Thu nhỏ bản vẽ"
+                        className={`${BUTTON} min-w-11 px-0 ${FOCUS_RING}`}
+                        disabled={view.zoom <= MIN_ZOOM}
+                        onClick={() => zoomBy(-0.5)}
+                      >
+                        −
+                      </button>
+                      <span className="min-h-11 rounded-lg border border-slate-300 bg-white px-2 py-3 text-xs font-semibold text-slate-700">
+                        {Math.round(view.zoom * 100)}%
+                      </span>
+                      <button
+                        type="button"
+                        aria-label="Phóng to bản vẽ"
+                        className={`${BUTTON} min-w-11 px-0 ${FOCUS_RING}`}
+                        disabled={view.zoom >= MAX_ZOOM}
+                        onClick={() => zoomBy(0.5)}
+                      >
+                        +
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="Đưa bản vẽ về vừa khung"
+                        className={`${BUTTON} ${FOCUS_RING}`}
+                        onClick={resetView}
+                      >
+                        Vừa khung
+                      </button>
+                    </div>
+
+                    {imageState === "loading" ? (
+                      <p className="absolute inset-0 grid place-items-center p-4 text-center text-sm text-slate-600">
+                        Đang tải ảnh bản vẽ…
+                      </p>
+                    ) : null}
+
+                    {imageState === "error" ? (
+                      <div className="absolute inset-0 grid place-items-center p-4 text-center">
+                        <div className="max-w-sm">
+                          <p role="alert" className="text-sm text-red-900">
+                            Không tải được ảnh bản vẽ: {imageError}
+                          </p>
+                          <button
+                            type="button"
+                            className={`${BUTTON} mt-3 ${FOCUS_RING}`}
+                            onClick={() =>
+                              setImageReloadKey((current) => current + 1)
+                            }
+                          >
+                            Thử lại ảnh
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {imageState === "ready" && imageUrl ? (
+                      <div
+                        className="absolute inset-0 will-change-transform"
+                        style={{
+                          transform: `translate(${view.pan.x}px, ${view.pan.y}px) scale(${view.zoom})`,
+                        }}
+                      >
+                        <img
+                          ref={imageRef}
+                          src={imageUrl}
+                          alt={`Bản vẽ ${activeSheet.drawing}, trang ${activeSheet.page}`}
+                          className="h-full w-full object-contain"
+                          draggable={false}
+                          onLoad={() => {
+                            const image = imageRef.current;
+                            if (!image) return;
+                            setImageBox(
+                              containBox(
+                                image.naturalWidth,
+                                image.naturalHeight,
+                                image.clientWidth,
+                                image.clientHeight,
+                              ),
+                            );
+                          }}
+                        />
+                        {imageBox ? (
+                          <div
+                            className="absolute"
+                            style={{
+                              left: imageBox.left,
+                              top: imageBox.top,
+                              width: imageBox.width,
+                              height: imageBox.height,
+                            }}
+                          >
+                            <svg
+                              aria-hidden="true"
+                              focusable="false"
+                              viewBox="0 0 1 1"
+                              preserveAspectRatio="none"
+                              className="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
+                            >
+                              {mapTargets.map(({ marker, points, x, y }) => {
+                                const selected =
+                                  detailMarker?.component_id ===
+                                  marker.component_id;
+                                const path = points.map(([px, py]) => `${px},${py}`).join(" ");
+                                return (
+                                  <g key={`${marker.component_id}-${marker.code}`}>
+                                    {points.length > 1 ? (
+                                      <>
+                                        <polyline points={path} fill="none" stroke="white"
+                                          strokeWidth={selected ? 4.5 : 3.5}
+                                          strokeLinecap="round" strokeLinejoin="round"
+                                          vectorEffect="non-scaling-stroke" />
+                                        <polyline points={path} fill="none"
+                                          stroke={selected ? "#a21caf" : "#c2410c"}
+                                          strokeWidth={selected ? 2.75 : 2}
+                                          strokeLinecap="round" strokeLinejoin="round"
+                                          strokeDasharray={isAdditionalScope(marker) ? "5 3" : undefined}
+                                          vectorEffect="non-scaling-stroke" />
+                                      </>
+                                    ) : (
+                                      <ellipse
+                                        cx={x}
+                                        cy={y}
+                                        rx={0.004}
+                                        ry={0.004 * imageBox.width / imageBox.height}
+                                        fill="none"
+                                        stroke={selected ? "#a21caf" : "#0284c7"}
+                                        strokeWidth={selected ? 2 : 1.25}
+                                        strokeDasharray={isAdditionalScope(marker) ? "2 2" : undefined}
+                                        vectorEffect="non-scaling-stroke"
+                                      />
+                                    )}
+                                  </g>
+                                );
+                              })}
+                            </svg>
+                            {mapTargets.map((target) => {
+                              const { marker, x, y } = target;
+                              let diameter = 18 / view.zoom;
+                              for (const other of mapTargets) {
+                                if (other === target) continue;
+                                const dx = Math.abs(x - other.x) * imageBox.width;
+                                const dy = Math.abs(y - other.y) * imageBox.height;
+                                diameter = Math.min(diameter, Math.max(dx, dy));
+                              }
+                              const selected =
+                                detailMarker?.component_id ===
+                                marker.component_id;
+                              return (
+                                <button
+                                  key={`${marker.component_id}-${marker.code}`}
+                                  type="button"
+                                  aria-label={`Mở chi tiết ${markerLabel(marker)}`}
+                                  aria-pressed={selected}
+                                  className={`absolute z-10 -translate-x-1/2 -translate-y-1/2 rounded-full bg-transparent ${FOCUS_RING}`}
+                                  style={{
+                                    left: `${x * 100}%`,
+                                    top: `${y * 100}%`,
+                                    width: diameter,
+                                    height: diameter,
+                                  }}
+                                  onPointerDown={(event) =>
+                                    event.stopPropagation()
+                                  }
+                                  onClick={() => void openDetail(marker)}
+                                />
+                              );
+                            })}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-slate-200 p-3 text-xs text-slate-600">
+                    <span>Kéo để di chuyển.</span>
+                    <span>Chụm hai ngón hoặc dùng nút +/− để thu phóng.</span>
+                    <span className="inline-flex items-center gap-1">
+                      <span className="h-0.5 w-3 bg-orange-700" /> Dầm
+                    </span>
+                    <span className="inline-flex items-center gap-1">
+                      <span className="h-2.5 w-2.5 rounded-full border border-dashed border-sky-600" />
+                      Nét đứt: phạm vi phát sinh.
+                    </span>
+                  </div>
+                </div>
+              ) : null}
+
+              {detailMarker ? (
+                <section
+                  aria-labelledby={detailHeadingId}
+                  className="rounded-xl border border-slate-300 bg-white p-3 shadow-sm"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium text-slate-500">
+                        Chi tiết cấu kiện
+                      </p>
+                      <h4
+                        id={detailHeadingId}
+                        ref={detailHeadingRef}
+                        tabIndex={-1}
+                        className="break-words font-mono text-base font-semibold text-slate-900 focus:outline-none"
+                      >
+                        {detail?.canonical_code ?? detailMarker.code}
+                      </h4>
+                      <p className="mt-1 text-xs text-slate-600">
+                        {componentTypeLabel(detailMarker.type)} ·{" "}
+                        {constructionStatusLabel(
+                          detailMarker.construction_status,
+                        )}{" "}
+                        · {originLabel(detailMarker.origin)}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      aria-label="Đóng chi tiết cấu kiện"
+                      className={`${BUTTON} shrink-0 ${FOCUS_RING}`}
+                      onClick={closeDetail}
+                    >
+                      Đóng
+                    </button>
+                  </div>
+
+                  {detailState === "loading" ? (
+                    <p className="mt-3 text-sm text-slate-600">
+                      Đang tải chi tiết cấu kiện…
+                    </p>
+                  ) : null}
+
+                  {detailState === "error" ? (
+                    <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-2 text-sm text-red-900">
+                      <p role="alert">
+                        Không tải được chi tiết cấu kiện: {detailError}
+                      </p>
+                      <button
+                        type="button"
+                        className={`${BUTTON} mt-2 ${FOCUS_RING}`}
+                        onClick={() => void openDetail(detailMarker)}
+                      >
+                        Thử lại
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {detailState === "ready" && detail ? (
+                    <div className="mt-3 space-y-3">
+                      <dl className="grid grid-cols-[7.5rem_minmax(0,1fr)] gap-x-2 gap-y-1 text-sm">
+                        <dt className="text-slate-600">Mã gốc</dt>
+                        <dd className="break-words font-mono text-slate-900">
+                          {detail.raw_code || "—"}
+                        </dd>
+                        <dt className="text-slate-600">Trạng thái duyệt</dt>
+                        <dd className="break-words text-slate-900">
+                          {verificationLabel(detail.verification)}
+                        </dd>
+                        <dt className="text-slate-600">Nguồn bản ghi</dt>
+                        <dd className="break-words text-slate-900">
+                          {recordOriginLabel(detail.record_origin)}
+                        </dd>
+                        <dt className="text-slate-600">Bí danh</dt>
+                        <dd className="break-words text-slate-900">
+                          {detail.aliases?.length
+                            ? detail.aliases.join(", ")
+                            : "—"}
+                        </dd>
+                      </dl>
+
+                      {detail.design_group ? (
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+                          <h5 className="text-sm font-semibold text-slate-900">
+                            Nhóm thiết kế
+                          </h5>
+                          <p className="mt-1 break-words text-sm text-slate-800">
+                            {detail.design_group.name ?? "—"}
+                          </p>
+                          <p className="text-xs text-slate-600">
+                            {[
+                              detail.design_group.drawing
+                                ? `Bản vẽ ${detail.design_group.drawing}`
+                                : null,
+                              detail.design_group.source_page
+                                ? `Trang ${detail.design_group.source_page}`
+                                : null,
+                              detail.design_group.source,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ") || "—"}
+                          </p>
+                        </div>
+                      ) : null}
+
+                      {detail.scopes?.length ? (
+                        <div>
+                          <h5 className="text-sm font-semibold text-slate-900">
+                            Phạm vi sửa chữa
+                          </h5>
+                          <ul className="mt-1 space-y-1">
+                            {detail.scopes.map((scope) => (
+                              <li
+                                key={scope.id}
+                                className="flex min-w-0 flex-wrap items-center gap-1 rounded-lg border border-slate-200 p-2 text-xs text-slate-700"
+                              >
+                                <span className="font-medium text-slate-900">
+                                  {originLabel(scope.kind)} · lần {scope.revision}
+                                </span>
+                                <span>{verificationLabel(scope.verification)}</span>
+                                {scope.approval_reference ? (
+                                  <span className="break-words">
+                                    · Căn cứ: {scope.approval_reference}
+                                  </span>
+                                ) : null}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+
+                      {detail.stages?.length ? (
+                        <div>
+                          <h5 className="text-sm font-semibold text-slate-900">
+                            Bước thi công
+                          </h5>
+                          <ul className="mt-1 space-y-1">
+                            {detail.stages.map((stage) => (
+                              <li
+                                key={stage.id}
+                                className="flex min-w-0 flex-wrap items-center justify-between gap-1 rounded-lg border border-slate-200 p-2 text-xs"
+                              >
+                                <span className="min-w-0 break-words text-slate-800">
+                                  {stage.name || stage.code}
+                                </span>
+                                <StatusChip status={stage.status} />
+                                {stage.inference_conflict ? (
+                                  <span className="text-amber-800">Cần đối chiếu với bước sau</span>
+                                ) : stage.inferred_from_stage_id ? (
+                                  <span className="text-slate-600">Suy ra từ bước sau</span>
+                                ) : null}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+
+                      {detail.work_links?.length ? (
+                        <div>
+                          <h5 className="text-sm font-semibold text-slate-900">
+                            Dòng danh mục công việc
+                          </h5>
+                          <ul className="mt-1 space-y-1">
+                            {detail.work_links.map((link) => (
+                              <li
+                                key={`${link.dm_row}-${link.work}`}
+                                className="break-words rounded-lg border border-slate-200 p-2 text-xs text-slate-700"
+                              >
+                                <span className="font-medium text-slate-900">
+                                  DM dòng {link.dm_row}
+                                </span>{" "}
+                                · {link.work || "—"}
+                                {link.raw_location
+                                  ? ` · ${link.raw_location}`
+                                  : ""}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+
+                      <p className="break-words text-xs text-slate-500">
+                        Nguồn: {shortSha(detail.source?.sha256)}
+                        {detail.source?.sheet
+                          ? ` · ${detail.source.sheet}`
+                          : ""}
+                        {detail.source?.row
+                          ? ` · dòng ${detail.source.row}`
+                          : ""}
+                      </p>
+                    </div>
+                  ) : null}
+                </section>
+              ) : null}
+
+              <details
+                className="rounded-xl border border-slate-200 bg-white shadow-sm"
+                open
+              >
+                <summary
+                  className={`flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 p-3 text-sm font-semibold text-slate-900 [&::-webkit-details-marker]:hidden ${FOCUS_RING}`}
+                >
+                  <span>Danh sách cấu kiện ({visibleMarkerCount})</span>
+                  <span aria-hidden="true" className="text-slate-500">
+                    ⌄
+                  </span>
+                </summary>
+                <div className="divide-y divide-slate-200 border-t border-slate-200">
+                  {filteredSheets.map((sheet) => (
+                    <section key={sheet.id} className="p-3">
+                      <h5 className="break-words text-sm font-semibold text-slate-900">
+                        {sheet.title}
+                      </h5>
+                      <p className="mt-0.5 text-xs text-slate-600">
+                        Bản vẽ {sheet.drawing} · trang {sheet.page}
+                      </p>
+                      {sheet.markers.length ? (
+                        <ul className="mt-2 space-y-1">
+                          {sheet.markers.map((marker) => (
+                            <li
+                              key={`${marker.component_id}-${marker.code}`}
+                            >
+                              <button
+                                type="button"
+                                className={`flex min-h-11 w-full min-w-0 flex-wrap items-center justify-between gap-1 rounded-lg border border-slate-200 px-2 py-1 text-left text-sm text-slate-800 active:bg-slate-50 ${FOCUS_RING}`}
+                                onClick={() => void openDetail(marker)}
+                              >
+                                <span className="break-words font-mono font-semibold text-slate-900">
+                                  {marker.code}
+                                </span>
+                                <span className="break-words text-xs text-slate-600">
+                                  {componentTypeLabel(marker.type)} ·{" "}
+                                  {constructionStatusLabel(
+                                    marker.construction_status,
+                                  )}{" "}
+                                  · {originLabel(marker.origin)}
+                                </span>
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="mt-2 text-xs text-slate-500">
+                          Chưa gắn cấu kiện trên trang này.
+                        </p>
+                      )}
+                    </section>
+                  ))}
+                </div>
+              </details>
+            </>
+          )}
+        </>
+      ) : null}
+    </section>
+  );
+}

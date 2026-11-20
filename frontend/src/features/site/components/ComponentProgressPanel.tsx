@@ -229,18 +229,27 @@ function ProgressCard({
             </span>
           </summary>
           <ul className="space-y-1 border-t border-slate-200 p-2 text-xs text-slate-600">
-            {sortStagesByPosition(row.stages).map((stage) => (
-              <li
-                key={stage.id}
-                className="flex min-w-0 flex-wrap items-center gap-1 break-words"
-              >
-                <span className="min-w-0 break-words">{stage.name}</span>
-                {stage.scope_kind ? (
-                  <span>· {scopeLabel(stage.scope_kind)}</span>
-                ) : null}
-                <StatusChip status={stage.status} />
-              </li>
-            ))}
+            {sortStagesByPosition(row.stages).map((stage) => {
+              const source = row.stages.find((item) => item.id === stage.inferred_from_stage_id);
+              return (
+                <li
+                  key={stage.id}
+                  className="flex min-w-0 flex-wrap items-center gap-1 break-words"
+                >
+                  <span className="min-w-0 break-words">{stage.name}</span>
+                  {stage.scope_kind ? <span>· {scopeLabel(stage.scope_kind)}</span> : null}
+                  <StatusChip status={stage.status} />
+                  {stage.inference_conflict ? (
+                    <span className="text-amber-800">Cần đối chiếu với bước sau</span>
+                  ) : stage.inferred_from_stage_id ? (
+                    <span className="text-slate-700">
+                      Suy ra từ bước sau
+                      {source ? ` · ${source.name}` : ""}
+                    </span>
+                  ) : null}
+                </li>
+              );
+            })}
           </ul>
         </details>
       ) : (

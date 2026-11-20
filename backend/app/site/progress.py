@@ -1,10 +1,10 @@
 """Component progress views, reviewed bulk updates and journal preview.
 
 Progress events and construction stages are shared-core entities.  This module
-adds site-facing aggregation, an exact preview/commit wrapper for bulk entry and
-a read-only reviewed journal preview.  Construction and acceptance status stay
-independent: nothing here writes acceptance records or derives acceptance from
-progress.
+adds site-facing aggregation, an exact preview/commit wrapper for bulk entry, an
+atomic multi-line daily commit and a read-only reviewed journal preview.
+Construction and acceptance status stay independent: nothing here writes
+acceptance records or derives acceptance from progress.
 """
 
 from __future__ import annotations
@@ -27,6 +27,7 @@ from .dependencies import (
     require_site_editor,
 )
 from .models import SitePhoto, SiteProgressBulkBatch
+from .progress_inference import apply_inferred_progress
 from .schemas import LOCAL_TZ
 from .service import (
     WORK_STATUS_LABELS,
@@ -81,6 +82,8 @@ ACCEPTANCE_STATUSES = (
     "CONFIRMED",
 )
 INPUT_STATUSES = ("IN_PROGRESS", "COMPLETED", "BLOCKED")
+MAX_DAILY_LINES = 50
+MAX_DAILY_COMPONENTS = 500
 
 
 class ProgressSelectionConflict(SiteError):
@@ -90,6 +93,40 @@ class ProgressSelectionConflict(SiteError):
 class StageSelectionIn(BaseModel):
     component_id: str = Field(min_length=1, max_length=36)
     stage_id: str = Field(min_length=1, max_length=36)
+
+
+def _clean_component_ids(value: List[str]) -> List[str]:
+    ids = [item.strip() for item in value]
+    if any(not item for item in ids):
+        raise ValueError("component_ids must not contain blanks")
+    if len(ids) != len(set(ids)):
+        raise ValueError("component_ids must be unique")
+    return ids
+
+
+def _clean_stage_selections(
+    value: List[StageSelectionIn],
+) -> List[StageSelectionIn]:
+    selected: List[StageSelectionIn] = []
+    seen: set[str] = set()
+    for item in value:
+        component_id = item.component_id.strip()
+        stage_id = item.stage_id.strip()
+        if not component_id or not stage_id:
+            raise ValueError("stage selections must not contain blanks")
+        if component_id in seen:
+            raise ValueError("stage selections must have unique component_id")
+        seen.add(component_id)
+        selected.append(StageSelectionIn(component_id=component_id, stage_id=stage_id))
+    return selected
+
+
+def _require_selection_components(
+    component_ids: List[str], selections: List[StageSelectionIn]
+) -> None:
+    requested = set(component_ids)
+    if any(item.component_id not in requested for item in selections):
+        raise ValueError("stage selection references a component outside component_ids")
 
 
 class BulkProgressIn(BaseModel):
@@ -106,34 +143,16 @@ class BulkProgressIn(BaseModel):
     @field_validator("component_ids")
     @classmethod
     def _exact_component_ids(cls, value: List[str]) -> List[str]:
-        ids = [item.strip() for item in value]
-        if any(not item for item in ids):
-            raise ValueError("component_ids must not contain blanks")
-        if len(ids) != len(set(ids)):
-            raise ValueError("component_ids must be unique")
-        return ids
+        return _clean_component_ids(value)
 
     @field_validator("stage_selections")
     @classmethod
     def _exact_stage_selections(cls, value: List[StageSelectionIn]) -> List[StageSelectionIn]:
-        selected: List[StageSelectionIn] = []
-        seen: set[str] = set()
-        for item in value:
-            component_id = item.component_id.strip()
-            stage_id = item.stage_id.strip()
-            if not component_id or not stage_id:
-                raise ValueError("stage selections must not contain blanks")
-            if component_id in seen:
-                raise ValueError("stage selections must have unique component_id")
-            seen.add(component_id)
-            selected.append(StageSelectionIn(component_id=component_id, stage_id=stage_id))
-        return selected
+        return _clean_stage_selections(value)
 
     @model_validator(mode="after")
     def _selections_belong_to_requested_components(self):
-        requested = set(self.component_ids)
-        if any(item.component_id not in requested for item in self.stage_selections):
-            raise ValueError("stage selection references a component outside component_ids")
+        _require_selection_components(self.component_ids, self.stage_selections)
         return self
 
     @field_validator("evidence_refs")
@@ -158,6 +177,71 @@ class BulkProgressPreviewIn(BulkProgressIn):
 
 
 class BulkProgressCommitIn(BulkProgressIn):
+    reviewed: Literal[True]
+    idempotency_key: str = Field(min_length=1, max_length=120)
+
+
+class DailyProgressLineIn(BaseModel):
+    """One work item in a daily entry.
+
+    ``group_quantity``/``group_unit`` describe the work group as a whole.  They
+    are kept in the batch result and audit log, never copied onto each component
+    event.
+    """
+
+    stage_definition_id: str = Field(min_length=1, max_length=36)
+    component_ids: List[str] = Field(min_length=1, max_length=MAX_DAILY_COMPONENTS)
+    stage_selections: List[StageSelectionIn] = Field(default_factory=list, max_length=MAX_DAILY_COMPONENTS)
+    status: Literal["IN_PROGRESS", "COMPLETED", "BLOCKED"]
+    group_quantity: Optional[float] = Field(default=None, ge=0, le=1_000_000_000_000)
+    group_unit: Optional[str] = Field(default=None, max_length=30)
+
+    @field_validator("component_ids")
+    @classmethod
+    def _exact_component_ids(cls, value: List[str]) -> List[str]:
+        return _clean_component_ids(value)
+
+    @field_validator("stage_selections")
+    @classmethod
+    def _exact_stage_selections(cls, value: List[StageSelectionIn]) -> List[StageSelectionIn]:
+        return _clean_stage_selections(value)
+
+    @field_validator("group_unit")
+    @classmethod
+    def _blank_to_none(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
+
+    @model_validator(mode="after")
+    def _selections_belong_to_requested_components(self):
+        _require_selection_components(self.component_ids, self.stage_selections)
+        return self
+
+
+class DailyProgressIn(BaseModel):
+    event_date: date
+    lines: List[DailyProgressLineIn] = Field(min_length=1, max_length=MAX_DAILY_LINES)
+
+    @field_validator("event_date")
+    @classmethod
+    def _strict_event_date(cls, value: date) -> date:
+        if value > datetime.now(LOCAL_TZ).date():
+            raise ValueError("event_date must not be in the future")
+        return value
+
+    @model_validator(mode="after")
+    def _bounded_workload(self):
+        total = sum(len(line.component_ids) for line in self.lines)
+        if total > MAX_DAILY_COMPONENTS:
+            raise ValueError(
+                f"a daily entry supports at most {MAX_DAILY_COMPONENTS} components"
+            )
+        return self
+
+
+class DailyProgressCommitIn(DailyProgressIn):
     reviewed: Literal[True]
     idempotency_key: str = Field(min_length=1, max_length=120)
 
@@ -196,6 +280,8 @@ class ProgressStageOut(BaseModel):
     scope_kind: Optional[str] = None
     status: str
     latest_event_at: Optional[datetime] = None
+    inferred_from_stage_id: Optional[str] = None
+    inference_conflict: bool = False
 
 
 class ProgressLatestOut(BaseModel):
@@ -268,6 +354,30 @@ class ProgressCommitOut(BaseModel):
     missing_component_ids: List[str] = Field(default_factory=list)
     missing_stage_component_ids: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
+
+
+class DailyProgressLinePreview(ProgressPreviewOut):
+    line_index: int
+    group_quantity: Optional[float] = None
+    group_unit: Optional[str] = None
+
+
+class DailyProgressPreviewOut(BaseModel):
+    can_commit: bool
+    lines: List[DailyProgressLinePreview]
+    warnings: List[str] = Field(default_factory=list)
+
+
+class DailyProgressLineResult(ProgressCommitOut):
+    line_index: int
+    stage_definition_id: str
+    group_quantity: Optional[float] = None
+    group_unit: Optional[str] = None
+
+
+class DailyProgressCommitOut(BaseModel):
+    created: int
+    lines: List[DailyProgressLineResult]
 
 
 def _empty_acceptance() -> dict[str, Any]:
@@ -533,6 +643,7 @@ def _load_rows(
             for event in events_by_stage.get(stage["id"], [])
         ]
         stages_out, latest, latest_stage = _stage_status(stages, events)
+        apply_inferred_progress(component.type, stages_out)
         rows.append(
             {
                 "id": component.id,
@@ -754,11 +865,219 @@ def _event_out(event: ProgressEvent, component_id: str) -> dict[str, Any]:
     }
 
 
+def _line_preview_payload(
+    line: DailyProgressLineIn, event_date: date
+) -> BulkProgressPreviewIn:
+    return BulkProgressPreviewIn(
+        stage_definition_id=line.stage_definition_id,
+        component_ids=line.component_ids,
+        stage_selections=line.stage_selections,
+        event_date=event_date,
+        status=line.status,
+        quantity=None,
+        unit=None,
+        note=None,
+        evidence_refs=[],
+    )
+
+
+def _line_commit_payload(
+    line: DailyProgressLineIn, event_date: date, key: str, index: int
+) -> BulkProgressCommitIn:
+    # A per-line key keeps the existing bulk batch rows unique while the daily
+    # wrapper owns the caller's idempotency key.
+    digest = hashlib.sha256(key.encode()).hexdigest()[:32]
+    return BulkProgressCommitIn(
+        stage_definition_id=line.stage_definition_id,
+        component_ids=line.component_ids,
+        stage_selections=line.stage_selections,
+        event_date=event_date,
+        status=line.status,
+        quantity=None,
+        unit=None,
+        note=None,
+        evidence_refs=[],
+        reviewed=True,
+        idempotency_key=f"daily-{digest}-{index}",
+    )
+
+
+def _duplicate_stage_ids(previews: List[dict[str, Any]]) -> List[str]:
+    seen: set[str] = set()
+    duplicates: List[str] = []
+    for preview in previews:
+        for row in preview["components"]:
+            stage_id = row.get("stage_id")
+            if not stage_id:
+                continue
+            if stage_id in seen and stage_id not in duplicates:
+                duplicates.append(stage_id)
+            seen.add(stage_id)
+    return duplicates
+
+
+def _daily_payload_hash(payload: DailyProgressCommitIn) -> str:
+    data = payload.model_dump(mode="json", exclude={"reviewed", "idempotency_key"})
+    return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
+
+
+def preview_daily(
+    db: Session, project_id: str, payload: DailyProgressIn
+) -> dict[str, Any]:
+    lines: List[dict[str, Any]] = []
+    warnings: List[str] = []
+    for index, line in enumerate(payload.lines):
+        preview = preview_bulk(
+            db, project_id, _line_preview_payload(line, payload.event_date)
+        )
+        lines.append(
+            {
+                **preview,
+                "line_index": index,
+                "group_quantity": line.group_quantity,
+                "group_unit": line.group_unit,
+            }
+        )
+        warnings.extend(f"Dòng {index + 1}: {item}" for item in preview["warnings"])
+    duplicates = _duplicate_stage_ids(lines)
+    if duplicates:
+        warnings.append(
+            f"{len(duplicates)} bước thi công bị trùng giữa các dòng; "
+            "mỗi bước chỉ được ghi một lần."
+        )
+    return {
+        "can_commit": all(item["can_commit"] for item in lines) and not duplicates,
+        "lines": lines,
+        "warnings": warnings,
+    }
+
+
+def commit_daily(
+    db: Session,
+    project_id: str,
+    payload: DailyProgressCommitIn,
+    actor_id: Optional[str],
+) -> dict[str, Any]:
+    digest = _daily_payload_hash(payload)
+    previous = _previous_result(db, project_id, payload.idempotency_key, digest)
+    if previous is not None:
+        return previous
+
+    # Validate every line before the first write, then revalidate each line
+    # inside the same transaction through commit_bulk.
+    previews: List[dict[str, Any]] = []
+    for index, line in enumerate(payload.lines):
+        previews.append(
+            preview_bulk(db, project_id, _line_preview_payload(line, payload.event_date))
+        )
+        if not previews[-1]["can_commit"]:
+            raise ProgressSelectionConflict(
+                f"Daily progress line {index + 1} no longer matches; preview again"
+            )
+    duplicates = _duplicate_stage_ids(previews)
+    if duplicates:
+        raise ProgressSelectionConflict(
+            "Duplicate stage IDs resolved across daily lines; preview again"
+        )
+
+    try:
+        batch = SiteProgressBulkBatch(
+            project_id=project_id,
+            idempotency_key=payload.idempotency_key,
+            payload_hash=digest,
+            created_by=actor_id,
+        )
+        db.add(batch)
+        db.flush()
+
+        line_results: List[dict[str, Any]] = []
+        resolved: dict[str, int] = {}
+        for index, line in enumerate(payload.lines):
+            result = commit_bulk(
+                db,
+                project_id,
+                _line_commit_payload(
+                    line, payload.event_date, payload.idempotency_key, index
+                ),
+                actor_id,
+                commit=False,
+            )
+            for event in result["events"]:
+                stage_id = event["stage_id"]
+                if stage_id in resolved:
+                    raise ProgressSelectionConflict(
+                        "Duplicate stage IDs resolved across daily lines; preview again"
+                    )
+                resolved[stage_id] = index
+            line_results.append(
+                {
+                    **result,
+                    "line_index": index,
+                    "stage_definition_id": line.stage_definition_id,
+                    "group_quantity": line.group_quantity,
+                    "group_unit": line.group_unit,
+                }
+            )
+
+        daily_result = {
+            "created": sum(item["created"] for item in line_results),
+            "lines": line_results,
+        }
+        # Stored verbatim for idempotent retries; group quantities live here and
+        # in the audit log, not on individual component events.
+        batch.result_json = json.dumps(daily_result, default=str)
+        _audit(
+            db,
+            project_id=project_id,
+            actor_id=actor_id,
+            action="component_progress_daily_recorded",
+            entity="SiteProgressBulkBatch",
+            entity_id=batch.id,
+            detail=json.dumps(
+                {
+                    "event_date": payload.event_date.isoformat(),
+                    "reviewed": True,
+                    "idempotency_key": payload.idempotency_key,
+                    "lines": [
+                        {
+                            "line_index": index,
+                            "stage_definition_id": line.stage_definition_id,
+                            "component_ids": line.component_ids,
+                            "stage_ids": {
+                                event["component_id"]: event["stage_id"]
+                                for event in line_results[index]["events"]
+                            },
+                            "status": line.status,
+                            "group_quantity": line.group_quantity,
+                            "group_unit": line.group_unit,
+                        }
+                        for index, line in enumerate(payload.lines)
+                    ],
+                }
+            ),
+        )
+        db.commit()
+        return daily_result
+    except IntegrityError as exc:
+        db.rollback()
+        previous = _previous_result(db, project_id, payload.idempotency_key, digest)
+        if previous is not None:
+            return previous
+        raise ProgressSelectionConflict(
+            "Concurrent daily progress update conflict; preview again"
+        ) from exc
+    except Exception:
+        db.rollback()
+        raise
+
+
 def commit_bulk(
     db: Session,
     project_id: str,
     payload: BulkProgressCommitIn,
     actor_id: Optional[str],
+    *,
+    commit: bool = True,
 ) -> dict[str, Any]:
     digest = _payload_hash(payload)
     previous = _previous_result(db, project_id, payload.idempotency_key, digest)
@@ -845,7 +1164,8 @@ def commit_bulk(
                 }
             ),
         )
-        db.commit()
+        if commit:
+            db.commit()
         return result
     except IntegrityError as exc:
         db.rollback()
@@ -1424,6 +1744,36 @@ def commit_progress_bulk(
 ):
     try:
         return commit_bulk(db, project_id, payload, current_user_id(user))
+    except ProgressSelectionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post(
+    "/projects/{project_id}/progress/daily-preview",
+    response_model=DailyProgressPreviewOut,
+)
+def preview_progress_daily(
+    project_id: str,
+    payload: DailyProgressIn,
+    db: Session = Depends(get_db),
+    user=Depends(require_site_editor),
+):
+    return preview_daily(db, project_id, payload)
+
+
+@router.post(
+    "/projects/{project_id}/progress/daily",
+    response_model=DailyProgressCommitOut,
+    status_code=201,
+)
+def commit_progress_daily(
+    project_id: str,
+    payload: DailyProgressCommitIn,
+    db: Session = Depends(get_db),
+    user=Depends(require_site_editor),
+):
+    try:
+        return commit_daily(db, project_id, payload, current_user_id(user))
     except ProgressSelectionConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
