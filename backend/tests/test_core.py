@@ -156,7 +156,7 @@ def test_change_password_revokes_tokens_and_checks_old_password(tmp_path, monkey
     changed = client.post(
         "/api/v1/auth/change-password",
         headers=old_headers,
-        json={"current_password": "old-password-123", "new_password": "new-password-456"},
+        json={"current_password": "old-password-123", "new_password": "test06"},
     )
     assert changed.status_code == 200
     assert changed.json() == {"status": "password_changed", "relogin": True}
@@ -168,7 +168,7 @@ def test_change_password_revokes_tokens_and_checks_old_password(tmp_path, monkey
     ).status_code == 401
     new_login = client.post(
         "/api/v1/auth/login",
-        json={"username": "password-user", "password": "new-password-456"},
+        json={"username": "password-user", "password": "test06"},
     )
     assert new_login.status_code == 200
     new_headers = {"Authorization": f"Bearer {new_login.json()['access_token']}"}

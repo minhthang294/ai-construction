@@ -40,8 +40,8 @@ export default function ChangePasswordDialog({
       setError("Nhập mật khẩu hiện tại.");
       return;
     }
-    if (newPassword.length < 12) {
-      setError("Mật khẩu mới phải có ít nhất 12 ký tự.");
+    if (newPassword.length < 6) {
+      setError("Mật khẩu mới phải có ít nhất 6 ký tự.");
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -131,11 +131,11 @@ export default function ChangePasswordDialog({
             />
           </label>
           <label className="block text-sm font-medium text-slate-700">
-            Mật khẩu mới (tối thiểu 12 ký tự)
+            Mật khẩu mới (tối thiểu 6 ký tự)
             <input
               type="password"
               autoComplete="new-password"
-              minLength={12}
+              minLength={6}
               className="app-input mt-1"
               value={newPassword}
               disabled={submitting}
@@ -148,7 +148,7 @@ export default function ChangePasswordDialog({
             <input
               type="password"
               autoComplete="new-password"
-              minLength={12}
+              minLength={6}
               className="app-input mt-1"
               value={confirmPassword}
               disabled={submitting}

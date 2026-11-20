@@ -21,13 +21,13 @@ class LoginIn(BaseModel):
 
 
 class UserIn(LoginIn):
-    password: str = Field(min_length=12)
+    password: str = Field(min_length=6)
     role: str = "viewer"
 
 
 class ChangePasswordIn(BaseModel):
     current_password: str = Field(min_length=1)
-    new_password: str = Field(min_length=12)
+    new_password: str = Field(min_length=6)
 
 
 class ProjectIn(BaseModel):
