@@ -1,5 +1,64 @@
 # Engineering AI Agent Report
 
+## 2026-11-23 — per-pile design parameters in chat and progress paste
+
+Uses the shared `backend/app/core/design_parameters.py` helper (no copy or
+private path copied into the repo).
+
+Chat (`database_chat.py`, ahead of progress/component lookup in `service.ask`):
+- New read-only design-parameter answer path for:
+  - `Cọc F67 đục dày bao nhiêu?` / `chiều dày t của H65` / `t của H65`
+  - `thông số cọc B153` (all seeded parameters: t, L1..L4, n, a, b)
+  - `PD2 cọc nào t = 5 cm` and `PD2 cọc nào t từ 3 đến 5 cm`
+- Values come only from `component_design_parameters`; chat never derives t
+  from dimensions or stage names.
+- Missing t returns exactly “chưa có số liệu t trong bảng thiết kế”, keeps a
+  component-record citation and warns “không suy đoán”. No value is invented.
+- Parameter citations carry the design-parameter record id plus
+  `drawing_number` (`TK-19`), `page_number` (`23`) and `section` (`dòng 14`), so
+  the source table/page/row is visible; `CitationCard` now shows bảng/trang/dòng
+  for database citations when present.
+- A zero-match range answer states “không có cọc nào …” and cites the scanned
+  component records; an empty segment returns the fixed refusal.
+
+Stage display names:
+- Chat stage labels (component detail, daily progress, current stage, pending
+  stage header) now use `display_stage_name`, so a pile shows
+  `Đục bê tông om vỡ dày trung bình t = 3 cm` (range when values differ;
+  `(chưa có số liệu)` when absent).
+- `progress_parse` loads `t_cm` per matched component; item `stage_candidates`,
+  multiple-stage option labels and completed-earlier question text use the same
+  helper. Missing t remains explicit.
+
+Tests added (`test_database_chat.py`, `test_progress_parse.py`):
+- seeded parameters with source drawing/page/row;
+- specific t answer + citation fields;
+- missing t message/warning;
+- full parameter list;
+- `PD2 t = 5 cm` filter and `3–5 cm` range;
+- progress-parse multiple-stage labels/options include `t = 3 cm`.
+
+Verification (temp DB/storage):
+```bash
+cd backend
+DATABASE_URL=sqlite:///<tmp>/app.db SITE_REPORT_STORAGE=<tmp>/site \
+ENGINEERING_AI_STORAGE=<tmp>/engineering ACCEPTANCE_STORAGE=<tmp>/acceptance \
+../.venv/Scripts/python -m pytest tests/engineering_ai -q   # 127 passed
+../.venv/Scripts/python -m pytest tests -q                  # 367 passed, 6 skipped, 0 failed
+
+cd frontend && npm test          # 34 files, 210 passed
+cd frontend && npm run build     # OK
+```
+
+Unresolved:
+- Parameter rows come from the core migration/import; chat only reads them.
+- `thông số` for a component with no parameter rows answers with the component
+  record citation and a warning, not a synthetic empty table row.
+- Suggestions still use the verb phrase, not the t-suffixed stage name; only
+  chat, progress-parse labels and the underlying stage display use the helper.
+- The full JSON example in `docs/API_CONTRACTS.md` predates t labels and shows
+  the older stage text; contract docs are coordinator-owned.
+
 ## 2026-11-23 — UI fix wave 1 (Hỏi AI + Nghiệm thu quick wins)
 
 Implemented the owner-approved quick wins from

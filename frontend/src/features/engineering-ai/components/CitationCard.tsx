@@ -29,6 +29,17 @@ export default function CitationCard({ citation, onOpen, onOpenComponent }: Prop
                 bản ghi {display.recordId}
               </span>
             )}
+            {citation.drawing_number && (
+              <span className="text-sm text-slate-600">
+                bảng {citation.drawing_number}
+              </span>
+            )}
+            {citation.page_number > 0 && (
+              <span className="text-sm text-slate-600">trang {citation.page_number}</span>
+            )}
+            {citation.section && (
+              <span className="text-sm text-slate-600">{citation.section}</span>
+            )}
           </>
         ) : (
           <>

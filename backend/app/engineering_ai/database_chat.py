@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from ..core.component_models import (
     ComponentAlias,
+    ComponentDesignParameter,
     ComponentStage,
     ComponentWorkLink,
     DesignGroup,
@@ -30,6 +31,11 @@ from ..core.component_models import (
     StageDefinition,
     StructuralComponent,
     StructureZone,
+)
+from ..core.design_parameters import (
+    display_stage_name,
+    format_parameter_value,
+    load_t_values,
 )
 from .constants import (
     GROUNDING_WARNING,
@@ -489,6 +495,310 @@ def _row_candidate(table: str, row, label: str, verified: bool) -> _Candidate:
     )
 
 
+def _parameter_rows(db: Session, component_ids: List[str]):
+    if not component_ids:
+        return []
+    return list(
+        db.scalars(
+            select(ComponentDesignParameter)
+            .where(ComponentDesignParameter.component_id.in_(component_ids))
+            .order_by(ComponentDesignParameter.component_id, ComponentDesignParameter.name)
+        ).all()
+    )
+
+
+def _parameter_label(row: ComponentDesignParameter) -> str:
+    name = {
+        "t_cm": "t",
+        "L1_m": "L1",
+        "L2_m": "L2",
+        "L3_m": "L3",
+        "L4_m": "L4",
+        "a_mm": "a",
+        "b_mm": "b",
+    }.get(row.name, row.name)
+    unit = f" {row.unit}" if row.unit else ""
+    return f"{name} = {format_parameter_value(row.value)}{unit}"
+
+
+def _parameter_source(row: ComponentDesignParameter) -> str:
+    parts = []
+    if row.source_drawing:
+        parts.append(f"bảng {row.source_drawing}")
+    if row.source_page:
+        parts.append(f"trang {row.source_page}")
+    if row.source_row:
+        parts.append(f"dòng {row.source_row}")
+    return ", ".join(parts)
+
+
+def _parameter_citation(
+    row: ComponentDesignParameter,
+) -> CitationOut:
+    drawing = row.source_drawing
+    page = int(row.source_page or 0)
+    quote = _parameter_label(row)
+    source = _parameter_source(row)
+    if source:
+        quote += f" — {source}"
+    return CitationOut(
+        document_id=row.id,
+        document_name=f"Bảng thiết kế {drawing}" if drawing else "Bảng thiết kế",
+        version=1,
+        page_number=page,
+        drawing_number=drawing,
+        section=f"dòng {row.source_row}" if row.source_row else None,
+        quote=quote,
+        url="",
+        record_id=row.id,
+        source="database",
+    )
+
+
+def _parameter_lines(
+    rows: List[ComponentDesignParameter],
+) -> Tuple[List[str], List[CitationOut]]:
+    lines: List[str] = []
+    citations: List[CitationOut] = []
+    for index, row in enumerate(rows, start=1):
+        source = _parameter_source(row)
+        suffix = f" ({source})" if source else ""
+        lines.append(f"- {_parameter_label(row)}{suffix} [{index}]")
+        citations.append(_parameter_citation(row))
+    return lines, citations
+
+
+def _design_parameter_intent(message: str) -> Optional[str]:
+    folded = fold_text(message)
+    if "thong so" in folded:
+        return "list"
+    if "chieu day" in folded or "do day" in folded:
+        return "t"
+    if re.search(r"\b(?:duc|dao|cat)\s+day\b", folded):
+        return "t"
+    if _parameter_range_query(message) is not None:
+        return "value"
+    if re.search(r"\bt\b", folded):
+        return "value" if re.search(r"\bt\s*(?:=|bang|la)?\s*\d", folded) else "t"
+    return None
+
+
+def _parameter_value_query(message: str) -> Optional[float]:
+    folded = fold_text(message)
+    match = re.search(r"\bt\s*(?:=|bang|la)?\s*(\d+(?:[.,]\d+)?)", folded)
+    if not match:
+        return None
+    raw = match.group(1).replace(",", ".")
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
+def _parameter_range_query(message: str) -> Optional[Tuple[float, float]]:
+    folded = fold_text(message)
+    match = re.search(
+        r"\bt\s*(?:tu|from)?\s*(\d+(?:[.,]\d+)?)\s*(?:-|–|den|toi)\s*(\d+(?:[.,]\d+)?)",
+        folded,
+    )
+    if not match:
+        return None
+    try:
+        low = float(match.group(1).replace(",", "."))
+        high = float(match.group(2).replace(",", "."))
+    except ValueError:
+        return None
+    return (min(low, high), max(low, high))
+
+
+def answer_design_parameter_question(
+    db: Session,
+    project_id: str,
+    message: str,
+) -> Optional[Tuple[ProviderAnswer, List[CitationOut], List[str], bool, float]]:
+    """Answer per-pile design-parameter questions from reviewed tables only."""
+
+    if not _component_tables_available(db):
+        return None
+    intent = _design_parameter_intent(message)
+    if intent is None:
+        return None
+    components = _load_components(db, project_id)
+    if not components:
+        return None
+    aliases = _related_rows(db, ComponentAlias, [component.id for component in components])
+    aliases_by_component: Dict[str, List[str]] = {}
+    for alias in aliases:
+        aliases_by_component.setdefault(alias.component_id, []).append(alias.alias)
+
+    matched = _matched_components(components, aliases_by_component, message)
+    query = _parse_progress_query(message)
+    if intent in {"t", "list"} and matched:
+        rows = _parameter_rows(db, [component.id for component in matched])
+        if intent == "list":
+            heading = f"Thông số thiết kế của {('cọc' if matched[0].type == 'pile' else 'dầm')} {matched[0].canonical_code}:"
+            if rows:
+                lines, citations = _parameter_lines(rows)
+                return (
+                    ProviderAnswer(text="\n".join([heading, *lines, "", STRUCTURED_FOOTER])),
+                    citations,
+                    [],
+                    False,
+                    0.8,
+                )
+            component_candidate = _row_candidate(
+                "structural_components",
+                matched[0],
+                f"{'Cọc' if matched[0].type == 'pile' else 'Dầm'} "
+                f"{matched[0].canonical_code} — bản ghi {matched[0].id}",
+                matched[0].verification == "verified",
+            )
+            component_candidate = _finalise_lines([component_candidate])[0]
+            return (
+                ProviderAnswer(
+                    text=(
+                        f"{heading}\n- Chưa có thông số thiết kế trong bảng.\n"
+                        f"{component_candidate.line}"
+                    )
+                ),
+                [component_candidate.citation],
+                ["Chưa có thông số thiết kế đã nhập cho cấu kiện này."],
+                False,
+                0.5,
+            )
+        t_rows = [row for row in rows if row.name == "t_cm"]
+        if t_rows:
+            lines, citations = _parameter_lines(t_rows[:3])
+            heading = (
+                f"{'Cọc' if matched[0].type == 'pile' else 'Dầm'} "
+                f"{matched[0].canonical_code}:"
+            )
+            return (
+                ProviderAnswer(text="\n".join([heading, *lines])),
+                citations,
+                [],
+                False,
+                0.8,
+            )
+        component_candidate = _row_candidate(
+            "structural_components",
+            matched[0],
+            f"{'Cọc' if matched[0].type == 'pile' else 'Dầm'} "
+            f"{matched[0].canonical_code} — bản ghi {matched[0].id}",
+            matched[0].verification == "verified",
+        )
+        component_candidate = _finalise_lines([component_candidate])[0]
+        answer = (
+            f"{'Cọc' if matched[0].type == 'pile' else 'Dầm'} "
+            f"{matched[0].canonical_code}: chưa có số liệu t trong bảng thiết kế. "
+            f"{component_candidate.line}"
+        )
+        return (
+            ProviderAnswer(text=answer),
+            [component_candidate.citation],
+            ["Chưa có số liệu t trong bảng thiết kế; không suy đoán giá trị."],
+            False,
+            0.5,
+        )
+
+    if intent == "value":
+        bounds = _parameter_range_query(message)
+        if bounds is not None:
+            low, high = bounds
+        else:
+            target = _parameter_value_query(message)
+            if target is None:
+                return None
+            low = high = target
+        scoped = components
+        scope_label = "công trình"
+        if query.segment:
+            segments = {
+                row.id: row
+                for row in db.scalars(
+                    select(Segment)
+                    .join(StructureZone, Segment.zone_id == StructureZone.id)
+                    .where(StructureZone.project_id == project_id)
+                ).all()
+            }
+            scoped = [
+                component
+                for component in components
+                if component.segment_id in segments
+                and str(segments[component.segment_id].number) == query.segment
+            ]
+            scope_label = f"PD{query.segment}"
+        if not scoped:
+            return (
+                ProviderAnswer(text=NO_SOURCE_ANSWER),
+                [],
+                [f"Không có cấu kiện nào trong {scope_label}."],
+                True,
+                0.0,
+            )
+        rows = [
+            row
+            for row in _parameter_rows(db, [component.id for component in scoped])
+            if row.name == "t_cm" and low <= float(row.value) <= high
+        ]
+        if rows:
+            component_by_id = {component.id: component for component in scoped}
+            lines: List[str] = []
+            citations: List[CitationOut] = []
+            for index, row in enumerate(rows[:10], start=1):
+                component = component_by_id.get(row.component_id)
+                code = component.canonical_code if component else row.component_id
+                source = _parameter_source(row)
+                suffix = f" ({source})" if source else ""
+                lines.append(f"- {code}: {_parameter_label(row)}{suffix} [{index}]")
+                citations.append(_parameter_citation(row))
+            answer = (
+                f"{scope_label}: {len(rows)} cọc có t = "
+                f"{format_parameter_value(low)}"
+                + (f"–{format_parameter_value(high)}" if high != low else "")
+                + " cm trong bảng thiết kế:"
+            )
+            if len(rows) > 10:
+                answer += f"\n- Chỉ nêu 10/{len(rows)} cọc."
+            return (
+                ProviderAnswer(text="\n".join([answer, *lines])),
+                citations,
+                [],
+                False,
+                0.8,
+            )
+        component_candidates = [
+            _row_candidate(
+                "structural_components",
+                component,
+                f"{'Cọc' if component.type == 'pile' else 'Dầm'} "
+                f"{component.canonical_code} — bản ghi {component.id}",
+                component.verification == "verified",
+            )
+            for component in scoped[:5]
+        ]
+        component_candidates = _finalise_lines(component_candidates)
+        answer = (
+            f"{scope_label}: không có cọc nào có t = "
+            f"{format_parameter_value(low)}"
+            + (f"–{format_parameter_value(high)}" if high != low else "")
+            + " cm trong bảng thiết kế "
+            f"(đã kiểm tra {len(scoped)} cấu kiện)."
+        )
+        if component_candidates:
+            answer += "\n" + "\n".join(
+                candidate.line for candidate in component_candidates
+            )
+        return (
+            ProviderAnswer(text=answer),
+            [candidate.citation for candidate in component_candidates],
+            ["Không tìm thấy giá trị t yêu cầu trong bảng thiết kế; không suy đoán."],
+            False,
+            0.5,
+        )
+    return None
+
+
 def _related_rows(db: Session, model, ids: List[str]):
     if not ids:
         return []
@@ -510,6 +820,7 @@ def _component_detail(
     work_links = _related_rows(db, ComponentWorkLink, ids)
     stages = _related_rows(db, ComponentStage, ids)
     events = _related_rows(db, ProgressEvent, ids)
+    t_by_component = load_t_values(db, ids)
 
     stage_definitions = {
         row.id: row
@@ -586,7 +897,12 @@ def _component_detail(
         )
     for stage in stages:
         definition = stage_definitions.get(stage.stage_definition_id)
-        name = f"{definition.code} {definition.name}" if definition else "công đoạn"
+        component = next(
+            (row for row in components if row.id == stage.component_id), None
+        )
+        name = _stage_label(
+            definition, t_by_component.get(stage.component_id) if component else None
+        )
         quantity = (
             f", khối lượng thiết kế: {_json_text(stage.design_quantity)}"
             if stage.design_quantity
@@ -741,10 +1057,15 @@ def is_progress_question(message: str) -> bool:
     return "chua" in folded and any(hint in folded for hint in _STAGE_HINTS)
 
 
-def _stage_label(definition: Optional[StageDefinition]) -> str:
+def _stage_label(
+    definition: Optional[StageDefinition], t_value: Optional[float] = None
+) -> str:
     if definition is None:
         return "công đoạn"
-    return f"{definition.code} {definition.name}".strip()
+    return display_stage_name(
+        f"{definition.code} {definition.name}".strip(),
+        [t_value],
+    )
 
 
 def _stage_for_component(
@@ -836,6 +1157,7 @@ def _daily_progress_answer(
     ]
 
     candidates: List[_Candidate] = []
+    t_by_component = load_t_values(db, [event.component_id for event in relevant])
     for event in relevant[:MAX_RELATED_ROWS]:
         component = component_by_id[event.component_id]
         stage = stage_by_id.get(event.component_stage_id)
@@ -847,7 +1169,8 @@ def _daily_progress_answer(
         )
         label = (
             f"{'Cọc' if component.type == 'pile' else 'Dầm'} {component.canonical_code}"
-            f" · {_stage_label(definition)}: {event.status}{quantity} "
+            f" · {_stage_label(definition, t_by_component.get(component.id))}: "
+            f"{event.status}{quantity} "
             f"(ngày {event.event_date:%d/%m/%Y}) — bản ghi {event.id}"
         )
         candidates.append(_event_candidate(event, label))
@@ -903,7 +1226,6 @@ def _pending_stage_answer(
     if not chosen:
         return None
     definition_ids = {definition.id for definition in chosen}
-    definition_names = ", ".join(_stage_label(item) for item in chosen[:3])
 
     component_type = (
         "pile" if re.search(r"\b(?:coc|pile)\b", folded)
@@ -941,6 +1263,14 @@ def _pending_stage_answer(
     pending = [component for component in with_stage if component not in done]
     if not with_stage:
         return None
+    t_by_component = load_t_values(db, [component.id for component in with_stage])
+    definition_names = ", ".join(
+        display_stage_name(
+            f"{item.code} {item.name}".strip(),
+            [t_by_component.get(component.id) for component in with_stage],
+        )
+        for item in chosen[:3]
+    )
 
     noun = "cọc" if component_type == "pile" else "dầm" if component_type == "beam" else "cấu kiện"
     scope_label = f"PD{query.segment}" if query.segment else "công trình"
@@ -997,6 +1327,7 @@ def _component_stage_answer(
     if not matched:
         return None
     component = matched[0]
+    t_value = load_t_values(db, [component.id]).get(component.id)
     component_stages = [stage for stage in stages if stage.component_id == component.id]
     stage_by_id = {stage.id: stage for stage in component_stages}
     component_events = [
@@ -1014,19 +1345,19 @@ def _component_stage_answer(
         stage = stage_by_id.get(latest.component_stage_id)
         definition = _stage_for_component(stage, definitions) if stage else None
         lines.append(
-            f'{noun} {component.canonical_code} đang ở bước "{_stage_label(definition)}": '
+            f'{noun} {component.canonical_code} đang ở bước "{_stage_label(definition, t_value)}": '
             f"{latest.status}, ngày {latest.event_date:%d/%m/%Y} (không phải nghiệm thu)."
         )
         citations.append(
             _event_candidate(
                 latest,
-                f"{noun} {component.canonical_code} · {_stage_label(definition)}: "
+                f"{noun} {component.canonical_code} · {_stage_label(definition, t_value)}: "
                 f"{latest.status}, ngày {latest.event_date:%d/%m/%Y} — bản ghi {latest.id}",
             )
         )
     elif component_stages:
         labels = ", ".join(
-            _stage_label(_stage_for_component(stage, definitions))
+            _stage_label(_stage_for_component(stage, definitions), t_value)
             for stage in component_stages[:5]
         )
         lines.append(
@@ -1038,7 +1369,7 @@ def _component_stage_answer(
                 "component_stages",
                 stage,
                 f"{noun} {component.canonical_code} · "
-                f"{_stage_label(_stage_for_component(stage, definitions))} "
+                f"{_stage_label(_stage_for_component(stage, definitions), t_value)} "
                 f"— bản ghi {stage.id}",
                 True,
             )

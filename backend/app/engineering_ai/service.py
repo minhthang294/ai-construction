@@ -15,6 +15,7 @@ from .component_chat import answer_component_query, parse_component_query
 from .constants import NO_SOURCE_ANSWER, UNVERIFIED_KB_NOTE
 from .database_chat import (
     answer_database_question,
+    answer_design_parameter_question,
     answer_progress_question,
     answer_structured_question,
 )
@@ -462,34 +463,39 @@ def ask(
         confidence = navigation.confidence
         page_action = navigation.page_action
     else:
-        progress = answer_progress_question(db, project_id, message)
-        if progress is not None:
-            answer, citations, progress_warnings, no_source, confidence = progress
-            warnings.extend(progress_warnings)
+        design_parameter = answer_design_parameter_question(db, project_id, message)
+        if design_parameter is not None:
+            answer, citations, parameter_warnings, no_source, confidence = design_parameter
+            warnings.extend(parameter_warnings)
         else:
-            component_query = parse_component_query(message)
-            if component_query is not None:
-                answer, citations, component_warnings, no_source, confidence = (
-                    answer_component_query(
-                        db, project_id, message, component_query, scope
-                    )
-                )
-                warnings.extend(component_warnings)
-                # The component DB can still answer the same question when the
-                # extraction facts do not; never fall through to generic pages.
-                if no_source:
-                    database = answer_database_question(db, project_id, message)
-                    if database is not None:
-                        answer, citations, db_warnings, no_source, confidence = database
-                        warnings.extend(db_warnings)
+            progress = answer_progress_question(db, project_id, message)
+            if progress is not None:
+                answer, citations, progress_warnings, no_source, confidence = progress
+                warnings.extend(progress_warnings)
             else:
-                warnings = [UNVERIFIED_KB_NOTE]
-                answer, citations, structured_warnings, no_source, confidence = (
-                    answer_structured_question(
-                        db, project_id, message, top_k, provider, scope
+                component_query = parse_component_query(message)
+                if component_query is not None:
+                    answer, citations, component_warnings, no_source, confidence = (
+                        answer_component_query(
+                            db, project_id, message, component_query, scope
+                        )
                     )
-                )
-                warnings.extend(structured_warnings)
+                    warnings.extend(component_warnings)
+                    # The component DB can still answer the same question when the
+                    # extraction facts do not; never fall through to generic pages.
+                    if no_source:
+                        database = answer_database_question(db, project_id, message)
+                        if database is not None:
+                            answer, citations, db_warnings, no_source, confidence = database
+                            warnings.extend(db_warnings)
+                else:
+                    warnings = [UNVERIFIED_KB_NOTE]
+                    answer, citations, structured_warnings, no_source, confidence = (
+                        answer_structured_question(
+                            db, project_id, message, top_k, provider, scope
+                        )
+                    )
+                    warnings.extend(structured_warnings)
 
     # A sourced answer without a citation is not acceptable.
     if not no_source and not citations:

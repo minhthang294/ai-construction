@@ -5,6 +5,7 @@ from typing import Dict
 
 from app.core.component_models import (
     ComponentAlias,
+    ComponentDesignParameter,
     ComponentStage,
     ConstructionBatch,
     ConstructionBatchComponent,
@@ -528,10 +529,66 @@ def test_duplicate_stage_names_get_unique_option_labels(client, session_factory)
         "/api/v1/projects/p1/ai/progress-parse",
         json={"text": "Cọc đục ngày 22/11\nI69"},
     ).json()
-    item = next(line for line in body["lines"] for item in line["items"])
+    item = next(item for line in body["lines"] for item in line["items"])
     assert item["stage_candidates"]
     labels = [candidate["name"] for candidate in item["stage_candidates"]]
     assert len(labels) == len(set(labels))
+
+
+def test_stage_labels_and_questions_show_component_t(client, session_factory):
+    seeded = _seed(session_factory)
+    with session_factory() as db:
+        from sqlalchemy import select
+
+        component = db.scalar(
+            select(StructuralComponent).where(
+                StructuralComponent.project_id == "p1",
+                StructuralComponent.canonical_code == "I49",
+            )
+        )
+        db.add(
+            ComponentDesignParameter(
+                project_id="p1",
+                component_id=component.id,
+                name="t_cm",
+                value=3.0,
+                unit="cm",
+                source_drawing="TK-19",
+                source_page=23,
+                source_row=14,
+                created_by="u1",
+            )
+        )
+        definition = StageDefinition(
+            project_id="p1",
+            component_type="pile",
+            code="DUP-T",
+            name="Đục bê tông om vỡ dày trung bình t",
+            position=9,
+        )
+        db.add(definition)
+        db.flush()
+        db.add(
+            ComponentStage(
+                component_id=component.id,
+                stage_definition_id=definition.id,
+                repair_scope_id="scope-2",
+                created_by="u1",
+            )
+        )
+        db.commit()
+
+    body = client.post(
+        "/api/v1/projects/p1/ai/progress-parse",
+        json={"text": "Cọc đục ngày 22/11\nI49"},
+    ).json()
+    item = next(item for line in body["lines"] for item in line["items"])
+    labels = [candidate["name"] for candidate in item["stage_candidates"]]
+    assert len(labels) == 2
+    assert all("t = 3 cm" in label for label in labels)
+    question = next(q for q in body["questions"] if q["kind"] == "multiple_stage")
+    assert all("t = 3 cm" in option["label_vi"] for option in question["options"])
+    assert seeded["by_code"]["I49"] == item["component_id"]
 
 
 def test_unknown_code_and_missing_status_questions(client, session_factory):

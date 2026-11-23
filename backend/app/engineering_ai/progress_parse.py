@@ -28,6 +28,7 @@ from ..core.component_models import (
     StructuralComponent,
     StructureZone,
 )
+from ..core.design_parameters import display_stage_name, load_t_values
 from .embeddings import fold_text, tokenize
 from .schemas import (
     EarlierEventOut,
@@ -285,12 +286,17 @@ def _ordered_candidates(
 
 def _option_labels(
     definitions: List[StageDefinition],
+    t_value: Optional[float] = None,
 ) -> Dict[str, str]:
-    names = Counter(_stage_name_key(definition) for definition in definitions)
+    names = Counter(
+        display_stage_name(str(definition.name or ""), [t_value]) for definition in definitions
+    )
     labels: Dict[str, str] = {}
     for definition in definitions:
-        name = " ".join(str(definition.name or "").split()) or definition.code
-        if names[_stage_name_key(definition)] > 1:
+        name = display_stage_name(" ".join(str(definition.name or "").split()), [t_value])
+        if not name:
+            name = definition.code
+        if names[display_stage_name(str(definition.name or ""), [t_value])] > 1:
             labels[definition.id] = f"{name} · {definition.code}"
         else:
             labels[definition.id] = name
@@ -330,6 +336,7 @@ def progress_parse(
             )
         ).all()
     )
+    t_by_component = load_t_values(db, [component.id for component in components])
     aliases = list(
         db.scalars(
             select(ComponentAlias).where(ComponentAlias.project_id == project_id)
@@ -563,7 +570,7 @@ def progress_parse(
             if selected is None and len(candidates) == 1:
                 selected = candidates[0]
             ordered = _ordered_candidates(candidates, selected)
-            labels = _option_labels(ordered)
+            labels = _option_labels(ordered, t_by_component.get(component.id))
             line_choices.append(
                 _ItemStageChoice(
                     candidates=ordered, selected=selected, labels=labels

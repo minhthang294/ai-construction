@@ -4,6 +4,7 @@ from datetime import date, datetime, timezone
 
 from app.core.component_models import (
     ComponentAlias,
+    ComponentDesignParameter,
     ComponentStage,
     DesignGroup,
     ProgressEvent,
@@ -137,6 +138,55 @@ def _seed_progress(db):
     return components
 
 
+def _seed_design_parameters(db):
+    zone = StructureZone(project_id="p1", name="Cầu chính", name_key="cau chinh")
+    db.add(zone)
+    db.flush()
+    segment = Segment(zone_id=zone.id, number=2, source_code="PD2")
+    db.add(segment)
+    db.flush()
+    components = {}
+    for code in ("F67", "F68", "H65", "B153"):
+        component = StructuralComponent(
+            project_id="p1",
+            segment_id=segment.id,
+            type="pile",
+            raw_code=code,
+            canonical_code=code,
+            verification="verified",
+            created_by="u1",
+        )
+        db.add(component)
+        components[code] = component
+    db.flush()
+    values = {
+        "F67": {"t_cm": 3, "L1_m": 4.5, "n": 2, "a_mm": 100, "b_mm": 150},
+        "F68": {"t_cm": 5, "L1_m": 5.0},
+        "H65": {"L1_m": 6.0},
+        "B153": {"t_cm": 5, "L2_m": 2.5},
+    }
+    for code, params in values.items():
+        for name, value in params.items():
+            unit = "cm" if name == "t_cm" else "m" if name.endswith("_m") else "mm" if name.endswith("_mm") else ""
+            db.add(
+                ComponentDesignParameter(
+                    project_id="p1",
+                    component_id=components[code].id,
+                    name=name,
+                    value=float(value),
+                    unit=unit,
+                    source_drawing="TK-19",
+                    source_page=23,
+                    source_row=14 if code == "F67" else 20,
+                    source_file_hash="a" * 64,
+                    created_by="u1",
+                )
+            )
+    db.commit()
+    return components
+
+
+
 def test_component_matching_is_whole_token(session_factory):
     with session_factory() as db:
         zone = StructureZone(project_id="p1", name="Cầu chính", name_key="cau chinh")
@@ -176,6 +226,83 @@ def test_component_matching_is_whole_token(session_factory):
         )
         assert alias_match == [long_code]
         assert a2 not in _matched_components([a2, a23], {}, "A23")
+
+
+def test_chat_answers_design_thickness_with_source_citation(client, session_factory):
+    with session_factory() as db:
+        _seed_design_parameters(db)
+
+    body = client.post(
+        "/api/v1/projects/p1/ai/chat",
+        json={"message": "Cọc F67 đục dày bao nhiêu?"},
+    ).json()
+    assert body["no_source"] is False
+    assert "t = 3 cm" in body["answer"]
+    citation = body["citations"][0]
+    assert citation["source"] == "database"
+    assert citation["record_id"]
+    assert citation["drawing_number"] == "TK-19"
+    assert citation["page_number"] == 23
+    assert citation["section"] == "dòng 14"
+
+
+def test_chat_says_missing_t_instead_of_guessing(client, session_factory):
+    with session_factory() as db:
+        _seed_design_parameters(db)
+
+    body = client.post(
+        "/api/v1/projects/p1/ai/chat",
+        json={"message": "chiều dày t của H65"},
+    ).json()
+    assert body["no_source"] is False
+    assert "chưa có số liệu t trong bảng thiết kế" in body["answer"]
+    assert any("không suy đoán" in warning for warning in body["warnings"])
+    assert body["citations"]
+
+
+def test_chat_lists_all_design_parameters(client, session_factory):
+    with session_factory() as db:
+        _seed_design_parameters(db)
+
+    body = client.post(
+        "/api/v1/projects/p1/ai/chat",
+        json={"message": "thông số cọc B153"},
+    ).json()
+    assert body["no_source"] is False
+    assert "t = 5 cm" in body["answer"]
+    assert "L2 = 2.5 m" in body["answer"]
+    assert all(citation["drawing_number"] == "TK-19" for citation in body["citations"])
+
+
+def test_chat_finds_components_by_thickness_value_for_segment(client, session_factory):
+    with session_factory() as db:
+        _seed_design_parameters(db)
+
+    body = client.post(
+        "/api/v1/projects/p1/ai/chat",
+        json={"message": "PD2 cọc nào t = 5 cm"},
+    ).json()
+    assert body["no_source"] is False
+    assert "2 cọc" in body["answer"]
+    assert "F68" in body["answer"] and "B153" in body["answer"]
+    assert "F67" not in body["answer"] and "H65" not in body["answer"]
+    assert len(body["citations"]) == 2
+    assert all(citation["page_number"] == 23 for citation in body["citations"])
+
+
+def test_chat_finds_components_by_thickness_range_for_segment(client, session_factory):
+    with session_factory() as db:
+        _seed_design_parameters(db)
+
+    body = client.post(
+        "/api/v1/projects/p1/ai/chat",
+        json={"message": "PD2 cọc nào t từ 3 đến 5 cm"},
+    ).json()
+    assert body["no_source"] is False
+    assert "3 cọc" in body["answer"]
+    assert "F67" in body["answer"]
+    assert "F68" in body["answer"] and "B153" in body["answer"]
+    assert "H65" not in body["answer"]
 
 
 def test_aggregate_answer_does_not_dump_the_whole_project(session_factory):
