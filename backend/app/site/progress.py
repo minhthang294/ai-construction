@@ -28,6 +28,7 @@ from .dependencies import (
 )
 from .models import SitePhoto, SiteProgressBulkBatch
 from app.core.batch_scope import batch_component_ids
+from app.core.design_parameters import display_stage_name, load_t_values
 from app.core.models import ProjectMember
 from .progress_inference import apply_inferred_progress
 from .schemas import LOCAL_TZ
@@ -370,6 +371,7 @@ class ProgressCommitOut(BaseModel):
 
 class DailyProgressLinePreview(ProgressPreviewOut):
     line_index: int
+    stage_display_name: Optional[str] = None
     group_quantity: Optional[float] = None
     group_unit: Optional[str] = None
 
@@ -598,6 +600,7 @@ def _load_rows(
         )
     ).all()
     ids = [component.id for component, _, _, _ in records]
+    t_values = load_t_values(db, ids) if ids else {}
     scopes: dict[str, List[str]] = {}
     if ids:
         for component_id, kind in db.execute(
@@ -636,7 +639,9 @@ def _load_rows(
                     "id": stage.id,
                     "stage_definition_id": definition.id,
                     "code": definition.code,
-                    "name": definition.name,
+                    "name": display_stage_name(
+                        definition.name, [t_values.get(stage.component_id)]
+                    ),
                     "position": definition.position,
                     "repair_scope_id": stage.repair_scope_id,
                     "scope_kind": scope_kinds.get(stage.repair_scope_id),
@@ -949,6 +954,20 @@ def preview_daily(
 ) -> dict[str, Any]:
     lines: List[dict[str, Any]] = []
     warnings: List[str] = []
+    definition_names = {
+        definition.id: definition.name
+        for definition in db.scalars(
+            select(StageDefinition).where(
+                StageDefinition.id.in_(
+                    [line.stage_definition_id for line in payload.lines]
+                )
+            )
+        )
+    }
+    all_component_ids = [
+        component_id for line in payload.lines for component_id in line.component_ids
+    ]
+    t_values = load_t_values(db, all_component_ids)
     for index, line in enumerate(payload.lines):
         preview = preview_bulk(
             db, project_id, _line_preview_payload(line, payload.event_date)
@@ -957,6 +976,10 @@ def preview_daily(
             {
                 **preview,
                 "line_index": index,
+                "stage_display_name": display_stage_name(
+                    definition_names.get(line.stage_definition_id, ""),
+                    [t_values.get(component_id) for component_id in line.component_ids],
+                ),
                 "group_quantity": line.group_quantity,
                 "group_unit": line.group_unit,
             }
@@ -1602,7 +1625,13 @@ def journal_preview(db: Session, project_id: str, journal_date: date) -> dict[st
                 StructuralComponent.canonical_code,
             )
         ).all()
+        journal_t_values = load_t_values(
+            db, [component.id for _, _, _, component, _, _ in records]
+        )
         for event, stage, definition, component, segment, area in records:
+            stage_name = display_stage_name(
+                definition.name, [journal_t_values.get(component.id)]
+            )
             construction_events.append(
                 {
                     "event_id": event.id,
@@ -1612,7 +1641,7 @@ def journal_preview(db: Session, project_id: str, journal_date: date) -> dict[st
                     "segment_number": segment.number,
                     "stage_id": stage.id,
                     "stage_code": definition.code,
-                    "stage_name": definition.name,
+                    "stage_name": stage_name,
                     "status": event.status,
                     "quantity": event.quantity,
                     "unit": event.unit,
@@ -1627,7 +1656,7 @@ def journal_preview(db: Session, project_id: str, journal_date: date) -> dict[st
                     "component_id": component.id,
                     "canonical_code": component.canonical_code,
                     "location": f"{area.name} · PĐ {segment.number}",
-                    "stage": definition.name,
+                    "stage": stage_name,
                     "status": event.status,
                     "quantity": event.quantity,
                     "unit": event.unit,

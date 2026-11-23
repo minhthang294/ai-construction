@@ -20,6 +20,7 @@ from .component_models import (ComponentAlias, ComponentImportBatch, ComponentSt
                                ProgressEvent, RepairScope, Segment, StageDefinition, StructuralComponent, StructureZone)
 from .component_seed import preview_seed
 from .database import get_db
+from .design_parameters import display_stage_name, load_parameters, load_t_values
 from .evidence import validate_evidence_refs
 from .models import AuditLog, now
 
@@ -519,7 +520,19 @@ def list_progress_events(project_id: str, component_id: str, stage_id: str | Non
         if stage_definition_for(db, component.id, stage_id) is None:
             raise HTTPException(404, "Stage not found")
         events = [event for event in events if event.component_stage_id == stage_id]
-    return [event_data(event) for event in events]
+    t_value = load_t_values(db, [component.id]).get(component.id)
+    stage_names = {
+        stage.id: display_stage_name(definition.name, [t_value])
+        for stage, definition in db.execute(
+            select(ComponentStage, StageDefinition)
+            .join(StageDefinition, ComponentStage.stage_definition_id == StageDefinition.id)
+            .where(ComponentStage.component_id == component.id)
+        ).all()
+    }
+    return [
+        {**event_data(event), "stage_name": stage_names.get(event.component_stage_id)}
+        for event in events
+    ]
 
 
 @router.post("/projects/{project_id}/components/{component_id}/progress-events", status_code=201)
@@ -627,10 +640,19 @@ def component_detail(project_id: str, component_id: str, db: Session = Depends(g
             latest[event.component_stage_id] = event
     from app.site.progress_inference import apply_inferred_progress
 
+    parameters = load_parameters(db, [component.id]).get(component.id, [])
+    t_value = next(
+        (float(item["value"]) for item in parameters if item["name"] == "t_cm"),
+        None,
+    )
+    stage_names = {
+        stage.id: display_stage_name(definition.name, [t_value])
+        for stage, definition in stage_rows
+    }
     stages = apply_inferred_progress(component.type, [
         {"id": stage.id, "stage_definition_id": definition.id,
          "repair_scope_id": stage.repair_scope_id, "code": definition.code,
-         "name": definition.name, "position": definition.position,
+         "name": stage_names[stage.id], "position": definition.position,
          "status": latest[stage.id].status if stage.id in latest else "NOT_STARTED",
          "latest_event_at": latest[stage.id].created_at if stage.id in latest else None}
         for stage, definition in stage_rows
@@ -645,9 +667,13 @@ def component_detail(project_id: str, component_id: str, db: Session = Depends(g
                        "row": component.source_row},
             "design_group": {"name": group.name, "drawing": group.drawing, "source": group.source,
                              "source_page": group.source_page} if group else None,
+            "design_parameters": parameters,
             "scopes": [scope_data(scope) for scope in scopes],
             "stages": stages,
-            "progress_events": [event_data(event) for event in events],
+            "progress_events": [
+                {**event_data(event), "stage_name": stage_names.get(event.component_stage_id)}
+                for event in events
+            ],
             "work_links": [{"dm_row": link.dm_row, "seed_sheet": link.seed_sheet, "seed_row": link.seed_row,
                             "source_sha256": link.source_hash, "work": link.work, "raw_location": link.raw_location}
                            for link in links]}

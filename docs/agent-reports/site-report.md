@@ -1158,3 +1158,10 @@ npm run build   # OK; main 294,49 kB; CSS 59,21 kB; ComponentCatalogImport 92,85
 ```
 
 Rủi ro/ghi chú: default batch gọi `/progress` cho từng batch khi chưa có lựa chọn — sóng yếu có thể chậm nếu có nhiều đợt; có thể thay bằng endpoint count nhẹ sau. Tabs Cấu kiện phải vuốt ngang để thấy “Nhật ký/Mặt bằng”. Nhãn bottom nav dùng 12px (ngoại lệ so với secondary 14px) để giữ 5 mục trên 390px.
+
+## Design parameters `t_cm` — 2026-11-23
+
+- Migration `b7c8d9e0f1a2` thêm `component_design_parameters` (unique component+name, provenance, audit).
+- CLI `scripts/import_design_parameters.py` preview/commit; preview trên bản copy thật: 393 dòng, 392 dòng/392 cọc khớp, 390 cọc có `t`, 2.525 tham số, 1 mã không khớp (`Cầu chính / M263`), 0 mơ hồ/0 xung đột; `A162/A163` thiếu t trong nguồn.
+- Tên bước được render `t = X cm`/dải `a–b cm`/`(chưa có số liệu)` trong component detail, history, daily preview, overview latest-day, journal, drawing popup và paste/Zalo summary.
+- Chi tiết + test: `docs/agent-reports/site-design-parameters.md`.

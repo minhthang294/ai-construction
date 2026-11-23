@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from .access import require_project_member
 from .batch_scope import batch_component_ids
+from .design_parameters import display_stage_name, load_t_values
 from .component_models import (ComponentStage, DesignGroup, ProgressEvent, RepairScope,
                                Segment, StageDefinition, StructuralComponent, StructureZone)
 from .database import get_db
@@ -109,10 +110,16 @@ def drawing_map(project_id: str, db: Session = Depends(get_db), batch_id: str | 
         latest_by_stage = {}
         for component_id, stage_id, definition_id, name, status, created_at, event_id in stage_events:
             latest_by_stage[(component_id, stage_id)] = (definition_id, name, status, created_at, event_id)
+        t_values = load_t_values(db, list(unique_components.values()))
         for (component_id, _), (definition_id, name, status, created_at, event_id) in latest_by_stage.items():
             current = current_work.get(component_id)
             if status == "IN_PROGRESS" and (current is None or (created_at, event_id) > (current[0], current[1])):
-                current_work[component_id] = (created_at, event_id, name, definition_id)
+                current_work[component_id] = (
+                    created_at,
+                    event_id,
+                    display_stage_name(name, [t_values.get(component_id)]),
+                    definition_id,
+                )
     review_count = len(manifest.review)
     position_review_count = 0
     sheets = []

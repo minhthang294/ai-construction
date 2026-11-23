@@ -64,6 +64,7 @@ export type PasteManualStages = Record<number, string>;
 
 export type PasteAppliedLine = {
   work_text: string;
+  stage_display_name?: string | null;
   component_type: string;
   stage_definition_id: string;
   status: "COMPLETED" | "IN_PROGRESS";
@@ -330,7 +331,7 @@ export function buildZaloSummary({
   for (const line of lines) {
     const noun = line.component_type === "beam" ? BEAM_NOUN : PILE_NOUN;
     parts.push("");
-    parts.push(`${line.work_text}: ${line.codes.length} ${noun}`);
+    parts.push(`${line.stage_display_name || line.work_text}: ${line.codes.length} ${noun}`);
     if (line.codes.length) parts.push(line.codes.join(", "));
   }
   parts.push("");

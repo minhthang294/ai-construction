@@ -113,6 +113,9 @@ export default function ProgressHistoryPanel({
               <span className="font-semibold text-slate-900">{STATUS_LABELS[event.status] ?? event.status}</span>
               <span className="tabular-nums text-slate-600">{event.event_date}</span>
             </div>
+            {event.stage_name ? (
+              <p className="mt-1 break-words text-slate-700">{event.stage_name}</p>
+            ) : null}
             {event.note ? <p className="mt-1 break-words text-slate-700">{event.note}</p> : null}
             <div className="mt-2 flex flex-wrap gap-2">
               <button type="button" className={SECONDARY} onClick={() => startCorrect(event)}>

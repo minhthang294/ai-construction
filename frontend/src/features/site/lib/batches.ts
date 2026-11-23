@@ -54,6 +54,7 @@ export type ProgressEventRecord = {
   id: string;
   component_id: string;
   stage_id: string;
+  stage_name?: string | null;
   event_date: string;
   status: "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED" | "BLOCKED";
   quantity: number | null;

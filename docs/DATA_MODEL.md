@@ -27,6 +27,7 @@ Các bảng nghiệp vụ dùng khóa UUID và phạm vi `project_id` khi áp d�
 | ConstructionBatch | project_id, name, note nullable, created_by/at, archived; nhóm cấu kiện thi công cùng đợt, **không đổi** khu/phân đoạn thiết kế |
 | ConstructionBatchComponent | batch_id + component_id (khóa chính đôi, unique), added_by/at, reason nullable |
 | ProgressEvent | component_id, component_stage_id, event_date, status, quantity/unit/note/evidence; batch_id nullable (đợt đã ghi), voided_at/by/reason nullable. Sự kiện đã void bị bỏ qua ở mọi truy vấn đọc |
+| ComponentDesignParameter | project_id, component_id, name (`t_cm`, `L1_m`, …), value numeric, unit, source_drawing/page/row, source_file_hash, created_by/at; unique component_id+name. `t_cm` dùng để render tên bước có `t = … cm` |
 | AuditLog | project_id, actor_id, action, entity, entity_id, detail JSON, timestamp |
 
 Lưu file và khóa ngoại riêng; không sao chép nội dung ảnh/PDF vào DB. Chỉ một migration chain ở `backend/alembic` do Codex tích hợp.

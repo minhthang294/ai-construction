@@ -912,6 +912,7 @@ export default function DailyProgressPanel({ projectId, batchId, primaryZone, in
                     line.stage_definition_id,
                   )
                 : "Dòng không còn trong biểu mẫu";
+              const groupLabel = linePreview.stage_display_name || group;
               const groupText =
                 linePreview.group_quantity !== null
                   ? `${linePreview.group_quantity} ${linePreview.group_unit ?? ""}`.trim()
@@ -923,7 +924,7 @@ export default function DailyProgressPanel({ projectId, batchId, primaryZone, in
                 >
                   <div className="flex flex-wrap items-baseline justify-between gap-1">
                     <h5 className="break-words text-sm font-semibold text-slate-900">
-                      Dòng {lineIndex + 1} · {group}
+                      Dòng {lineIndex + 1} · {groupLabel}
                     </h5>
                     <span className="text-xs text-slate-600">
                       {linePreview.ready_count}/{linePreview.count} sẵn sàng

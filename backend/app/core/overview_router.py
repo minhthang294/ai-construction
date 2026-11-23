@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from .access import require_project_member
 from .batch_scope import batch_component_ids
+from .design_parameters import display_stage_name, format_parameter_value, load_t_values
 from .component_models import (
     ComponentStage,
     ProgressEvent,
@@ -227,7 +228,10 @@ def _works_for_day(db: Session, project_id: str, day: date, batch_id: str | None
         _, component, _, _, definition = row
         latest[(component.id, definition.id)] = row
 
-    grouped: dict[tuple, set[str]] = defaultdict(set)
+    t_by_component = load_t_values(
+        db, [component.id for _, component, _, _, _ in latest.values()]
+    )
+    grouped: dict[tuple, dict[str, float | None]] = defaultdict(dict)
     for event, component, segment, zone, definition in latest.values():
         grouped[
             (
@@ -237,20 +241,40 @@ def _works_for_day(db: Session, project_id: str, day: date, batch_id: str | None
                 component.type,
                 event.status,
             )
-        ].add(component.canonical_code)
+        ][component.canonical_code] = t_by_component.get(component.id)
 
-    works = [
-        {
-            "stage_name": stage_name,
-            "zone": zone,
-            "segment": segment,
-            "component_type": component_type,
-            "status": status,
-            "count": len(codes),
-            "codes": sorted(codes),
-        }
-        for (stage_name, zone, segment, component_type, status), codes in grouped.items()
-    ]
+    works = []
+    for (raw_stage_name, zone, segment, component_type, status), code_values in grouped.items():
+        ordered_codes = sorted(code_values)
+        numeric_values = sorted(
+            {round(value, 4) for value in code_values.values() if value is not None}
+        )
+        has_missing = any(value is None for value in code_values.values())
+        stage_name = display_stage_name(
+            raw_stage_name, [code_values[code] for code in ordered_codes]
+        )
+        mixed = len(numeric_values) > 1 or (has_missing and bool(numeric_values))
+        codes = [
+            (
+                f"{code} (t = {format_parameter_value(code_values[code])} cm)"
+                if code_values[code] is not None
+                else f"{code} (chưa có số liệu)"
+            )
+            if mixed
+            else code
+            for code in ordered_codes
+        ]
+        works.append(
+            {
+                "stage_name": stage_name,
+                "zone": zone,
+                "segment": segment,
+                "component_type": component_type,
+                "status": status,
+                "count": len(codes),
+                "codes": codes,
+            }
+        )
     works.sort(key=lambda item: (
         item["zone"], item["segment"], item["stage_name"], item["status"]
     ))

@@ -61,6 +61,7 @@ export type DailyProgressPayload = {
 
 export type DailyProgressLinePreview = ProgressPreview & {
   line_index: number;
+  stage_display_name?: string | null;
   group_quantity: number | null;
   group_unit: string | null;
 };

@@ -262,6 +262,13 @@ export default function ProgressPastePanel({ projectId, onOpenAcceptance }: Prop
     setError(null);
     try {
       const data = await previewDailyProgress(projectId, result.payload);
+      setApplied({
+        ...result,
+        savedLines: result.savedLines.map((line, index) => ({
+          ...line,
+          stage_display_name: data.lines[index]?.stage_display_name ?? null,
+        })),
+      });
       setPreview(data);
       setIdempotencyKey(pasteIdempotencyKey(text, eventDate));
       setConfirmed(false);
@@ -662,6 +669,11 @@ export default function ProgressPastePanel({ projectId, onOpenAcceptance }: Prop
                     {line.ready_count}/{line.count} sẵn sàng
                   </span>
                 </div>
+                {line.stage_display_name ? (
+                  <p className="mt-1 break-words text-xs font-medium text-slate-800">
+                    {line.stage_display_name}
+                  </p>
+                ) : null}
                 <p className="mt-1 break-words font-mono text-xs text-slate-700">
                   {line.components.map((component) => component.canonical_code).join(", ")}
                 </p>

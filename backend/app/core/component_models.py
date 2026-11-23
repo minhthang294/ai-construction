@@ -153,6 +153,27 @@ class ProgressEvent(Base):
     void_reason: Mapped[str | None] = mapped_column(Text)
 
 
+class ComponentDesignParameter(Base):
+    """Reviewed design value for one component (for example pile thickness t)."""
+
+    __tablename__ = "component_design_parameters"
+    __table_args__ = (UniqueConstraint("component_id", "name"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
+    component_id: Mapped[str] = mapped_column(
+        ForeignKey("structural_components.id"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(40), nullable=False)
+    value: Mapped[float] = mapped_column(Float, nullable=False)
+    unit: Mapped[str | None] = mapped_column(String(20))
+    source_drawing: Mapped[str | None] = mapped_column(String(120))
+    source_page: Mapped[int | None] = mapped_column(Integer)
+    source_row: Mapped[int | None] = mapped_column(Integer)
+    source_file_hash: Mapped[str | None] = mapped_column(String(64))
+    created_by: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+
+
 class ConstructionBatch(Base):
     """A named group of components executed together on site.
 
