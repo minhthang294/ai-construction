@@ -38,7 +38,7 @@ import {
   type ManualComponentDraft,
 } from "../lib/componentImport";
 
-type Props = { projectId: string };
+type Props = { projectId: string; onOpenPaste?: () => void };
 
 const PAGE_SIZE = 100;
 const COMPONENT_VIEWS = [
@@ -129,7 +129,7 @@ function CandidateCard({ component }: { component: ComponentCandidate }) {
   );
 }
 
-export default function ComponentCatalogImport({ projectId }: Props) {
+export default function ComponentCatalogImport({ projectId, onOpenPaste }: Props) {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<ComponentPreview | null>(null);
   const [idempotencyKey, setIdempotencyKey] = useState<string | null>(null);
@@ -412,6 +412,7 @@ export default function ComponentCatalogImport({ projectId }: Props) {
           initialComponentId={progressRequest?.componentId}
           initialStageDefinitionId={progressRequest?.stageDefinitionId}
           onInitialComponentHandled={clearProgressRequest}
+          onOpenPaste={onOpenPaste}
         />
       ) : view === "progress" ? (
         <ComponentProgressPanel

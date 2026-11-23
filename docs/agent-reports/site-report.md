@@ -1054,3 +1054,41 @@ npm run build   # OK; main index 292,52 kB, ComponentCatalogImport 130,87 kB, kh
 ```
 
 Test mới: `backend/tests/test_construction_batches.py` (scope, preview mơ hồ/không tự chọn, audit, filter components/summary/segments/latest-day/drawing-map), `backend/tests/test_progress_void.py` (quyền creator/PM, cùng ngày, void ẩn khỏi summary/overview/journal, correct void+tạo mới, audit, validation). Chưa có E2E trình duyệt cho batch manager/history.
+
+## Wave 3b — “Dán tin nhắn” — 2026-11-23
+
+### Luồng
+
+- Trang mới `progress-paste` (không thêm vào nav 5 mục), lazy-load:
+  - Quick action Tổng quan **“Ghi tiến độ từ tin nhắn”**.
+  - Nút **“Dán tin nhắn Zalo để ghi tiến độ”** trong Hiện trường và đầu khối Tiến độ trong ngày (Cấu kiện → Ghi theo ngày).
+- Chọn **Đợt thi công** ngay trên trang (dùng `useConstructionBatch`, nhớ theo project); đổi đợt sẽ reset kết quả đọc.
+- Textarea lớn + “Dán từ clipboard” (`navigator.clipboard.readText`, fallback hướng dẫn dán tay), ngày mặc định, gọi `POST /projects/{p}/ai/progress-parse` với `{text, default_date, batch_id}`.
+- Hiển thị ngày editable, từng dòng công tác, chip mã **gom theo chữ cái đầu**; mã không khớp (`component_id=null`) màu đỏ. Có `<details>` “Xem trên mặt bằng” dùng `DrawingMapPanel` với `selection` tô sáng các mã đã đọc; danh sách chip luôn là fallback.
+- Câu hỏi một card/ câu, chọn bằng nút (`aria-pressed`); nút “Xem lại trước khi ghi” chỉ bật khi trả lời đủ. Áp dụng local:
+  - dedupe mã trùng;
+  - skip mã không có/ngoài phạm vi;
+  - chọn stage theo option câu hỏi hoặc select công đoạn từng dòng;
+  - “Thi công cùng đợt” → gom `component_ids`, gọi preview batch rồi `POST .../construction-batches/{id}/components`;
+  - “Ngày trước là đang làm” → sau khi ghi gọi `POST /progress/events/{id}/correct` cho các `event_ids` trong `apply` với lý do `Theo tin nhắn ngày DD/MM/YYYY: hôm trước đang làm`.
+- Preview dùng đúng `daily-preview`; màn xem lại hiển thị số sẵn sàng, cảnh báo, checkbox xác nhận; commit `progress/daily` với key `paste-<date>-<fnv1a>` từ text+ngày. Nếu preview `can_commit=false` thì không cho ghi.
+- Sau khi ghi: thẻ kết quả (số sự kiện/sửa/thêm đợt), Zalo summary (ngày, tổng theo loại, mã theo dòng như input, “Chưa nghiệm thu: N cấu kiện đã xong”) + nút Sao chép; danh sách “Đã thi công xong, chưa nghiệm thu” của đợt (lọc `construction_status=COMPLETED` và acceptance khác CONFIRMED/APPROVED) + nút Mở Nghiệm thu.
+- Offline: lỗi mạng khi parse/preview/commit lưu text+ngày+đợt vào IndexedDB qua `saveDraft` key `paste:<projectId>`; thông báo “chưa ghi tiến độ, không xếp hàng tự động”. Mở lại trang khôi phục bản nháp; lưu thành công thì xoá draft.
+
+### Helper thuần + test
+
+- `frontend/src/features/site/lib/progressPaste.ts`: `applyPasteAnswers`, `pasteIdempotencyKey`, `buildZaloSummary`, `groupCodesByPrefix`, types bám response parse (kể cả optional `stage_definition_id`, `stage_candidates`, `earlier_events`, `in_batch`, `apply`/`codes`).
+- `progressPaste.test.ts` (7 test): golden message 22/11 (26 cọc + 3 dầm) → 8 payload lines, dedupe G65, 3 mã Bunke vào batch, correction cho các sự kiện trước của F-66-67; chặn khi thiếu câu trả lời; skip/replace unknown; manual stage; status confirm; idempotency key; Zalo summary.
+
+### Kiểm tra
+
+```bash
+cd frontend
+npm test        # 33 files, 207 tests passed
+npm run build   # OK; main index 293,67 kB; ProgressPastePanel 20,21 kB; dailyProgress 38,98 kB; không cảnh báo >500 kB
+cd ../backend
+DATABASE_URL="sqlite:///$TEMP/wave3b-parse.db" ../.venv/Scripts/python -m pytest tests/engineering_ai/test_progress_parse.py -q
+# 8 passed (chỉ đọc; không sửa engineering_ai)
+```
+
+Lưu ý: parser do agent engineering-ai sở hữu có thể còn chỉnh `apply` hints; UI đọc `apply.event_ids/component_ids/action` và fallback theo `id` câu hỏi. Nếu stage thực tế vẫn mơ hồ ở cấp `component_stage`, daily-preview sẽ chặn commit và người dùng quay lại chọn tay ở luồng hiện có. Chưa có E2E trình duyệt cho luồng dán tin nhắn.

@@ -79,6 +79,894 @@ Mỗi giá trị trả về từ `progress/design-quantities` gồm `quantity` (
 | `POST /projects/{p}/acceptance-records/{id}/exports` | Excel sao chép template PYC/BBNT; PDF PYC chỉ giữ trang PYC, PDF BBNT chỉ giữ trang BBNT; tên tải PYC dạng `YC-<số phiếu>.pdf` |
 | `GET/POST /projects/{p}/acceptance-participants` | Danh mục người tham gia theo vai trò; `PUT/DELETE .../{id}` |
 
+### `POST /projects/{p}/ai/progress-parse` — ví dụ đầy đủ (tin nhắn 22/11)
+
+Request: `{"text":"Cọc đục ngày 22/11\nI49, 51,55,57,58,60,63,64,67,\nH65,62,53,50\nG50,65,65\nF54,55,57,64,67,69\nA155\nB153,155\nE153,155\nDầm f66-67, a-b153,b-d153","default_date":"2026-01-01","batch_id":null}`
+
+Response (read-only; IDs lấy từ dữ liệu seed của test golden):
+
+```json
+{
+  "event_date": "2026-11-22",
+  "date_source": "text",
+  "batch_id": null,
+  "lines": [
+    {
+      "work_text": "Cọc đục",
+      "stage_candidates": [
+        {
+          "stage_definition_id": "9d7a73c3-a00d-4d70-ba69-987f20c96a34",
+          "name": "Đục bê tông om vỡ dày trung bình t",
+          "component_type": "pile"
+        },
+        {
+          "stage_definition_id": "bc0eee6e-a6dd-418b-9d7e-adb00d399fa0",
+          "name": "Đục bê tông om vỡ dày trung bình t",
+          "component_type": "pile"
+        },
+        {
+          "stage_definition_id": "61fed7f5-1708-4edd-a81d-59cd8d7263bb",
+          "name": "Đục bê tông om vỡ dày trung bình t",
+          "component_type": "pile"
+        },
+        {
+          "stage_definition_id": "6d165f57-e56d-46d3-9140-e9b719e4cb02",
+          "name": "Đục bê tông om vỡ dày trung bình t",
+          "component_type": "pile"
+        },
+        {
+          "stage_definition_id": "842cc86b-4e83-48ba-a1aa-57fdb77dfe5e",
+          "name": "Đục bê tông om vỡ dày trung bình t",
+          "component_type": "pile"
+        },
+        {
+          "stage_definition_id": "3452b927-fc34-44e7-b6ef-8f15a354a91b",
+          "name": "Đục bê tông om vỡ dày trung bình t",
+          "component_type": "pile"
+        },
+        {
+          "stage_definition_id": "69cd90e8-881b-4721-97c7-0ad855b8b120",
+          "name": "Đục bê tông om vỡ dày trung bình t",
+          "component_type": "pile"
+        },
+        {
+          "stage_definition_id": "bab662d5-166b-4b40-b8cd-d23159364210",
+          "name": "Đục bê tông om vỡ dày trung bình t",
+          "component_type": "pile"
+        },
+        {
+          "stage_definition_id": "9aa7938f-fd3a-471a-a264-863ded8c748f",
+          "name": "Đục bê tông om vỡ dày trung bình t",
+          "component_type": "pile"
+        }
+      ],
+      "component_type": "pile",
+      "items": [
+        {
+          "raw": "I49",
+          "code": "I49",
+          "component_id": "e7115246-a45c-423b-8e1f-85284371947b",
+          "zone": "Cầu chính",
+          "segment": 2,
+          "status_guess": "COMPLETED",
+          "stage_definition_id": "9d7a73c3-a00d-4d70-ba69-987f20c96a34",
+          "stage_candidates": [],
+          "earlier_events": [],
+          "in_batch": false
+        },
+        {
+          "raw": "51",
+          "code": "I51",
+          "component_id": "4b44a083-644c-4f07-b8e4-1a8eacbb3aea",
+          "zone": "Cầu chính",
+          "segment": 2,
+          "status_guess": "COMPLETED",
+          "stage_definition_id": "bc0eee6e-a6dd-418b-9d7e-adb00d399fa0",
+          "stage_candidates": [],
+          "earlier_events": [],
+          "in_batch": false
+        },
+        {
+          "raw": "55",
+          "code": "I55",
+          "component_id": "c3e55b75-7ebc-4bb0-93b6-221e5e61530a",
+          "zone": "Cầu chính",
+          "segment": 2,
+          "status_guess": "COMPLETED",
+          "stage_definition_id": "61fed7f5-1708-4edd-a81d-59cd8d7263bb",
+          "stage_candidates": [],
+          "earlier_events": [],
+          "in_batch": false
+        },
+        {
+          "raw": "57",
+          "code": "I57",
+          "component_id": "27d5ef58-ebe1-4417-b7d6-de1ff4568221",
+          "zone": "Cầu chính",
+          "segment": 2,
+          "status_guess": "COMPLETED",
+          "stage_definition_id": "6d165f57-e56d-46d3-9140-e9b719e4cb02",
+          "stage_candidates": [],
+          "earlier_events": [],
+          "in_batch": false
+        },
+        {
+          "raw": "58",
+          "code": "I58",
+          "component_id": "c88955e8-ccce-45e8-b378-2cf754db9d54",
+          "zone": "Cầu chính",
+          "segment": 2,
+          "status_guess": "COMPLETED",
+          "stage_definition_id": "842cc86b-4e83-48ba-a1aa-57fdb77dfe5e",
+          "stage_candidates": [],
+          "earlier_events": [],
+          "in_batch": false
+        },
+        {
+          "raw": "60",
+          "code": "I60",
+          "component_id": "27b71590-97db-454b-b8ae-a0423f46e55f",
+          "zone": "Cầu chính",
+          "segment": 2,
+          "status_guess": "COMPLETED",
+          "stage_definition_id": "3452b927-fc34-44e7-b6ef-8f15a354a91b",
+          "stage_candidates": [],
+          "earlier_events": [],
+          "in_batch": false
+        },
+        {
+          "raw": "63",
+          "code": "I63",
+          "component_id": "fb8f055f-cd52-4a9f-a7cd-16040b0c2b42",
+          "zone": "Cầu chính",
+          "segment": 2,
+          "status_guess": "COMPLETED",
+          "stage_definition_id": "69cd90e8-881b-4721-97c7-0ad855b8b120",
+          "stage_candidates": [],
+          "earlier_events": [],
+          "in_batch": false
+        },
+        {
+          "raw": "64",
+          "code": "I64",
+          "component_id": "65837b47-8b5b-4ac1-a3bc-ed06bbf92005",
+          "zone": "Cầu chính",
+          "segment": 2,
+          "status_guess": "COMPLETED",
+          "stage_definition_id": "bab662d5-166b-4b40-b8cd-d23159364210",
+          "stage_candidates": [],
+          "earlier_events": [],
+          "in_batch": false
+        },
+        {
+          "raw": "67",
+          "code": "I67",
+          "component_id": "eea77142-0f35-4d23-a218-fbe2a520cf27",
+          "zone": "Cầu chính",
+          "segment": 2,
+          "status_guess": "COMPLETED",
+          "stage_definition_id": "9aa7938f-fd3a-471a-a264-863ded8c748f",
+          "stage_candidates": [],
+          "earlier_events": [],
+          "in_batch": false
+        }
+      ]
+    },
+    {
+      "work_text": "Cọc đục",
+      "stage_candidates": [
+        {
+          "stage_definition_id": "a2c829d1-bc2b-494b-a03f-aaa398b80f6a",
+          "name": "Đục bê tông om vỡ dày trung bình t",
+          "component_type": "pile"
+        },
+        {
+          "stage_definition_id": "ed90c003-f28b-4043-a0f0-517ce329d0fa",
+          "name": "Đục bê tông om vỡ dày trung bình t",
+          "component_type": "pile"
+        },
+        {
+          "stage_definition_id": "f39bc757-a13f-41cf-b118-7b450ff5f35c",
+          "name": "Đục bê tông om vỡ dày trung bình t",
+          "component_type": "pile"
+        },
+        {
+          "stage_definition_id": "96d1c213-294b-4d3b-a724-99198c4c4eec",
+          "name": "Đục bê tông om vỡ dày trung bình t",
+          "component_type": "pile"
+        }
+      ],
+      "component_type": "pile",
+      "items": [
+        {
+          "raw": "H65",
+          "code": "H65",
+          "component_id": "54947e31-c1fd-4297-9775-4ed64ad3375c",
+          "zone": "Cầu chính",
+          "segment": 2,
+          "status_guess": "COMPLETED",
+          "stage_definition_id": "a2c829d1-bc2b-494b-a03f-aaa398b80f6a",
+          "stage_candidates": [],
+          "earlier_events": [],
+          "in_batch": false
+        },
+        {
+          "raw": "62",
+          "code": "H62",
+          "component_id": "31653b0d-6c9e-42f2-a2ef-626a51cbb6fb",
+          "zone": "Cầu chính",
+          "segment": 2,
+          "status_guess": "COMPLETED",
+          "stage_definition_id": "ed90c003-f28b-4043-a0f0-517ce329d0fa",
+          "stage_candidates": [],
+          "earlier_events": [],
+          "in_batch": false
+        },
+        {
+          "raw": "53",
+          "code": "H53",
+          "component_id": "734a712e-cc1b-48bf-a6fc-2181763db4cc",
+          "zone": "Cầu chính",
+          "segment": 2,
+          "status_guess": "COMPLETED",
+          "stage_definition_id": "f39bc757-a13f-41cf-b118-7b450ff5f35c",
+          "stage_candidates": [],
+          "earlier_events": [],
+          "in_batch": false
+        },
+        {
+          "raw": "50",
+          "code": "H50",
+          "component_id": "be851920-46a4-477a-b4ea-7a1d957046ca",
+          "zone": "Cầu chính",
+          "segment": 2,
+          "status_guess": "COMPLETED",
+          "stage_definition_id": "96d1c213-294b-4d3b-a724-99198c4c4eec",
+          "stage_candidates": [],
+          "earlier_events": [],
+          "in_batch": false
+        }
+      ]
+    },
+    {
+      "work_text": "Cọc đục",
+      "stage_candidates": [
+        {
+          "stage_definition_id": "5cf6fba0-c7eb-4e79-a65a-bfc10e2d5e60",
+          "name": "Đục bê tông om vỡ dày trung bình t",
+          "component_type": "pile"
+        },
+        {
+          "stage_definition_id": "65eb7add-9c36-4dd7-9da1-15831a91135a",
+          "name": "Đục bê tông om vỡ dày trung bình t",
+          "component_type": "pile"
+        }
+      ],
+      "component_type": "pile",
+      "items": [
+        {
+          "raw": "G50",
+          "code": "G50",
+          "component_id": "a18b8e53-7096-4a9f-aadb-0a38fa00b127",
+          "zone": "Cầu chính",
+          "segment": 2,
+          "status_guess": "COMPLETED",
+          "stage_definition_id": "5cf6fba0-c7eb-4e79-a65a-bfc10e2d5e60",
+          "stage_candidates": [],
+          "earlier_events": [],
+          "in_batch": false
+        },
+        {
+          "raw": "65",
+          "code": "G65",
+          "component_id": "7d70666e-0e34-4a5c-a1a3-59aacc63eabe",
+          "zone": "Cầu chính",
+          "segment": 2,
+          "status_guess": "COMPLETED",
+          "stage_definition_id": "65eb7add-9c36-4dd7-9da1-15831a91135a",
+          "stage_candidates": [],
+          "earlier_events": [],
+          "in_batch": false
+        },
+        {
+          "raw": "65",
+          "code": "G65",
+          "component_id": "7d70666e-0e34-4a5c-a1a3-59aacc63eabe",
+          "zone": "Cầu chính",
+          "segment": 2,
+          "status_guess": "COMPLETED",
+          "stage_definition_id": "65eb7add-9c36-4dd7-9da1-15831a91135a",
+          "stage_candidates": [],
+          "earlier_events": [],
+          "in_batch": false
+        }
+      ]
+    },
+    {
+      "work_text": "Cọc đục",
+      "stage_candidates": [
+        {
+          "stage_definition_id": "954d4d59-4924-40e8-b0c6-ddfd381b5d11",
+          "name": "Đục bê tông om vỡ dày trung bình t",
+          "component_type": "pile"
+        },
+        {
+          "stage_definition_id": "a89a7319-07b1-4c07-8415-4f1c69552466",
+          "name": "Đục bê tông om vỡ dày trung bình t",
+          "component_type": "pile"
+        },
+        {
+          "stage_definition_id": "d35f5f57-7993-4624-a6f3-d6b86770680f",
+          "name": "Đục bê tông om vỡ dày trung bình t",
+          "component_type": "pile"
+        },
+        {
+          "stage_definition_id": "a31d4945-02e1-4dcc-9d37-2c1c840acb24",
+          "name": "Đục bê tông om vỡ dày trung bình t",
+          "component_type": "pile"
+        },
+        {
+          "stage_definition_id": "f51e60d8-a6b2-4bd9-ac32-ad1dc057cb13",
+          "name": "Đục bê tông om vỡ dày trung bình t",
+          "component_type": "pile"
+        },
+        {
+          "stage_definition_id": "e0919ca1-0f62-4c78-a8ea-b78463cb2760",
+          "name": "Đục bê tông om vỡ dày trung bình t",
+          "component_type": "pile"
+        }
+      ],
+      "component_type": "pile",
+      "items": [
+        {
+          "raw": "F54",
+          "code": "F54",
+          "component_id": "fdc86775-410c-4b80-96e4-9042a4f58efc",
+          "zone": "Cầu chính",
+          "segment": 2,
+          "status_guess": "COMPLETED",
+          "stage_definition_id": "954d4d59-4924-40e8-b0c6-ddfd381b5d11",
+          "stage_candidates": [],
+          "earlier_events": [],
+          "in_batch": false
+        },
+        {
+          "raw": "55",
+          "code": "F55",
+          "component_id": "2cae26f4-0cab-4269-9652-207b20bb6215",
+          "zone": "Cầu chính",
+          "segment": 2,
+          "status_guess": "COMPLETED",
+          "stage_definition_id": "a89a7319-07b1-4c07-8415-4f1c69552466",
+          "stage_candidates": [],
+          "earlier_events": [],
+          "in_batch": false
+        },
+        {
+          "raw": "57",
+          "code": "F57",
+          "component_id": "c8a0a3a2-1fec-4067-9012-31bf337b2def",
+          "zone": "Cầu chính",
+          "segment": 2,
+          "status_guess": "COMPLETED",
+          "stage_definition_id": "d35f5f57-7993-4624-a6f3-d6b86770680f",
+          "stage_candidates": [],
+          "earlier_events": [],
+          "in_batch": false
+        },
+        {
+          "raw": "64",
+          "code": "F64",
+          "component_id": "ee4a5a82-1298-474b-87c6-46d40d605d75",
+          "zone": "Cầu chính",
+          "segment": 2,
+          "status_guess": "COMPLETED",
+          "stage_definition_id": "a31d4945-02e1-4dcc-9d37-2c1c840acb24",
+          "stage_candidates": [],
+          "earlier_events": [],
+          "in_batch": false
+        },
+        {
+          "raw": "67",
+          "code": "F67",
+          "component_id": "37437686-09fb-476e-a987-5023e2ffe938",
+          "zone": "Cầu chính",
+          "segment": 2,
+          "status_guess": "COMPLETED",
+          "stage_definition_id": "f51e60d8-a6b2-4bd9-ac32-ad1dc057cb13",
+          "stage_candidates": [],
+          "earlier_events": [],
+          "in_batch": false
+        },
+        {
+          "raw": "69",
+          "code": "F69",
+          "component_id": "4e3a951f-9ff1-40b4-8cca-e50c4468851b",
+          "zone": "Cầu chính",
+          "segment": 2,
+          "status_guess": "COMPLETED",
+          "stage_definition_id": "e0919ca1-0f62-4c78-a8ea-b78463cb2760",
+          "stage_candidates": [],
+          "earlier_events": [],
+          "in_batch": false
+        }
+      ]
+    },
+    {
+      "work_text": "Cọc đục",
+      "stage_candidates": [
+        {
+          "stage_definition_id": "a52e41bb-876e-4d86-bbab-a8d51e805b12",
+          "name": "Đục bê tông om vỡ dày trung bình t",
+          "component_type": "pile"
+        }
+      ],
+      "component_type": "pile",
+      "items": [
+        {
+          "raw": "A155",
+          "code": "A155",
+          "component_id": "2b638d26-28a9-4ca7-9461-c9cb7931ad57",
+          "zone": "Cầu chính",
+          "segment": 2,
+          "status_guess": "COMPLETED",
+          "stage_definition_id": "a52e41bb-876e-4d86-bbab-a8d51e805b12",
+          "stage_candidates": [],
+          "earlier_events": [],
+          "in_batch": false
+        }
+      ]
+    },
+    {
+      "work_text": "Cọc đục",
+      "stage_candidates": [
+        {
+          "stage_definition_id": "fa6ecfd1-4e7d-4279-af37-819ab3a04e28",
+          "name": "Đục bê tông om vỡ dày trung bình t",
+          "component_type": "pile"
+        },
+        {
+          "stage_definition_id": "06e437fb-fdc6-44df-8b24-5cf49d636e98",
+          "name": "Đục bê tông om vỡ dày trung bình t",
+          "component_type": "pile"
+        }
+      ],
+      "component_type": "pile",
+      "items": [
+        {
+          "raw": "B153",
+          "code": "B153",
+          "component_id": "48be166c-d92e-4fcf-bfa7-33f18b44b7aa",
+          "zone": "Cầu chính",
+          "segment": 2,
+          "status_guess": "COMPLETED",
+          "stage_definition_id": "fa6ecfd1-4e7d-4279-af37-819ab3a04e28",
+          "stage_candidates": [],
+          "earlier_events": [],
+          "in_batch": false
+        },
+        {
+          "raw": "155",
+          "code": "B155",
+          "component_id": "5aa9575d-2657-42e4-82d7-fddd497fd3f2",
+          "zone": "Cầu chính",
+          "segment": 2,
+          "status_guess": "COMPLETED",
+          "stage_definition_id": "06e437fb-fdc6-44df-8b24-5cf49d636e98",
+          "stage_candidates": [],
+          "earlier_events": [],
+          "in_batch": false
+        }
+      ]
+    },
+    {
+      "work_text": "Cọc đục",
+      "stage_candidates": [
+        {
+          "stage_definition_id": "3ee8f6eb-549b-4fe9-ab5f-232f2db13319",
+          "name": "Đục bê tông om vỡ dày trung bình t",
+          "component_type": "pile"
+        },
+        {
+          "stage_definition_id": "6c777d9b-7719-4074-9b89-1a17091a42a1",
+          "name": "Đục bê tông om vỡ dày trung bình t",
+          "component_type": "pile"
+        }
+      ],
+      "component_type": "pile",
+      "items": [
+        {
+          "raw": "E153",
+          "code": "E153",
+          "component_id": "131443bc-4e0b-4b7c-8f9c-cab9a7dc362e",
+          "zone": "Cầu chính",
+          "segment": 2,
+          "status_guess": "COMPLETED",
+          "stage_definition_id": "3ee8f6eb-549b-4fe9-ab5f-232f2db13319",
+          "stage_candidates": [],
+          "earlier_events": [],
+          "in_batch": false
+        },
+        {
+          "raw": "155",
+          "code": "E155",
+          "component_id": "37af3a19-1381-44aa-8c94-a662d6fb5951",
+          "zone": "Cầu chính",
+          "segment": 2,
+          "status_guess": "COMPLETED",
+          "stage_definition_id": "6c777d9b-7719-4074-9b89-1a17091a42a1",
+          "stage_candidates": [],
+          "earlier_events": [],
+          "in_batch": false
+        }
+      ]
+    },
+    {
+      "work_text": "Dầm đục",
+      "stage_candidates": [
+        {
+          "stage_definition_id": "f5592f84-81a6-4825-8739-4a1ae14685b7",
+          "name": "Đục bê tông om vỡ dày trung bình 50 mm",
+          "component_type": "beam"
+        },
+        {
+          "stage_definition_id": "43aaa3c2-5271-4e26-9c01-7ce0ac97a018",
+          "name": "Đục bê tông om vỡ dày trung bình 20 mm",
+          "component_type": "beam"
+        },
+        {
+          "stage_definition_id": "326c33fe-6c06-4104-a16b-88a4255934d3",
+          "name": "Đục bê tông om vỡ dày trung bình 70 mm",
+          "component_type": "beam"
+        },
+        {
+          "stage_definition_id": "805c7752-3327-4a3c-af94-5af68153c2bd",
+          "name": "Đục bê tông om vỡ dày trung bình 100 mm",
+          "component_type": "beam"
+        },
+        {
+          "stage_definition_id": "571ce5a7-4fc4-4f0b-a142-af462fdf0375",
+          "name": "Đục bê tông om vỡ dày trung bình 70 mm",
+          "component_type": "beam"
+        },
+        {
+          "stage_definition_id": "83eec469-5b1e-41e0-94d9-59a293dc57a8",
+          "name": "Đục bê tông om vỡ dày trung bình 20 mm",
+          "component_type": "beam"
+        },
+        {
+          "stage_definition_id": "442d3c81-2275-425f-81cb-8a345d587b02",
+          "name": "Đục bê tông om vỡ dày trung bình 50 mm",
+          "component_type": "beam"
+        },
+        {
+          "stage_definition_id": "7b2187ad-276c-4315-b005-9f1e8d92ab52",
+          "name": "Đục bê tông om vỡ dày trung bình 100 mm",
+          "component_type": "beam"
+        },
+        {
+          "stage_definition_id": "f5fc04e3-3244-4433-ad53-c51f098e6e02",
+          "name": "Đục bê tông om vỡ dày trung bình 70 mm",
+          "component_type": "beam"
+        },
+        {
+          "stage_definition_id": "dffcfef2-cfe1-4b70-8001-3ec2052751e0",
+          "name": "Đục bê tông om vỡ dày trung bình 20 mm",
+          "component_type": "beam"
+        },
+        {
+          "stage_definition_id": "b31b101f-f292-4bac-8201-460ffdc57189",
+          "name": "Đục bê tông om vỡ dày trung bình 50 mm",
+          "component_type": "beam"
+        },
+        {
+          "stage_definition_id": "07504a99-60b4-45bc-b0fb-da001556202e",
+          "name": "Đục bê tông om vỡ dày trung bình 100 mm",
+          "component_type": "beam"
+        }
+      ],
+      "component_type": "beam",
+      "items": [
+        {
+          "raw": "f66-67",
+          "code": "F-66-67",
+          "component_id": "e02a20ab-3ba3-49ff-b7ec-da4ee5a50539",
+          "zone": "Bunke",
+          "segment": 1,
+          "status_guess": "COMPLETED",
+          "stage_definition_id": "f5592f84-81a6-4825-8739-4a1ae14685b7",
+          "stage_candidates": [
+            {
+              "stage_definition_id": "f5592f84-81a6-4825-8739-4a1ae14685b7",
+              "name": "Đục bê tông om vỡ dày trung bình 50 mm",
+              "component_type": "beam"
+            },
+            {
+              "stage_definition_id": "43aaa3c2-5271-4e26-9c01-7ce0ac97a018",
+              "name": "Đục bê tông om vỡ dày trung bình 20 mm",
+              "component_type": "beam"
+            },
+            {
+              "stage_definition_id": "326c33fe-6c06-4104-a16b-88a4255934d3",
+              "name": "Đục bê tông om vỡ dày trung bình 70 mm",
+              "component_type": "beam"
+            },
+            {
+              "stage_definition_id": "805c7752-3327-4a3c-af94-5af68153c2bd",
+              "name": "Đục bê tông om vỡ dày trung bình 100 mm",
+              "component_type": "beam"
+            }
+          ],
+          "earlier_events": [
+            {
+              "event_id": "2bcf8c67-74a7-414d-a7e5-01c10490d2e0",
+              "event_date": "2026-11-20",
+              "status": "COMPLETED"
+            }
+          ],
+          "in_batch": false
+        },
+        {
+          "raw": "a-b153",
+          "code": "A-B-153",
+          "component_id": "5baba0fc-1627-4025-9e82-5f87c2fbad29",
+          "zone": "Bunke",
+          "segment": 1,
+          "status_guess": "COMPLETED",
+          "stage_definition_id": "571ce5a7-4fc4-4f0b-a142-af462fdf0375",
+          "stage_candidates": [
+            {
+              "stage_definition_id": "571ce5a7-4fc4-4f0b-a142-af462fdf0375",
+              "name": "Đục bê tông om vỡ dày trung bình 70 mm",
+              "component_type": "beam"
+            },
+            {
+              "stage_definition_id": "83eec469-5b1e-41e0-94d9-59a293dc57a8",
+              "name": "Đục bê tông om vỡ dày trung bình 20 mm",
+              "component_type": "beam"
+            },
+            {
+              "stage_definition_id": "442d3c81-2275-425f-81cb-8a345d587b02",
+              "name": "Đục bê tông om vỡ dày trung bình 50 mm",
+              "component_type": "beam"
+            },
+            {
+              "stage_definition_id": "7b2187ad-276c-4315-b005-9f1e8d92ab52",
+              "name": "Đục bê tông om vỡ dày trung bình 100 mm",
+              "component_type": "beam"
+            }
+          ],
+          "earlier_events": [],
+          "in_batch": false
+        },
+        {
+          "raw": "b-d153",
+          "code": "B-D-153",
+          "component_id": "f0dfb613-881e-4cec-b8a4-e87671517e2f",
+          "zone": "Bunke",
+          "segment": 1,
+          "status_guess": "COMPLETED",
+          "stage_definition_id": "f5fc04e3-3244-4433-ad53-c51f098e6e02",
+          "stage_candidates": [
+            {
+              "stage_definition_id": "f5fc04e3-3244-4433-ad53-c51f098e6e02",
+              "name": "Đục bê tông om vỡ dày trung bình 70 mm",
+              "component_type": "beam"
+            },
+            {
+              "stage_definition_id": "dffcfef2-cfe1-4b70-8001-3ec2052751e0",
+              "name": "Đục bê tông om vỡ dày trung bình 20 mm",
+              "component_type": "beam"
+            },
+            {
+              "stage_definition_id": "b31b101f-f292-4bac-8201-460ffdc57189",
+              "name": "Đục bê tông om vỡ dày trung bình 50 mm",
+              "component_type": "beam"
+            },
+            {
+              "stage_definition_id": "07504a99-60b4-45bc-b0fb-da001556202e",
+              "name": "Đục bê tông om vỡ dày trung bình 100 mm",
+              "component_type": "beam"
+            }
+          ],
+          "earlier_events": [],
+          "in_batch": false
+        }
+      ]
+    }
+  ],
+  "questions": [
+    {
+      "id": "duplicate:G65",
+      "kind": "duplicate_code",
+      "message_vi": "Mã G65 xuất hiện 2 lần trong tin nhắn. Bạn muốn xử lý thế nào?",
+      "options": [
+        {
+          "label_vi": "Bỏ trùng",
+          "value": "dedupe"
+        },
+        {
+          "label_vi": "Mã khác",
+          "value": "replace_code"
+        }
+      ],
+      "codes": [
+        "G65"
+      ],
+      "apply": {
+        "action": "dedupe",
+        "codes": [
+          "G65"
+        ]
+      }
+    },
+    {
+      "id": "stage:e02a20ab-3ba3-49ff-b7ec-da4ee5a50539",
+      "kind": "multiple_stage",
+      "message_vi": "Cấu kiện F-66-67 có 4 công đoạn riêng khớp 'Dầm đục'. Chọn công đoạn đúng:",
+      "options": [
+        {
+          "label_vi": "Đục bê tông om vỡ dày trung bình 50 mm",
+          "value": "f5592f84-81a6-4825-8739-4a1ae14685b7"
+        },
+        {
+          "label_vi": "Đục bê tông om vỡ dày trung bình 20 mm",
+          "value": "43aaa3c2-5271-4e26-9c01-7ce0ac97a018"
+        },
+        {
+          "label_vi": "Đục bê tông om vỡ dày trung bình 70 mm",
+          "value": "326c33fe-6c06-4104-a16b-88a4255934d3"
+        },
+        {
+          "label_vi": "Đục bê tông om vỡ dày trung bình 100 mm",
+          "value": "805c7752-3327-4a3c-af94-5af68153c2bd"
+        }
+      ],
+      "codes": [
+        "F-66-67"
+      ],
+      "apply": {
+        "action": "set_stage",
+        "stage_definition_id": "f5592f84-81a6-4825-8739-4a1ae14685b7",
+        "codes": [
+          "F-66-67"
+        ]
+      }
+    },
+    {
+      "id": "completed:e02a20ab-3ba3-49ff-b7ec-da4ee5a50539:2bcf8c67-74a7-414d-a7e5-01c10490d2e0",
+      "kind": "completed_earlier",
+      "message_vi": "F-66-67 đã có COMPLETED ngày 20/11/2026, trước ngày 22/11/2026 cho công đoạn 'Đục bê tông om vỡ dày trung bình 50 mm'. Bạn muốn ghi thế nào?",
+      "options": [
+        {
+          "label_vi": "Ghi thêm hoàn thành",
+          "value": "add_completed"
+        },
+        {
+          "label_vi": "Ngày trước là đang làm, hôm nay xong",
+          "value": "previous_was_in_progress"
+        },
+        {
+          "label_vi": "Bỏ qua",
+          "value": "skip"
+        }
+      ],
+      "codes": [
+        "F-66-67"
+      ],
+      "apply": {
+        "action": "correct_earlier_to_in_progress",
+        "event_ids": [
+          "2bcf8c67-74a7-414d-a7e5-01c10490d2e0"
+        ],
+        "codes": [
+          "F-66-67"
+        ]
+      }
+    },
+    {
+      "id": "stage:5baba0fc-1627-4025-9e82-5f87c2fbad29",
+      "kind": "multiple_stage",
+      "message_vi": "Cấu kiện A-B-153 có 4 công đoạn riêng khớp 'Dầm đục'. Chọn công đoạn đúng:",
+      "options": [
+        {
+          "label_vi": "Đục bê tông om vỡ dày trung bình 70 mm",
+          "value": "571ce5a7-4fc4-4f0b-a142-af462fdf0375"
+        },
+        {
+          "label_vi": "Đục bê tông om vỡ dày trung bình 20 mm",
+          "value": "83eec469-5b1e-41e0-94d9-59a293dc57a8"
+        },
+        {
+          "label_vi": "Đục bê tông om vỡ dày trung bình 50 mm",
+          "value": "442d3c81-2275-425f-81cb-8a345d587b02"
+        },
+        {
+          "label_vi": "Đục bê tông om vỡ dày trung bình 100 mm",
+          "value": "7b2187ad-276c-4315-b005-9f1e8d92ab52"
+        }
+      ],
+      "codes": [
+        "A-B-153"
+      ],
+      "apply": {
+        "action": "set_stage",
+        "stage_definition_id": "571ce5a7-4fc4-4f0b-a142-af462fdf0375",
+        "codes": [
+          "A-B-153"
+        ]
+      }
+    },
+    {
+      "id": "stage:f0dfb613-881e-4cec-b8a4-e87671517e2f",
+      "kind": "multiple_stage",
+      "message_vi": "Cấu kiện B-D-153 có 4 công đoạn riêng khớp 'Dầm đục'. Chọn công đoạn đúng:",
+      "options": [
+        {
+          "label_vi": "Đục bê tông om vỡ dày trung bình 70 mm",
+          "value": "f5fc04e3-3244-4433-ad53-c51f098e6e02"
+        },
+        {
+          "label_vi": "Đục bê tông om vỡ dày trung bình 20 mm",
+          "value": "dffcfef2-cfe1-4b70-8001-3ec2052751e0"
+        },
+        {
+          "label_vi": "Đục bê tông om vỡ dày trung bình 50 mm",
+          "value": "b31b101f-f292-4bac-8201-460ffdc57189"
+        },
+        {
+          "label_vi": "Đục bê tông om vỡ dày trung bình 100 mm",
+          "value": "07504a99-60b4-45bc-b0fb-da001556202e"
+        }
+      ],
+      "codes": [
+        "B-D-153"
+      ],
+      "apply": {
+        "action": "set_stage",
+        "stage_definition_id": "f5fc04e3-3244-4433-ad53-c51f098e6e02",
+        "codes": [
+          "B-D-153"
+        ]
+      }
+    },
+    {
+      "id": "outside:Bunke:1:beam",
+      "kind": "outside_scope",
+      "message_vi": "3 dầm (F-66-67, A-B-153, B-D-153) thuộc Bunke - phân đoạn 1, ngoài phạm vi Cầu chính - PD2. Thi công cùng đợt?",
+      "options": [
+        {
+          "label_vi": "Thi công cùng đợt",
+          "value": "include"
+        },
+        {
+          "label_vi": "Bỏ qua",
+          "value": "skip"
+        }
+      ],
+      "codes": [
+        "F-66-67",
+        "A-B-153",
+        "B-D-153"
+      ],
+      "apply": {
+        "action": "skip_codes",
+        "codes": [
+          "F-66-67",
+          "A-B-153",
+          "B-D-153"
+        ]
+      }
+    }
+  ],
+  "unknown_codes": [],
+  "warnings": [
+    "Trạng thái mặc định là COMPLETED cho công tác đã làm; sửa nếu thực tế khác.",
+    "3 cấu kiện nằm ngoài phân đoạn chính; xác nhận trước khi ghi."
+  ]
+}
+```
+
 `DailyReport.status`: `draft|reviewed`; `AcceptanceChecklist.state`: `yes|no|unconfirmed`; `AcceptanceRecord.result`: `approved|conditional|rejected|null`. `null` là chưa có quyết định. `PhotoEvidence` chỉ dùng ảnh với caption/category đã được người dùng xác nhận. Citation gồm `document_id`, `document_name`, `version`, `page_number`, `drawing_number?`, `revision?`, `quote`, `url`, `ocr_confidence?`.
 
 Import cấu kiện hiện chỉ hỗ trợ cấu trúc workbook seed. `reviewed` là xác nhận của người gọi API; commit chỉ chấp nhận dữ liệu khớp workbook gửi lại. Giao diện cho phép xem trước, lọc và duyệt, nhưng chưa sửa từng candidate: cần sửa workbook và xem lại. Import chỉ bổ sung và không xóa cấu kiện thiếu trong file. Không tạo tiến độ hay nghiệm thu từ ngày có trong seed.

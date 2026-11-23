@@ -67,6 +67,8 @@ type Props = {
   onDateChange?: (date: string) => void;
   /** Optional app-shell navigation to the Nghiệm thu page. */
   onOpenAcceptance?: () => void;
+  /** Optional app-shell navigation to the "Dán tin nhắn" progress flow. */
+  onOpenProgressPaste?: () => void;
 };
 
 function mergePhotos(previous: SitePhoto[], incoming: SitePhoto[]): SitePhoto[] {
@@ -93,6 +95,7 @@ export default function SiteReportPage({
   date,
   onDateChange,
   onOpenAcceptance,
+  onOpenProgressPaste,
 }: Props) {
   const [report, setReport] = useState<DailyReport | null>(null);
   const [manpower, setManpower] = useState<ManpowerEntry[]>([]);
@@ -719,6 +722,15 @@ export default function SiteReportPage({
             {failed > 0 ? ` · ${failed} lỗi` : ""}
           </span>
         </div>
+        {onOpenProgressPaste ? (
+          <button
+            type="button"
+            className="mt-3 min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 hover:bg-slate-50 sm:w-auto"
+            onClick={onOpenProgressPaste}
+          >
+            Dán tin nhắn Zalo để ghi tiến độ
+          </button>
+        ) : null}
       </header>
 
       {(offlineCacheAt != null || lastSyncedAt != null) && (

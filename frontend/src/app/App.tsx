@@ -30,6 +30,9 @@ const AcceptancePage = lazy(
 const EngineeringAIPage = lazy(
   () => import("../features/engineering-ai/pages/EngineeringAIPage"),
 );
+const ProgressPastePanel = lazy(
+  () => import("../features/site/components/ProgressPastePanel"),
+);
 
 function PageLoading({ label }: { label: string }) {
   return (
@@ -58,7 +61,7 @@ export function pickProjectId(projects: Project[], current: string, recent: stri
     projects.find((project) => project.id === recent)?.id || projects[0]?.id || "";
 }
 
-type PageId = "dashboard" | "projects" | "work-items" | "components" | "daily-report" | "acceptance" | "documents";
+type PageId = "dashboard" | "projects" | "work-items" | "components" | "daily-report" | "acceptance" | "documents" | "progress-paste";
 
 const PAGE_META: Record<PageId, { label: string; description: string }> = {
   dashboard: { label: "Tổng quan", description: "Tình hình công trường hôm nay" },
@@ -68,6 +71,7 @@ const PAGE_META: Record<PageId, { label: string; description: string }> = {
   "daily-report": { label: "Hiện trường", description: "Báo cáo ngày, nhân lực, ảnh và nhật ký" },
   acceptance: { label: "Nghiệm thu", description: "Phiếu yêu cầu và biên bản nghiệm thu" },
   documents: { label: "Hỏi AI", description: "Hỏi đáp về cấu kiện, tiến độ và bản vẽ có dẫn nguồn" },
+  "progress-paste": { label: "Ghi tiến độ từ tin nhắn", description: "Dán tin nhắn hiện trường, xem lại rồi ghi" },
 };
 
 const NAV_ITEMS: Array<{ id: PageId; icon: typeof DashboardIcon }> = [
@@ -526,14 +530,20 @@ export default function App() {
             <Dashboard key={projectId} token={token} projectId={projectId} date={today} project={selected} onNavigate={(next) => navigate(next as PageId)} />
           ) : page === "work-items" ? (
             <WorkItemList token={token} projectId={projectId} />
+          ) : page === "progress-paste" ? (
+            <ProgressPastePanel
+              projectId={projectId}
+              onOpenAcceptance={() => navigate("acceptance")}
+            />
           ) : page === "components" ? (
-            <ComponentCatalogImport key={projectId} projectId={projectId} />
+            <ComponentCatalogImport key={projectId} projectId={projectId} onOpenPaste={() => navigate("progress-paste")} />
           ) : page === "daily-report" ? (
             <SiteReportPage
               projectId={projectId}
               date={reportDate}
               onDateChange={setReportDate}
               onOpenAcceptance={() => navigate("acceptance")}
+              onOpenProgressPaste={() => navigate("progress-paste")}
             />
           ) : page === "acceptance" ? (
             <AcceptancePage projectId={projectId} onDirtyChange={setAcceptanceDirty} />

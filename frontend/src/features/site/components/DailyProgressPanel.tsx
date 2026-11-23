@@ -52,6 +52,7 @@ type Props = {
   initialComponentId?: string | null;
   initialStageDefinitionId?: string | null;
   onInitialComponentHandled?: () => void;
+  onOpenPaste?: () => void;
 };
 
 const FOCUS_RING =
@@ -87,7 +88,7 @@ function StatusChip({ status }: { status: string }) {
   );
 }
 
-export default function DailyProgressPanel({ projectId, batchId, primaryZone, initialComponentId, initialStageDefinitionId, onInitialComponentHandled }: Props) {
+export default function DailyProgressPanel({ projectId, batchId, primaryZone, initialComponentId, initialStageDefinitionId, onInitialComponentHandled, onOpenPaste }: Props) {
   const [rows, setRows] = useState<ProgressRow[]>([]);
   const [rowsLoaded, setRowsLoaded] = useState(false);
   const [definitions, setDefinitions] = useState<StageDefinition[]>([]);
@@ -444,6 +445,15 @@ export default function DailyProgressPanel({ projectId, batchId, primaryZone, in
         <p className="mt-1 text-xs text-slate-600">
           Chọn đúng bước thi công và cấu kiện có thật; xem lại rồi mới lưu.
         </p>
+        {onOpenPaste ? (
+          <button
+            type="button"
+            className={`${SECONDARY_BUTTON} mt-2 w-full ${FOCUS_RING}`}
+            onClick={onOpenPaste}
+          >
+            Dán tin nhắn Zalo để ghi tiến độ
+          </button>
+        ) : null}
         <label className="mt-3 block text-xs font-medium text-slate-700">
           Ngày ghi nhận
           <input

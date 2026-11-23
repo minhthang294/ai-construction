@@ -37,6 +37,7 @@ import type {
   ConstructionBatchDetail,
   ProgressEventRecord,
 } from "./batches";
+import type { PasteParse } from "./progressPaste";
 
 const API_BASE = (import.meta as any)?.env?.VITE_API_BASE ?? "/api/v1";
 
@@ -774,6 +775,19 @@ export async function undoProgressBatch(
       body: JSON.stringify({ reason }),
     },
   );
+  if (!res.ok) return fail(res);
+  return res.json();
+}
+
+export async function parseProgressMessage(
+  projectId: string,
+  body: { text: string; default_date?: string; batch_id?: string },
+): Promise<PasteParse> {
+  const res = await apiFetch(`/projects/${projectId}/ai/progress-parse`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
   if (!res.ok) return fail(res);
   return res.json();
 }

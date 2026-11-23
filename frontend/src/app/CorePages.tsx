@@ -472,6 +472,7 @@ export function Dashboard({
     ["Cần xử lý", totalIssues ?? "—", "Từ đối soát dữ liệu", "#b91c1c"],
   ] as const;
   const quickActions = [
+    { label: "Ghi tiến độ từ tin nhắn", page: "progress-paste", icon: WorkIcon, description: "Dán tin nhắn Zalo" },
     { label: "Cập nhật tiến độ thi công", page: "components", icon: WorkIcon, description: "Ghi tiến độ theo mã cọc, dầm" },
     { label: "Báo cáo hiện trường", page: "daily-report", icon: CameraIcon, description: "Nhân lực, ảnh, nhật ký" },
     { label: "Lập phiếu nghiệm thu", page: "acceptance", icon: AcceptanceIcon, description: "PYC và BBNT" },
