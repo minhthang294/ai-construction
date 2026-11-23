@@ -12,7 +12,6 @@ import {
   BUTTON_PRIMARY,
   BUTTON_SECONDARY,
   CARD,
-  CARD_PAD,
   cx,
   FIELD,
   FIELD_BASE,
@@ -20,23 +19,25 @@ import {
   META_TEXT,
   PANEL_ALERT,
   PANEL_EMPTY,
-  SECTION_TEXT,
-  SECTION_TITLE,
   SELECT_INLINE,
 } from "../lib/ui";
-import { ChatIcon, SearchIcon, SpinnerIcon } from "./icons";
+import { SearchIcon, SpinnerIcon } from "./icons";
 import CitationCard from "./CitationCard";
 import QuestionSuggestions from "./QuestionSuggestions";
 import type { ChatMessage, Citation, Conversation, QuestionSuggestion } from "../types";
 
 type Props = {
   projectId: string;
+  suggestions: QuestionSuggestion[];
+  suggestionsLoading: boolean;
   onOpenCitation: (citation: Citation) => void;
   onOpenComponent?: (recordId: string, citation: Citation) => void;
 };
 
 export default function ChatPanel({
   projectId,
+  suggestions,
+  suggestionsLoading,
   onOpenCitation,
   onOpenComponent,
 }: Props) {
@@ -121,7 +122,7 @@ export default function ChatPanel({
 
   async function deleteCurrent() {
     if (!conversationId) return;
-    if (!window.confirm("Xóa hội thoại này? Tài liệu và citation nguồn không bị xóa.")) {
+    if (!window.confirm("Xóa hội thoại này? Tài liệu và nguồn trích dẫn không bị xóa.")) {
       return;
     }
     try {
@@ -229,7 +230,7 @@ export default function ChatPanel({
             <div className="flex shrink-0 gap-2">
               <button
                 type="button"
-                className={cx(SECTION_TEXT, "min-h-11 rounded-lg px-2 text-xs font-medium text-[#35507f] hover:bg-slate-100 lg:hidden")}
+                className={cx("min-h-11 rounded-lg px-2 text-sm font-medium text-[#35507f] hover:bg-slate-100 lg:hidden")}
                 aria-expanded={historyOpen}
                 aria-controls="eai-conversation-list"
                 onClick={() => setHistoryOpen((value) => !value)}
@@ -290,7 +291,7 @@ export default function ChatPanel({
                     onClick={() => void openConversation(conversation.id)}
                     aria-pressed={active}
                     className={cx(
-                      "w-full min-h-11 rounded-lg p-2.5 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#405e9b]",
+                      "w-full min-h-11 rounded-lg p-2.5 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#405e9b]",
                       active
                         ? "bg-[#405e9b]/10 text-[#2f487a] ring-1 ring-inset ring-[#405e9b]/30"
                         : "text-slate-700 hover:bg-slate-50",
@@ -299,7 +300,7 @@ export default function ChatPanel({
                     <span className="block text-sm font-medium [overflow-wrap:anywhere]">
                       {conversation.title || "(không tên)"}
                     </span>
-                    <span className="mt-0.5 block text-xs text-slate-500">
+                    <span className="mt-0.5 block text-sm text-slate-600">
                       {conversation.messages.length} lượt
                     </span>
                   </button>
@@ -310,73 +311,56 @@ export default function ChatPanel({
         </aside>
 
         <div className={cx(CARD, "order-1 min-w-0 lg:order-2")} aria-busy={busy}>
-          <div className={cx(CARD_PAD, "border-b border-slate-200")}>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div className="min-w-0">
-                <h2 className={SECTION_TITLE}>
-                  {conversationTitle || "Hỏi đáp có citation"}
-                </h2>
-                <p className={cx(SECTION_TEXT, "mt-1 max-w-2xl")}>
-                  Trả lời từ dữ kiện AI trích xuất và database cấu kiện/tiến độ. Mỗi
-                  khẳng định phải có citation; thiếu nguồn sẽ trả câu từ chối chuẩn.
-                  Tiến độ thi công không phải nghiệm thu.
-                </p>
+          <div className="border-b border-slate-200 p-3 sm:p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className="min-w-0 text-base font-semibold text-slate-950">
+                {conversationTitle || "Hỏi AI hồ sơ"}
+              </h2>
+              <div className="flex shrink-0 items-center gap-2">
+                <label className="flex min-h-11 items-center gap-2 text-sm font-medium text-slate-700">
+                  <span className="sr-only sm:not-sr-only">Phạm vi</span>
+                  <select
+                    className={SELECT_INLINE}
+                    value={scope}
+                    onChange={(event) =>
+                      setScope(event.target.value as "effective" | "history")
+                    }
+                  >
+                    <option value="effective">Bản có hiệu lực</option>
+                    <option value="history">Toàn bộ lịch sử</option>
+                  </select>
+                </label>
+                {conversationId && (
+                  <>
+                    <button
+                      type="button"
+                      className={cx(BUTTON_SECONDARY, "px-3")}
+                      onClick={() => void renameCurrent()}
+                      disabled={busy}
+                    >
+                      Đổi tên
+                    </button>
+                    <button
+                      type="button"
+                      className={cx(BUTTON_DANGER_OUTLINE, "px-3")}
+                      onClick={() => void deleteCurrent()}
+                      disabled={busy}
+                    >
+                      Xóa
+                    </button>
+                  </>
+                )}
               </div>
-              <div className="flex shrink-0 gap-2">
-                <button
-                  type="button"
-                  className={cx(BUTTON_SECONDARY, "flex-1 px-3 sm:flex-none")}
-                  onClick={() => void renameCurrent()}
-                  disabled={!conversationId}
-                >
-                  Đổi tên
-                </button>
-                <button
-                  type="button"
-                  className={cx(BUTTON_DANGER_OUTLINE, "flex-1 px-3 sm:flex-none")}
-                  onClick={() => void deleteCurrent()}
-                  disabled={!conversationId}
-                >
-                  Xóa
-                </button>
-              </div>
-            </div>
-
-            <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
-              <label className="flex min-h-11 items-center gap-2 text-sm font-medium text-slate-700">
-                Phạm vi
-                <select
-                  className={SELECT_INLINE}
-                  value={scope}
-                  onChange={(event) =>
-                    setScope(event.target.value as "effective" | "history")
-                  }
-                >
-                  <option value="effective">Bản có hiệu lực</option>
-                  <option value="history">Toàn bộ lịch sử</option>
-                </select>
-              </label>
             </div>
           </div>
 
-          <div className="space-y-3 p-4 sm:p-5">
+          <div className="space-y-3 p-3 sm:p-5">
             <div
               role="log"
               aria-live="polite"
               aria-relevant="additions"
               className="space-y-3"
             >
-              {messages.length === 0 && (
-                <div className={cx(PANEL_EMPTY, "flex gap-3")}>
-                  <ChatIcon className="mt-0.5 h-5 w-5 shrink-0 text-slate-400" />
-                  <p>
-                    Đặt câu hỏi về vị trí, công đoạn, tiến độ hoặc mở bản vẽ. Nếu
-                    không có dữ kiện phù hợp, hệ thống trả: “Không tìm thấy thông tin
-                    này trong hồ sơ công trình hiện có.”
-                  </p>
-                </div>
-              )}
-
               {messages.map((message, index) => {
                 const isUser = message.role === "user";
                 return (
@@ -391,7 +375,7 @@ export default function ChatPanel({
                   >
                     <div
                       className={cx(
-                        "mb-1.5 flex flex-wrap items-center gap-2 text-xs font-semibold",
+                        "mb-1.5 flex flex-wrap items-center gap-2 text-sm font-semibold",
                         isUser ? "text-white/85" : "text-[#35507f]",
                       )}
                     >
@@ -407,7 +391,7 @@ export default function ChatPanel({
                     </p>
 
                     {message.no_source && (
-                      <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs leading-5 text-amber-950">
+                      <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-sm leading-5 text-amber-950">
                         Không có dữ kiện trích xuất hoặc bản ghi database phù hợp.
                         Không có kết luận kỹ thuật nào được tạo.
                       </p>
@@ -415,7 +399,7 @@ export default function ChatPanel({
 
                     {message.citations.length > 0 && (
                       <div className="mt-3 space-y-1.5">
-                        <p className="text-xs font-semibold text-slate-600">
+                        <p className="text-sm font-semibold text-slate-600">
                           Nguồn ({message.citations.length})
                         </p>
                         {message.citations.map((citation) => (
@@ -430,7 +414,7 @@ export default function ChatPanel({
                     )}
 
                     {message.warnings.length > 0 && (
-                      <ul className="mt-3 list-disc space-y-1 pl-5 text-xs leading-5 text-amber-800">
+                      <ul className="mt-3 list-disc space-y-1 pl-5 text-sm leading-5 text-amber-800">
                         {message.warnings.map((warning, warningIndex) => (
                           <li key={`${warningIndex}-${warning}`}>{warning}</li>
                         ))}
@@ -455,7 +439,7 @@ export default function ChatPanel({
                   {failedQuestion && (
                     <button
                       type="button"
-                      className={cx(BUTTON_SECONDARY, "min-h-9 shrink-0 px-3 py-1 text-xs")}
+                      className={cx(BUTTON_SECONDARY, "min-h-11 shrink-0 px-3 py-1 text-sm")}
                       onClick={retry}
                       disabled={busy}
                     >
@@ -467,7 +451,8 @@ export default function ChatPanel({
 
               {messages.length === 0 && (
                 <QuestionSuggestions
-                  projectId={projectId}
+                  suggestions={suggestions}
+                  loading={suggestionsLoading}
                   busy={busy}
                   onPick={pickSuggestion}
                 />

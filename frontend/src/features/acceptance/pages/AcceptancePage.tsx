@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import AcceptanceHistoryPanel from "../components/AcceptanceHistoryPanel";
 import ConfirmDialog from "../components/ConfirmDialog";
 import NumberingPanel from "../components/NumberingPanel";
@@ -30,6 +30,13 @@ import {
 } from "../lib/api";
 import { latestRequestForPrefill } from "../lib/requestPrefill";
 import { projectMetadataDefaults } from "../lib/projectPrefill";
+import {
+  recordStatusLabel,
+  requestStatusLabel,
+  resultLabel,
+  revisionLabel,
+  STATUS_LEGEND,
+} from "../lib/statusLabels";
 import {
   buildWhatsAppInvite,
   whatsAppInviteUrl,
@@ -339,8 +346,16 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
     };
   }, [projectId, requests]);
 
+  const recordsByRequest = useMemo(() => {
+    const map = new Map<string, AcceptanceRecord>();
+    for (const record of records) {
+      if (!map.has(record.request_id)) map.set(record.request_id, record);
+    }
+    return map;
+  }, [records]);
+
   function recordFor(requestId: string): AcceptanceRecord | undefined {
-    return records.find((record) => record.request_id === requestId);
+    return recordsByRequest.get(requestId);
   }
 
   function confirmDiscard(target: GuardTarget): boolean {
@@ -654,7 +669,7 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
     if (busy) return;
     const record = recordFor(request.id);
     const warning = record
-      ? `PYC ${request.number} đã có BBNT (${record.status}). Xoá PYC sẽ xoá luôn BBNT liên quan và lịch sử xuất file. Không thể hoàn tác. Tiếp tục?`
+      ? `PYC ${request.number} đã có BBNT (${recordStatusLabel(record.status)}). Xoá PYC sẽ xoá luôn BBNT liên quan và lịch sử xuất file. Không thể hoàn tác. Tiếp tục?`
       : request.status === "submitted"
         ? `PYC ${request.number} đã gửi. Xoá phiếu này và lịch sử xuất file? Không thể hoàn tác.`
         : `Xoá PYC ${request.number}? Không thể hoàn tác.`;
@@ -692,7 +707,7 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
     if (!draft?.id) return;
     if (
       !window.confirm(
-        "Tạo revision mới từ bản hiện tại? Bản cũ sẽ được giữ nguyên và revision mới ở trạng thái nháp.",
+        "Tạo bản sửa mới từ bản hiện tại? Bản cũ sẽ được giữ nguyên và bản sửa mới ở trạng thái nháp.",
       )
     ) {
       return;
@@ -706,7 +721,7 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
       loadDraft(draftFor(revised, request, projectContext));
       setRecords(recordList);
       closePreview();
-      setMessage(`Đã tạo revision ${revised.revision}; bản cũ được giữ nguyên.`);
+      setMessage(`Đã tạo bản sửa ${revised.revision}; bản cũ được giữ nguyên.`);
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
@@ -769,13 +784,14 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
     <div className="space-y-4">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#405e9b]">Điều hành</p>
+          <p className="text-sm font-semibold uppercase tracking-[0.14em] text-[#405e9b]">Điều hành</p>
           <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">Nghiệm thu (PYC / BBNT)</h1>
           <p className="mt-1 text-sm text-slate-600">Lập phiếu yêu cầu, biên bản và xuất hồ sơ nghiệm thu.</p>
         </div>
-        <div className="flex gap-2">
+        <div role="group" aria-label="Khu vực nghiệm thu" className="flex gap-2">
           <button
             type="button"
+            aria-pressed={tab === "requests"}
             onClick={() => switchTab("requests")}
             className={`min-h-11 rounded-xl px-3 py-2 text-sm font-medium ${tab === "requests" ? "bg-teal-700 text-white" : "border bg-white"}`}
           >
@@ -783,6 +799,7 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
           </button>
           <button
             type="button"
+            aria-pressed={tab === "records"}
             onClick={() => switchTab("records")}
             className={`min-h-11 rounded-xl px-3 py-2 text-sm font-medium ${tab === "records" ? "bg-teal-700 text-white" : "border bg-white"}`}
           >
@@ -791,8 +808,19 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
         </div>
       </header>
 
-      {message && <div className="rounded bg-emerald-50 p-3 text-sm text-emerald-900">{message}</div>}
-      {error && (
+      <div className="flex flex-wrap items-center gap-2" aria-label="Chú giải trạng thái">
+        <span className="text-sm font-medium text-slate-600">Trạng thái:</span>
+        {STATUS_LEGEND.map((item) => (
+          <span
+            key={item.label}
+            className={`rounded-full border px-2 py-1 text-sm ${item.className}`}
+          >
+            {item.label}
+          </span>
+        ))}
+      </div>
+
+      {error && !editingRequest && !draft && (
         <div role="alert" className="rounded bg-rose-50 p-3 text-sm text-rose-900">
           {error}
         </div>
@@ -817,7 +845,11 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
         <section className="rounded-xl bg-white p-3 shadow-sm">
           <div className="flex items-center justify-between">
             <h2 className="font-semibold">Xem trước {preview.kind.toUpperCase()}</h2>
-            <button type="button" className="text-sm underline" onClick={closePreview}>
+            <button
+              type="button"
+              className="inline-flex min-h-11 items-center text-sm underline"
+              onClick={closePreview}
+            >
               Đóng
             </button>
           </div>
@@ -834,7 +866,7 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
                   alt="Ảnh xem trước phiếu yêu cầu nghiệm thu"
                   className="w-full rounded border border-slate-200 bg-white shadow-sm"
                 />
-                <p className="text-xs text-slate-500">
+                <p className="text-sm text-slate-500">
                   Ảnh được tạo từ mẫu Excel đã điền dữ liệu; bản chính thức chỉ
                   được tạo khi bấm xuất file.
                 </p>
@@ -847,7 +879,7 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
               </p>
             )
           ) : (
-            <pre className="mt-2 max-h-64 overflow-auto rounded bg-slate-50 p-2 text-xs">
+            <pre className="mt-2 max-h-64 overflow-auto rounded bg-slate-50 p-2 text-sm">
               {JSON.stringify(preview.cells, null, 2)}
             </pre>
           )}
@@ -881,40 +913,56 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
               />
             </div>
           ) : (
-            <button
-              type="button"
-              onClick={() => setEditingRequest("new")}
-              className="rounded bg-teal-700 px-4 py-3 font-semibold text-white"
-            >
-              + Tạo PYC nháp
-            </button>
+            <div className="space-y-1">
+              <button
+                type="button"
+                onClick={() => setEditingRequest("new")}
+                className="min-h-11 rounded bg-teal-700 px-4 py-3 font-semibold text-white"
+              >
+                + Tạo PYC nháp
+              </button>
+              {requests.length === 0 && (
+                <p className="text-sm text-slate-600">Chưa có PYC. Tạo phiếu đầu tiên ở trên.</p>
+              )}
+            </div>
           )}
 
-          <section className="rounded-xl bg-white p-4 shadow-sm">
-            <h2 className="mb-2 font-semibold">Danh sách PYC</h2>
-            {requests.length === 0 && <p className="text-sm text-slate-500">Chưa có PYC.</p>}
-            <ul className="divide-y">
-              {requests.map((request) => {
-                const record = recordFor(request.id);
-                return (
-                  <li key={request.id} className="flex flex-wrap items-center gap-2 py-3">
-                    <div className="min-w-0 flex-1">
-                      <p className="font-medium">
-                        PYC {request.number}{" "}
-                        <span className="text-xs text-slate-500">({request.status})</span>
-                      </p>
-                      <p className="truncate text-sm text-slate-600">
-                        {request.location || request.subject || request.project_name || "Chưa có nội dung"}
-                      </p>
-                      {request.daily_report_id && (
-                        <p className="text-xs text-teal-800">
-                          Báo cáo ngày:{" "}
-                          {reportLinks[request.id]
-                            ? `${reportLinks[request.id]?.report_date} (${reportLinks[request.id]?.status})`
-                            : "đã liên kết"}
+          {message && !editingRequest && (
+            <p
+              role="status"
+              className="sticky bottom-[4.75rem] z-20 rounded bg-emerald-50 p-3 text-sm text-emerald-900 shadow-sm"
+            >
+              {message}
+            </p>
+          )}
+
+          {requests.length > 0 && (
+            <section className="rounded-xl bg-white p-4 shadow-sm">
+              <h2 className="mb-2 font-semibold">Danh sách PYC</h2>
+              <ul className="divide-y">
+                {requests.map((request) => {
+                  const record = recordFor(request.id);
+                  return (
+                    <li key={request.id} className="flex flex-wrap items-center gap-2 py-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium">
+                          PYC {request.number}{" "}
+                          <span className="text-sm text-slate-600">
+                            ({requestStatusLabel(request.status)})
+                          </span>
                         </p>
-                      )}
-                    </div>
+                        <p className="truncate text-sm text-slate-600">
+                          {request.location || request.subject || request.project_name || "Chưa có nội dung"}
+                        </p>
+                        {request.daily_report_id && (
+                          <p className="text-sm text-teal-800">
+                            Báo cáo ngày:{" "}
+                            {reportLinks[request.id]
+                              ? `${reportLinks[request.id]?.report_date} (${reportLinks[request.id]?.status})`
+                              : "đã liên kết"}
+                          </p>
+                        )}
+                      </div>
                     <button
                       type="button"
                       onClick={() => startRecord(request)}
@@ -987,13 +1035,18 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
                 );
               })}
             </ul>
-          </section>
-          <ParticipantLibrary projectId={projectId} onChanged={setProfiles} />
+            </section>
+          )}
         </div>
       )}
 
       {tab === "records" && (
         <div className="space-y-4">
+          {message && !draft && (
+            <p role="status" className="rounded bg-emerald-50 p-3 text-sm text-emerald-900">
+              {message}
+            </p>
+          )}
           {!draft && (
             <section className="rounded-xl bg-white p-4 shadow-sm">
               <h2 className="mb-2 font-semibold">Chọn PYC để lập BBNT</h2>
@@ -1004,7 +1057,7 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
                   return (
                     <li key={request.id} className="flex items-center gap-2 py-3">
                       <span className="flex-1">
-                        PYC {request.number} {record ? `— BBNT ${record.status}` : "— chưa có BBNT"}
+                        PYC {request.number} {record ? `— BBNT ${recordStatusLabel(record.status)}` : "— chưa có BBNT"}
                       </span>
                       <button
                         type="button"
@@ -1025,11 +1078,11 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h2 className="font-semibold">
                   BBNT {draft.number ? `số ${draft.number}` : draft.request_number ? `cho PYC ${draft.request_number}` : "(nháp)"}{" "}
-                  — revision {draft.revision}
+                  — {revisionLabel(draft.revision)}
                 </h2>
-                <span className="text-xs rounded bg-slate-100 px-2 py-1 text-slate-700">
+                <span className="text-sm rounded bg-slate-100 px-2 py-1 text-slate-700">
                   {draft.status === "confirmed"
-                    ? `Đã xác nhận: ${draft.result ?? ""}`
+                    ? `Đã xác nhận: ${resultLabel(draft.result) || "—"}`
                     : "Nháp — chưa có kết luận"}
                 </span>
               </div>
@@ -1059,7 +1112,7 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
                   <dd className="font-medium">{draft.location || "—"}</dd>
                 </div>
               </dl>
-              <p className="text-xs text-slate-500">
+              <p className="text-sm text-slate-500">
                 Thông tin công trình được lấy lại từ PYC/Thiết lập công trình; không cần nhập lại.
               </p>
 
@@ -1182,121 +1235,150 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
                 />
               </label>
 
-              <div className="flex flex-wrap gap-2">
-                {draft.status !== "confirmed" && (
+              <div className="sticky bottom-[4.75rem] z-20 -mx-4 space-y-2 border-t border-slate-200 bg-white/95 p-3 backdrop-blur supports-[backdrop-filter]:bg-white/85 lg:bottom-0 lg:-mx-4">
+                {message && (
+                  <p role="status" className="rounded bg-emerald-50 p-2 text-sm text-emerald-900">
+                    {message}
+                  </p>
+                )}
+                {error && (
+                  <p role="alert" className="rounded bg-rose-50 p-2 text-sm text-rose-900">
+                    {error}
+                  </p>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  {draft.status !== "confirmed" && (
+                    <button
+                      type="button"
+                      onClick={saveRecord}
+                      disabled={busy}
+                      className="min-h-11 rounded bg-teal-700 px-4 py-3 font-semibold text-white disabled:opacity-50"
+                    >
+                      {busy ? "Đang lưu..." : "Lưu BBNT nháp"}
+                    </button>
+                  )}
+                  {draft.status !== "confirmed" && draft.id && (
+                    <button
+                      type="button"
+                      onClick={() => setConfirming(true)}
+                      disabled={busy}
+                      className="min-h-11 rounded bg-emerald-700 px-4 py-3 font-semibold text-white disabled:opacity-50"
+                    >
+                      Xác nhận BBNT
+                    </button>
+                  )}
                   <button
                     type="button"
-                    onClick={saveRecord}
-                    disabled={busy}
-                    className="rounded bg-teal-700 px-4 py-3 font-semibold text-white disabled:opacity-50"
+                    onClick={closeRecordEditor}
+                    className="min-h-11 rounded border px-4 py-3"
                   >
-                    {busy ? "Đang lưu..." : "Lưu BBNT nháp"}
+                    Đóng
                   </button>
-                )}
-                {draft.status !== "confirmed" && draft.id && (
-                  <button
-                    type="button"
-                    onClick={() => setConfirming(true)}
-                    disabled={busy}
-                    className="rounded bg-emerald-700 px-4 py-3 font-semibold text-white disabled:opacity-50"
-                  >
-                    Xác nhận BBNT
-                  </button>
-                )}
-                {draft.id && (
-                  <button
-                    type="button"
-                    onClick={handlePreviewRecord}
-                    disabled={busy}
-                    className="rounded border px-4 py-3 disabled:opacity-50"
-                  >
-                    Xem trước
-                  </button>
-                )}
-                {draft.id && shouldOfferRevision(draft.status, draft.stale) && (
-                  <button
-                    type="button"
-                    onClick={handleRevision}
-                    disabled={busy}
-                    className="min-h-11 rounded border border-amber-600 px-4 py-3 text-amber-800 disabled:opacity-50"
-                  >
-                    Tạo revision
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => handleExportRecord("pyc", "xlsx")}
-                  disabled={busy}
-                  className="rounded bg-slate-700 px-4 py-3 text-white disabled:opacity-50"
-                >
-                  PYC Excel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleExportRecord("pyc", "pdf")}
-                  disabled={busy}
-                  className="rounded bg-slate-700 px-4 py-3 text-white disabled:opacity-50"
-                >
-                  PYC PDF
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleExportRecord("bbnt", "xlsx")}
-                  disabled={busy || draft.status !== "confirmed"}
-                  title={
-                    draft.status !== "confirmed"
-                      ? "BBNT phải được người có quyền xác nhận trước khi xuất"
-                      : undefined
-                  }
-                  className="rounded bg-slate-700 px-4 py-3 text-white disabled:opacity-50"
-                >
-                  BBNT Excel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleExportRecord("bbnt", "pdf")}
-                  disabled={busy || draft.status !== "confirmed"}
-                  title={
-                    draft.status !== "confirmed"
-                      ? "BBNT phải được người có quyền xác nhận trước khi xuất"
-                      : undefined
-                  }
-                  className="rounded bg-slate-700 px-4 py-3 text-white disabled:opacity-50"
-                >
-                  BBNT PDF
-                </button>
-                <button
-                  type="button"
-                  onClick={closeRecordEditor}
-                  className="min-h-11 rounded border px-4 py-3"
-                >
-                  Đóng
-                </button>
-              </div>
+                  <details className="w-full rounded border border-slate-200">
+                    <summary className="flex min-h-11 cursor-pointer items-center px-3 text-sm font-medium text-slate-700">
+                      Xuất hồ sơ &amp; xem trước
+                    </summary>
+                    <div className="flex flex-wrap gap-2 border-t border-slate-200 p-2">
+                      {draft.id && (
+                        <button
+                          type="button"
+                          onClick={handlePreviewRecord}
+                          disabled={busy}
+                          className="min-h-11 rounded border px-4 py-3 text-sm disabled:opacity-50"
+                        >
+                          Xem trước
+                        </button>
+                      )}
+                      {draft.id && shouldOfferRevision(draft.status, draft.stale) && (
+                        <button
+                          type="button"
+                          onClick={handleRevision}
+                          disabled={busy}
+                          className="min-h-11 rounded border border-amber-600 px-4 py-3 text-sm text-amber-800 disabled:opacity-50"
+                        >
+                          Tạo bản sửa
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleExportRecord("pyc", "xlsx")}
+                        disabled={busy}
+                        className="min-h-11 rounded bg-slate-700 px-4 py-3 text-sm text-white disabled:opacity-50"
+                      >
+                        PYC Excel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleExportRecord("pyc", "pdf")}
+                        disabled={busy}
+                        className="min-h-11 rounded bg-slate-700 px-4 py-3 text-sm text-white disabled:opacity-50"
+                      >
+                        PYC PDF
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleExportRecord("bbnt", "xlsx")}
+                        disabled={busy || draft.status !== "confirmed"}
+                        title={
+                          draft.status !== "confirmed"
+                            ? "BBNT phải được người có quyền xác nhận trước khi xuất"
+                            : undefined
+                        }
+                        className="min-h-11 rounded bg-slate-700 px-4 py-3 text-sm text-white disabled:opacity-50"
+                      >
+                        BBNT Excel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleExportRecord("bbnt", "pdf")}
+                        disabled={busy || draft.status !== "confirmed"}
+                        title={
+                          draft.status !== "confirmed"
+                            ? "BBNT phải được người có quyền xác nhận trước khi xuất"
+                            : undefined
+                        }
+                        className="min-h-11 rounded bg-slate-700 px-4 py-3 text-sm text-white disabled:opacity-50"
+                      >
+                        BBNT PDF
+                      </button>
+                    </div>
+                  </details>
+                </div>
 
-              {draft.status !== "confirmed" && !draft.id && (
-                <p className="text-xs text-slate-500">
-                  Lưu nháp trước, sau đó người có quyền mới có thể xác nhận.
-                </p>
-              )}
+                {draft.status !== "confirmed" && !draft.id && (
+                  <p className="text-sm text-slate-600">
+                    Lưu nháp trước, sau đó người có quyền mới có thể xác nhận.
+                  </p>
+                )}
+              </div>
             </div>
           )}
         </div>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <NumberingPanel
-          projectId={projectId}
-          onSaved={() => {
-            void refresh();
-          }}
-        />
-        <AcceptanceHistoryPanel
-          projectId={projectId}
-          onOpenRequest={openRequestById}
-          onOpenRecord={openRecordById}
-        />
-      </div>
+      <details className="rounded-xl bg-white p-4 shadow-sm">
+        <summary className="flex min-h-11 cursor-pointer items-center gap-2 text-sm font-semibold text-slate-800">
+          Cài đặt nghiệm thu
+          <span className="ml-auto text-sm font-normal text-slate-500">
+            Danh bạ &amp; cấu hình số
+          </span>
+        </summary>
+        <div className="mt-3 grid gap-4 lg:grid-cols-2">
+          <ParticipantLibrary projectId={projectId} onChanged={setProfiles} />
+          <NumberingPanel
+            projectId={projectId}
+            onSaved={() => {
+              void refresh();
+            }}
+          />
+        </div>
+      </details>
+
+      <AcceptanceHistoryPanel
+        projectId={projectId}
+        onOpenRequest={openRequestById}
+        onOpenRecord={openRecordById}
+      />
 
       {draft && confirming && draft.id && (
         (() => {
@@ -1316,3 +1398,4 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
     </div>
   );
 }
+

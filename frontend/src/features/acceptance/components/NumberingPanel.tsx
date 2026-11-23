@@ -95,7 +95,7 @@ export default function NumberingPanel({ projectId, onSaved }: Props) {
   return (
     <section className="rounded-xl bg-white p-4 shadow-sm" aria-label="Cấu hình số nghiệm thu">
       <h2 className="font-semibold">Cấu hình số PYC/BBNT</h2>
-      <p className="mb-2 text-xs text-slate-500">
+      <p className="mb-2 text-sm text-slate-500">
         Số được cấp nguyên tử phía máy chủ; lưu cấu hình sẽ đặt lại next number về số bắt đầu.
       </p>
 
@@ -103,7 +103,7 @@ export default function NumberingPanel({ projectId, onSaved }: Props) {
         <label className="block text-sm">
           Loại phiếu
           <select
-            className="mt-1 w-full rounded border p-2"
+            className="mt-1 min-h-11 w-full rounded border p-2"
             value={form.kind}
             onChange={(event) => {
               const kind = event.target.value as "pyc" | "bbnt";
@@ -120,7 +120,7 @@ export default function NumberingPanel({ projectId, onSaved }: Props) {
           <label className="block text-sm">
             Prefix
             <input
-              className="mt-1 w-full rounded border p-2"
+              className="mt-1 min-h-11 w-full rounded border p-2"
               value={form.prefix}
               onChange={(event) => setForm({ ...form, prefix: event.target.value })}
             />
@@ -130,7 +130,7 @@ export default function NumberingPanel({ projectId, onSaved }: Props) {
             <input
               type="number"
               min={1}
-              className="mt-1 w-full rounded border p-2"
+              className="mt-1 min-h-11 w-full rounded border p-2"
               value={form.start_number}
               onChange={(event) =>
                 setForm({ ...form, start_number: Number(event.target.value) || 1 })
@@ -143,7 +143,7 @@ export default function NumberingPanel({ projectId, onSaved }: Props) {
               type="number"
               min={1}
               max={10}
-              className="mt-1 w-full rounded border p-2"
+              className="mt-1 min-h-11 w-full rounded border p-2"
               value={form.width}
               onChange={(event) =>
                 setForm({ ...form, width: Number(event.target.value) || 1 })
@@ -153,7 +153,7 @@ export default function NumberingPanel({ projectId, onSaved }: Props) {
           <label className="block text-sm">
             Date format
             <input
-              className="mt-1 w-full rounded border p-2"
+              className="mt-1 min-h-11 w-full rounded border p-2"
               value={form.date_format}
               onChange={(event) => setForm({ ...form, date_format: event.target.value })}
             />
@@ -163,7 +163,7 @@ export default function NumberingPanel({ projectId, onSaved }: Props) {
         <label className="block text-sm">
           Reset policy
           <select
-            className="mt-1 w-full rounded border p-2"
+            className="mt-1 min-h-11 w-full rounded border p-2"
             value={form.reset_policy}
             onChange={(event) =>
               setForm({ ...form, reset_policy: event.target.value as ResetPolicy })
@@ -182,7 +182,7 @@ export default function NumberingPanel({ projectId, onSaved }: Props) {
         <button
           type="submit"
           disabled={busy}
-          className="w-full rounded bg-teal-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          className="min-h-11 w-full rounded bg-teal-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
         >
           {busy ? "Đang lưu..." : "Lưu cấu hình số"}
         </button>
@@ -197,3 +197,5 @@ export default function NumberingPanel({ projectId, onSaved }: Props) {
     </section>
   );
 }
+
+

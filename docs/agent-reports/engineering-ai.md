@@ -1,5 +1,66 @@
 # Engineering AI Agent Report
 
+## 2026-11-23 — UI fix wave 1 (Hỏi AI + Nghiệm thu quick wins)
+
+Implemented the owner-approved quick wins from
+`docs/agent-reports/ux-audit-ai-acceptance.md` without touching
+`frontend/src/app`, `frontend/src/features/site` or `frontend/src/style.css`.
+
+Hỏi AI:
+- Hero reduced to one title row; the duplicate “Hỏi đáp có citation” intro and
+  duplicated chat header copy were removed. Suggestions scroll in one compact
+  row on phones and wrap on desktop, so the composer and chips are on the first
+  390 px screen (`EngineeringAIPage.tsx`, `ChatPanel.tsx`,
+  `QuestionSuggestions.tsx`).
+- Suggestions are fetched once by the page and passed down; the empty-source
+  banner now distinguishes: documents → unverified-extraction note; components/
+  progress only → “vẫn trả lời từ database cấu kiện và tiến độ”; neither →
+  the refusal warning. No more “every question will be refused” when DB data
+  exists.
+- “citation” is now “nguồn/nguồn trích dẫn” in field-facing copy.
+- Rename/Delete are hidden until a conversation exists.
+- Chips, citation actions, history actions and retry are ≥44 px with 14 px text;
+  citation metadata/badges were enlarged.
+
+Nghiệm thu:
+- Vietnamese status labels and a colour legend replace raw
+  draft/submitted/confirmed/revision (`lib/statusLabels.ts` + test); request,
+  record, result, revision and delete/revision prompts all use them.
+- Numbering configuration and participant library moved into a closed-by-default
+  `Cài đặt nghiệm thu` `<details>`; the history panel stays outside.
+- Empty PYC card replaced with one line under “+ Tạo PYC nháp”.
+- PYC and BBNT forms have a sticky bottom action bar with inline success/error;
+  BBNT export/preview/revision moved into a compact `Xuất hồ sơ & xem trước`
+  disclosure so the bar stays small on phones.
+- `recordsByRequest` is precomputed with `useMemo` instead of `records.find` in
+  each row.
+- Tabs use `aria-pressed`; the confirm dialog traps focus, focuses on open,
+  closes on Escape and restores focus; `MenuButton` has `aria-haspopup`.
+- Larger text/touch targets for history, participant library, numbering inputs
+  and preview close.
+
+Files: engineering-ai page/chat/citation/suggestion components;
+acceptance page, RequestForm, ParticipantsEditor, ParticipantLibrary,
+NumberingPanel, AcceptanceHistoryPanel, TriStateChecklist, ConfirmDialog,
+`lib/statusLabels.ts` (+ test); `frontend/src/ui/MenuButton.tsx`.
+
+Verification (temp DB/storage):
+```bash
+cd backend
+DATABASE_URL=sqlite:///<tmp>/app.db SITE_REPORT_STORAGE=<tmp>/site \
+ENGINEERING_AI_STORAGE=<tmp>/engineering ACCEPTANCE_STORAGE=<tmp>/acceptance \
+../.venv/Scripts/python -m pytest tests/engineering_ai tests/acceptance -q
+# 223 passed, 6 skipped, 0 failed
+
+cd frontend && npm test          # 34 files, 210 passed
+cd frontend && npm run build     # tsc -b + vite build OK
+```
+
+Unresolved: the app shell still owns the component-navigation listener for
+`engineering-ai:open-component`; PYC success appears as a sticky status after
+the editor closes (the editor unmounts, so the message cannot live inside its
+bar). Large PYC lists remain unpaginated.
+
 ## 2026-11-23 — fix: per-component stages, action-verb matching, recent-usage suggestion
 
 Real-data bug fixed without changing the API shape (additive only):

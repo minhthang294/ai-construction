@@ -15,17 +15,17 @@ export default function CitationCard({ citation, onOpen, onOpenComponent }: Prop
   const isComponentRow = display.table === "structural_components";
   return (
     <article className="min-w-0 space-y-1.5 rounded-lg border border-[#405e9b]/20 bg-[#405e9b]/5 p-2.5">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs leading-5">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm leading-5">
         <span className="min-w-0 font-semibold text-[#2f487a] [overflow-wrap:anywhere]">
           {display.title}
         </span>
         {display.isDatabase ? (
           <>
-            <span className="rounded-full border border-slate-300 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-700">
+            <span className="rounded-full border border-slate-300 bg-white px-2 py-0.5 text-sm font-medium text-slate-700">
               {display.table}
             </span>
             {display.recordId && (
-              <span className="text-[11px] text-slate-500 [overflow-wrap:anywhere]">
+              <span className="text-sm text-slate-600 [overflow-wrap:anywhere]">
                 bản ghi {display.recordId}
               </span>
             )}
@@ -33,28 +33,28 @@ export default function CitationCard({ citation, onOpen, onOpenComponent }: Prop
         ) : (
           <>
             {display.pageLabel && (
-              <span className="rounded-full border border-[#405e9b]/20 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-700">
+              <span className="rounded-full border border-[#405e9b]/20 bg-white px-2 py-0.5 text-sm font-medium text-slate-700">
                 v{citation.version} · {display.pageLabel}
               </span>
             )}
             {citation.drawing_number && (
-              <span className="text-[11px] text-slate-600">
+              <span className="text-sm text-slate-600">
                 bản vẽ {citation.drawing_number}
-                {citation.revision ? ` rev ${citation.revision}` : ""}
+                {citation.revision ? ` bản sửa ${citation.revision}` : ""}
               </span>
             )}
             {citation.section && (
-              <span className="text-[11px] text-slate-600">mục {citation.section}</span>
+              <span className="text-sm text-slate-600">mục {citation.section}</span>
             )}
           </>
         )}
       </div>
-      <blockquote className="line-clamp-3 border-l-2 border-[#405e9b]/40 pl-2 text-xs leading-5 text-slate-800 [overflow-wrap:anywhere] whitespace-pre-wrap">
+      <blockquote className="line-clamp-3 border-l-2 border-[#405e9b]/40 pl-2 text-sm leading-5 text-slate-800 [overflow-wrap:anywhere] whitespace-pre-wrap">
         {citation.quote}
       </blockquote>
       {lowOcr && (
-        <p className="flex items-start gap-1.5 text-[11px] leading-5 text-amber-800">
-          <AlertIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <p className="flex items-start gap-1.5 text-sm leading-5 text-amber-800">
+          <AlertIcon className="mt-0.5 h-4 w-4 shrink-0" />
           Trang nguồn có độ tin cậy thấp; cần kiểm tra bản vẽ gốc.
         </p>
       )}
@@ -62,7 +62,7 @@ export default function CitationCard({ citation, onOpen, onOpenComponent }: Prop
         {display.isDatabase && isComponentRow && display.recordId && onOpenComponent && (
           <button
             type="button"
-            className={cx(BUTTON_SECONDARY, "min-h-9 px-3 py-1 text-xs")}
+            className={cx(BUTTON_SECONDARY, "min-h-11 px-3 py-1 text-sm")}
             onClick={() => onOpenComponent(display.recordId!, citation)}
           >
             Mở cấu kiện
@@ -71,10 +71,10 @@ export default function CitationCard({ citation, onOpen, onOpenComponent }: Prop
         {!display.isDatabase && onOpen && (
           <button
             type="button"
-            className={cx(BUTTON_SECONDARY, "min-h-9 px-3 py-1 text-xs")}
+            className={cx(BUTTON_SECONDARY, "min-h-11 px-3 py-1 text-sm")}
             onClick={() => onOpen(citation)}
           >
-            <ArrowLeftIcon className="h-3.5 w-3.5 rotate-180" />
+            <ArrowLeftIcon className="h-4 w-4 rotate-180" />
             Xem trang
           </button>
         )}

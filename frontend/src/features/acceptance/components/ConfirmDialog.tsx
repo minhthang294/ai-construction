@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AcceptanceRecord, ResultState } from "../types";
 import { confirmationBlockers, hasUnresolvedChecklist } from "../types";
 
@@ -26,6 +26,10 @@ export default function ConfirmDialog({
   const [result, setResult] = useState<ResultState | "">("");
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+  const onCancelRef = useRef(onCancel);
+  onCancelRef.current = onCancel;
 
   useEffect(() => {
     if (open) {
@@ -34,6 +38,40 @@ export default function ConfirmDialog({
       setError(null);
     }
   }, [open, record.id]);
+
+  useEffect(() => {
+    if (!open) return;
+    previousFocusRef.current = document.activeElement as HTMLElement | null;
+    dialogRef.current?.focus();
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCancelRef.current();
+        return;
+      }
+      if (event.key !== "Tab" || !dialogRef.current) return;
+      const focusable = Array.from(
+        dialogRef.current.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), a[href]',
+        ),
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      previousFocusRef.current?.focus();
+    };
+  }, [open]);
 
   if (!open) return null;
 
@@ -59,9 +97,11 @@ export default function ConfirmDialog({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3">
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="acceptance-confirm-title"
+        tabIndex={-1}
         className="max-h-full w-full max-w-lg overflow-y-auto rounded-xl bg-white p-4 shadow-xl"
       >
         <h2 id="acceptance-confirm-title" className="text-lg font-semibold">
@@ -112,7 +152,7 @@ export default function ConfirmDialog({
               />
               <span>
                 <span className="font-medium">{option.label}</span>
-                <span className="block text-xs text-slate-500">{option.hint}</span>
+                <span className="block text-sm text-slate-500">{option.hint}</span>
               </span>
             </label>
           ))}
@@ -156,3 +196,4 @@ export default function ConfirmDialog({
     </div>
   );
 }
+

@@ -91,7 +91,7 @@ export default function ParticipantLibrary({ projectId, onChanged }: Props) {
   return (
     <section className="rounded-xl bg-white p-4 shadow-sm">
       <h2 className="font-semibold">Danh bạ người tham gia</h2>
-      <p className="mb-2 text-xs text-slate-500">
+      <p className="mb-2 text-sm text-slate-500">
         Chọn từ danh bạ khi lập PYC. Hệ thống chỉ lưu snapshot họ tên/đơn vị, không tự tạo chữ ký.
       </p>
 
@@ -101,14 +101,16 @@ export default function ParticipantLibrary({ projectId, onChanged }: Props) {
             <span className="min-w-0 flex-1">
               <strong>{profile.full_name}</strong> — {profile.position || "—"} —{" "}
               {profile.organization || "—"}{" "}
-              <span className="text-xs text-slate-500">({profile.role})</span>
+              <span className="text-sm text-slate-600">
+                ({ROLE_OPTIONS.find((option) => option.value === profile.role)?.label ?? profile.role})
+              </span>
               {!profile.active && <span className="ml-1 text-rose-700">[ngừng]</span>}
             </span>
             <button
               type="button"
               onClick={() => toggleActive(profile)}
               disabled={busy}
-              className="rounded border px-2 py-1"
+              className="min-h-11 rounded border px-3 py-2 text-sm"
             >
               {profile.active ? "Ngừng" : "Kích hoạt"}
             </button>
@@ -116,7 +118,7 @@ export default function ParticipantLibrary({ projectId, onChanged }: Props) {
               type="button"
               onClick={() => remove(profile)}
               disabled={busy}
-              className="rounded border border-rose-300 px-2 py-1 text-rose-700"
+              className="min-h-11 rounded border border-rose-300 px-3 py-2 text-sm text-rose-700"
             >
               Xóa
             </button>
@@ -128,7 +130,7 @@ export default function ParticipantLibrary({ projectId, onChanged }: Props) {
         <label className="block text-sm">
           Họ tên
           <input
-            className="mt-1 w-full rounded border p-2"
+            className="mt-1 min-h-11 w-full rounded border p-2"
             value={form.full_name}
             onChange={(event) => setForm({ ...form, full_name: event.target.value })}
             required
@@ -137,7 +139,7 @@ export default function ParticipantLibrary({ projectId, onChanged }: Props) {
         <label className="block text-sm">
           Vai trò
           <select
-            className="mt-1 w-full rounded border p-2"
+            className="mt-1 min-h-11 w-full rounded border p-2"
             value={form.role}
             onChange={(event) =>
               setForm({ ...form, role: event.target.value as ParticipantRole })
@@ -153,7 +155,7 @@ export default function ParticipantLibrary({ projectId, onChanged }: Props) {
         <label className="block text-sm">
           Đơn vị
           <input
-            className="mt-1 w-full rounded border p-2"
+            className="mt-1 min-h-11 w-full rounded border p-2"
             value={form.organization ?? ""}
             onChange={(event) => setForm({ ...form, organization: event.target.value })}
           />
@@ -161,7 +163,7 @@ export default function ParticipantLibrary({ projectId, onChanged }: Props) {
         <label className="block text-sm">
           Chức vụ
           <input
-            className="mt-1 w-full rounded border p-2"
+            className="mt-1 min-h-11 w-full rounded border p-2"
             value={form.position ?? ""}
             onChange={(event) => setForm({ ...form, position: event.target.value })}
           />
@@ -185,3 +187,5 @@ export default function ParticipantLibrary({ projectId, onChanged }: Props) {
     </section>
   );
 }
+
+

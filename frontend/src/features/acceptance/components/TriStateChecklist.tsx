@@ -32,7 +32,7 @@ export default function TriStateChecklist({ items, onChange, disabled = false }:
       <div className="flex items-center justify-between gap-2">
         <h3 className="font-semibold">Checklist hồ sơ</h3>
         <span
-          className={`text-xs rounded px-2 py-1 ${
+          className={`text-sm rounded px-2 py-1 ${
             unresolved ? "bg-amber-100 text-amber-900" : "bg-emerald-100 text-emerald-900"
           }`}
           role="status"
@@ -70,7 +70,7 @@ export default function TriStateChecklist({ items, onChange, disabled = false }:
               })}
             </div>
             {item.evidence_refs.length > 0 && (
-              <p className="mt-2 text-xs text-slate-500">
+              <p className="mt-2 text-sm text-slate-500">
                 Bằng chứng: {item.evidence_refs.join(", ")}
               </p>
             )}
@@ -80,3 +80,4 @@ export default function TriStateChecklist({ items, onChange, disabled = false }:
     </section>
   );
 }
+

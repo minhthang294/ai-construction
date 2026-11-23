@@ -1,5 +1,11 @@
 import { useEffect, useState } from "react";
 import { listWorkItems, workItemAcceptanceHistory } from "../lib/api";
+import {
+  recordStatusLabel,
+  requestStatusLabel,
+  resultLabel,
+  revisionLabel,
+} from "../lib/statusLabels";
 import type {
   AcceptanceHistoryItem,
   WorkItemAcceptanceHistory,
@@ -70,7 +76,7 @@ export default function AcceptanceHistoryPanel({
   return (
     <section className="rounded-xl bg-white p-4 shadow-sm" aria-label="Lịch sử nghiệm thu theo công việc">
       <h2 className="font-semibold">Lịch sử nghiệm thu theo công việc</h2>
-      <p className="mb-2 text-xs text-slate-500">
+      <p className="mb-2 text-sm text-slate-500">
         Chỉ đọc PYC/BBNT theo work item; không tự xác nhận hay thay đổi biên bản.
       </p>
 
@@ -106,7 +112,7 @@ export default function AcceptanceHistoryPanel({
             <li key={`${item.kind}-${item.id}`} className="rounded border p-2 text-sm">
               <div className="flex flex-wrap items-center gap-2">
                 <span
-                  className={`rounded px-2 py-0.5 text-xs font-semibold ${
+                  className={`rounded px-2 py-0.5 text-sm font-semibold ${
                     item.kind === "pyc"
                       ? "bg-sky-100 text-sky-900"
                       : "bg-emerald-100 text-emerald-900"
@@ -115,16 +121,22 @@ export default function AcceptanceHistoryPanel({
                   {item.kind.toUpperCase()}
                 </span>
                 <span className="font-medium">Số {item.number}</span>
-                <span className="text-slate-600">{item.status}</span>
-                <span className="text-slate-600">revision {item.revision}</span>
-                {item.result && <span className="text-slate-600">{item.result}</span>}
+                <span className="text-slate-600">
+                  {item.kind === "pyc"
+                    ? requestStatusLabel(item.status)
+                    : recordStatusLabel(item.status)}
+                </span>
+                <span className="text-slate-600">{revisionLabel(item.revision)}</span>
+                {item.result && (
+                  <span className="text-slate-600">{resultLabel(item.result)}</span>
+                )}
               </div>
-              <div className="mt-1 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+              <div className="mt-1 flex flex-wrap items-center justify-between gap-2 text-sm text-slate-600">
                 <span>{formatTime(item.updated_at)}</span>
                 <button
                   type="button"
                   onClick={() => openItem(item)}
-                  className="rounded border border-teal-700 px-2 py-1 text-teal-800"
+                  className="min-h-11 rounded border border-teal-700 px-3 py-2 text-sm text-teal-800"
                 >
                   Mở {item.kind.toUpperCase()}
                 </button>
@@ -136,3 +148,4 @@ export default function AcceptanceHistoryPanel({
     </section>
   );
 }
+

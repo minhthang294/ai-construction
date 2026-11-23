@@ -309,12 +309,12 @@ export default function RequestForm({
       <h2 className="text-lg font-semibold">
         {initial ? `Sửa PYC ${initial.number}` : "Tạo PYC nháp"}
       </h2>
-      <p className="rounded bg-slate-50 p-2 text-xs text-slate-600">
+      <p className="rounded bg-slate-50 p-2 text-sm text-slate-600">
         Tên công trình, Chủ đầu tư và Địa điểm được điền sẵn từ Thiết lập công
         trình; chỉ sửa khi PYC này cần giá trị khác.
       </p>
       {!initial && previousRequest && (
-        <div className="flex flex-col gap-2 rounded border border-teal-200 bg-teal-50 p-2 text-xs text-teal-900 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-2 rounded border border-teal-200 bg-teal-50 p-2 text-sm text-teal-900 sm:flex-row sm:items-center sm:justify-between">
           <p>
             Đã điền vị trí, đơn vị và người ký từ PYC{" "}
             <strong>{previousRequest.number}</strong>. Ngày yêu cầu mặc định là
@@ -322,7 +322,7 @@ export default function RequestForm({
           </p>
           <button
             type="button"
-            className="min-h-9 shrink-0 rounded border border-teal-300 bg-white px-2 font-medium text-teal-800"
+            className="min-h-11 shrink-0 rounded border border-teal-300 bg-white px-3 text-sm font-medium text-teal-800"
             onClick={resetToProjectDefaults}
           >
             Xóa dữ liệu mẫu
@@ -462,7 +462,7 @@ export default function RequestForm({
             {reportMessage && <p className="mt-1 text-slate-600">{reportMessage}</p>}
           </div>
         </div>
-        <p className="mt-2 text-xs text-slate-500">
+        <p className="mt-2 text-sm text-slate-500">
           Liên kết chỉ để đọc và đối chiếu; không tự động xác nhận nghiệm thu.
         </p>
       </fieldset>
@@ -485,7 +485,7 @@ export default function RequestForm({
               </option>
             ))}
           </select>
-          <span className="mt-1 block text-xs text-slate-500">
+          <span className="mt-1 block text-sm text-slate-500">
             Chọn từ danh mục để điền nhanh, có thể sửa lại bên dưới.
           </span>
         </label>
@@ -499,7 +499,7 @@ export default function RequestForm({
           />
         </label>
         {workItems.length === 0 && (
-          <p className="mt-2 rounded bg-amber-50 p-2 text-xs text-amber-900">
+          <p className="mt-2 rounded bg-amber-50 p-2 text-sm text-amber-900">
             Danh mục công việc chưa có hoặc chưa tải được; vẫn có thể nhập tay nội
             dung nghiệm thu và lưu PYC.
           </p>
@@ -650,31 +650,33 @@ export default function RequestForm({
         />
       </label>
 
-      {error && (
-        <p role="alert" className="rounded bg-rose-50 p-3 text-sm text-rose-800">
-          {error}
-        </p>
-      )}
-
-      <div className="flex flex-wrap gap-2">
-        <button
-          type="submit"
-          disabled={submitting}
-          className="rounded bg-teal-700 px-4 py-3 font-semibold text-white disabled:opacity-50"
-        >
-          {submitting ? "Đang lưu..." : initial ? "Lưu thay đổi" : "Tạo PYC nháp"}
-        </button>
-        {onCancel && (
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={submitting}
-            className="rounded border px-4 py-3 disabled:opacity-50"
-          >
-            Hủy
-          </button>
+      <div className="sticky bottom-[4.75rem] z-20 -mx-4 space-y-2 border-t border-slate-200 bg-white/95 p-3 backdrop-blur supports-[backdrop-filter]:bg-white/85 lg:bottom-0 lg:-mx-4">
+        {error && (
+          <p role="alert" className="rounded bg-rose-50 p-2 text-sm text-rose-800">
+            {error}
+          </p>
         )}
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="submit"
+            disabled={submitting}
+            className="min-h-11 rounded bg-teal-700 px-4 py-3 font-semibold text-white disabled:opacity-50"
+          >
+            {submitting ? "Đang lưu..." : initial ? "Lưu thay đổi" : "Tạo PYC nháp"}
+          </button>
+          {onCancel && (
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={submitting}
+              className="min-h-11 rounded border px-4 py-3 disabled:opacity-50"
+            >
+              Hủy
+            </button>
+          )}
+        </div>
       </div>
     </form>
   );
 }
+

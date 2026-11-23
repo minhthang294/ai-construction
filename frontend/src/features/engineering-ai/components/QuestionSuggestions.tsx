@@ -1,20 +1,19 @@
-import { useEffect, useState } from "react";
-import { listQuestionSuggestions } from "../lib/api";
 import { cx, META_TEXT } from "../lib/ui";
 import type { QuestionSuggestion } from "../types";
 import { AlertIcon } from "./icons";
 
 type Props = {
-  projectId: string;
+  suggestions: QuestionSuggestion[];
+  loading: boolean;
   busy: boolean;
   onPick: (suggestion: QuestionSuggestion) => void;
 };
 
 const BADGE_STYLES: Record<string, string> = {
-  verified: "border-emerald-200 bg-emerald-50 text-emerald-800",
-  proposed: "border-amber-200 bg-amber-50 text-amber-800",
-  navigation: "border-[#405e9b]/20 bg-white text-[#35507f]",
-  caution: "border-red-200 bg-red-50 text-red-800",
+  verified: "border-emerald-300 bg-emerald-50 text-emerald-900",
+  proposed: "border-amber-300 bg-amber-50 text-amber-900",
+  navigation: "border-[#405e9b]/30 bg-white text-[#35507f]",
+  caution: "border-red-300 bg-red-50 text-red-800",
 };
 
 const BADGE_LABELS: Record<string, string> = {
@@ -24,28 +23,12 @@ const BADGE_LABELS: Record<string, string> = {
   caution: "Cần đối chiếu",
 };
 
-export default function QuestionSuggestions({ projectId, busy, onPick }: Props) {
-  const [suggestions, setSuggestions] = useState<QuestionSuggestion[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    listQuestionSuggestions(projectId)
-      .then((rows) => {
-        if (!cancelled) setSuggestions(rows.slice(0, 6));
-      })
-      .catch(() => {
-        if (!cancelled) setSuggestions([]);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId]);
-
+export default function QuestionSuggestions({
+  suggestions,
+  loading,
+  busy,
+  onPick,
+}: Props) {
   if (loading) {
     return (
       <div role="status" className={cx(META_TEXT, "flex items-center gap-2")}>
@@ -65,11 +48,11 @@ export default function QuestionSuggestions({ projectId, busy, onPick }: Props) 
 
   return (
     <section aria-label="Gợi ý câu hỏi từ dữ liệu công trình">
-      <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-[#35507f]">
+      <h3 className="text-sm font-semibold text-[#35507f]">
         Hỏi nhanh từ dữ liệu công trình
       </h3>
-      <div className="mt-2 flex flex-wrap gap-2">
-        {suggestions.map((suggestion) => (
+      <div className="mt-2 flex gap-2 overflow-x-auto pb-1 lg:flex-wrap lg:overflow-visible">
+        {suggestions.slice(0, 6).map((suggestion) => (
           <button
             key={suggestion.id}
             type="button"
@@ -80,15 +63,15 @@ export default function QuestionSuggestions({ projectId, busy, onPick }: Props) 
                 ? "Điền câu hỏi vào ô nhập để bạn đổi mã cấu kiện"
                 : "Gửi câu hỏi này ngay"
             }
-            className="flex min-h-10 max-w-full items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-left text-xs leading-5 text-slate-700 transition-colors hover:border-[#405e9b]/40 hover:bg-[#405e9b]/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#405e9b] disabled:cursor-not-allowed disabled:opacity-60"
+            className="flex min-h-11 max-w-[85%] shrink-0 items-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2 text-left text-sm leading-5 text-slate-800 transition-colors hover:border-[#405e9b]/50 hover:bg-[#405e9b]/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#405e9b] disabled:cursor-not-allowed disabled:opacity-60 lg:max-w-full"
           >
             <span className="min-w-0 [overflow-wrap:anywhere]">{suggestion.label}</span>
             {suggestion.badge && (
               <span
                 className={cx(
-                  "shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-medium",
+                  "shrink-0 rounded-full border px-2 py-0.5 text-sm font-medium",
                   BADGE_STYLES[suggestion.badge] ??
-                    "border-slate-200 bg-slate-50 text-slate-600",
+                    "border-slate-200 bg-slate-50 text-slate-700",
                 )}
               >
                 {BADGE_LABELS[suggestion.badge] ?? ""}

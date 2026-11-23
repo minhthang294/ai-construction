@@ -3,19 +3,21 @@ import ChatPanel from "../components/ChatPanel";
 import DocumentList from "../components/DocumentList";
 import PageViewer from "../components/PageViewer";
 import { AlertIcon, ChatIcon, DocumentIcon } from "../components/icons";
-import { fetchResourceBlob, listDocuments } from "../lib/api";
+import { fetchResourceBlob, listDocuments, listQuestionSuggestions } from "../lib/api";
 import { cx, META_TEXT } from "../lib/ui";
-import type { Citation, SourceDocument } from "../types";
+import type { Citation, QuestionSuggestion, SourceDocument } from "../types";
 
 type Props = { projectId: string };
 
 export default function EngineeringAIPage({ projectId }: Props) {
-  // Remount on project switch so no prior-project document/citation state survives.
+  // Remount on project switch so no prior-project document/source state survives.
   return <EngineeringAIProjectPage key={projectId} projectId={projectId} />;
 }
 
 function EngineeringAIProjectPage({ projectId }: Props) {
   const [documents, setDocuments] = useState<SourceDocument[]>([]);
+  const [suggestions, setSuggestions] = useState<QuestionSuggestion[]>([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [pageNumber, setPageNumber] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -42,6 +44,24 @@ function EngineeringAIProjectPage({ projectId }: Props) {
   useEffect(() => {
     void refresh(true);
   }, [refresh]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setSuggestionsLoading(true);
+    listQuestionSuggestions(projectId)
+      .then((rows) => {
+        if (!cancelled) setSuggestions(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setSuggestions([]);
+      })
+      .finally(() => {
+        if (!cancelled) setSuggestionsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
 
   const selected = documents.find((document) => document.id === selectedId) ?? null;
 
@@ -98,49 +118,33 @@ function EngineeringAIProjectPage({ projectId }: Props) {
   }
 
   return (
-    <div className="w-full space-y-4 sm:space-y-5">
-      <header className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex h-1.5" aria-hidden="true">
-          <span className="w-4/5 bg-[#405e9b]" />
-          <span className="flex-1 bg-[#e5322c]" />
+    <div className="w-full space-y-3 sm:space-y-4">
+      <header className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+        <div className="min-w-0">
+          <h1 className="text-lg font-semibold tracking-tight text-slate-950 sm:text-xl">
+            Hỏi AI hồ sơ kỹ thuật
+          </h1>
         </div>
-        <div className="p-4 sm:p-6">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div className="max-w-3xl">
-              <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#405e9b]">
-                <span
-                  className="inline-block h-2 w-2 rounded-full bg-[#e5322c]"
-                  aria-hidden="true"
-                />
-                SBTECH · Kho tri thức công trình
-              </p>
-              <h1 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950 sm:text-3xl">
-                Hỏi đáp AI hồ sơ kỹ thuật
-              </h1>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600 sm:text-base">
-                Trả lời từ dữ kiện AI đã trích xuất và database cấu kiện, kèm citation.
-                Bấm citation để mở đúng trang bản vẽ. Thiếu nguồn thì trả lời từ chối
-                chuẩn thay vì suy đoán.
-              </p>
-            </div>
-            <span className="inline-flex w-fit shrink-0 items-center gap-2 rounded-full border border-[#405e9b]/20 bg-[#405e9b]/5 px-3 py-1.5 text-xs font-medium text-[#35507f]">
-              <ChatIcon className="h-4 w-4" />
-              Chat có citation
-            </span>
-          </div>
-        </div>
+        <span className="inline-flex w-fit shrink-0 items-center gap-2 rounded-full border border-[#405e9b]/20 bg-[#405e9b]/5 px-3 py-1.5 text-sm font-medium text-[#35507f]">
+          <ChatIcon className="h-4 w-4" />
+          Trả lời có nguồn
+        </span>
       </header>
 
       <div
         role="note"
         aria-label="Phạm vi sử dụng AI"
-        className="flex gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm leading-6 text-amber-950 sm:p-4"
+        className="flex gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm leading-6 text-amber-950"
       >
         <AlertIcon className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" />
         <p>
-          {documents.length === 0
-            ? "Chưa có hồ sơ nguồn trong công trình này. AI trả lời “Không tìm thấy thông tin này trong hồ sơ công trình hiện có.” cho mọi câu hỏi kỹ thuật."
-            : "Dữ kiện AI trích xuất chưa được kiểm chứng toàn bộ. Tiến độ thi công không phải nghiệm thu; chỉ dùng citation để đối chiếu bản vẽ gốc."}
+          {suggestionsLoading && documents.length === 0
+            ? "Đang kiểm tra dữ liệu cấu kiện và tiến độ của công trình..."
+            : documents.length > 0
+              ? "Dữ kiện AI trích xuất chưa được kiểm chứng toàn bộ. Tiến độ thi công không phải nghiệm thu; chỉ dùng nguồn trích dẫn để đối chiếu bản vẽ gốc."
+              : suggestions.length > 0
+                ? "Chưa có bản vẽ nguồn, nhưng AI vẫn trả lời được từ database cấu kiện và tiến độ. Thiếu dữ kiện thì trả câu từ chối chuẩn."
+                : "Chưa có dữ liệu cấu kiện, tiến độ hay bản vẽ nguồn. AI sẽ trả lời “Không tìm thấy thông tin này trong hồ sơ công trình hiện có.”"}
         </p>
       </div>
 
@@ -172,6 +176,8 @@ function EngineeringAIProjectPage({ projectId }: Props) {
       <ChatPanel
         key={projectId}
         projectId={projectId}
+        suggestions={suggestions}
+        suggestionsLoading={suggestionsLoading}
         onOpenCitation={openCitation}
         onOpenComponent={openComponent}
       />

@@ -127,3 +127,4 @@ export default function ParticipantsEditor({ items, onChange, disabled = false }
     </section>
   );
 }
+
