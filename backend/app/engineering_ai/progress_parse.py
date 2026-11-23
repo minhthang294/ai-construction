@@ -315,6 +315,45 @@ def _question_option(label: str, value: str) -> ProgressParseQuestionOptionOut:
     return ProgressParseQuestionOptionOut(label_vi=label, value=value)
 
 
+def _group_questions(
+    questions: List[ProgressParseQuestionOut],
+) -> List[ProgressParseQuestionOut]:
+    grouped: List[ProgressParseQuestionOut] = []
+    index: Dict[Tuple[str, Tuple[Tuple[str, str], ...]], ProgressParseQuestionOut] = {}
+    for question in questions:
+        key = (question.kind, tuple((o.label_vi, o.value) for o in question.options))
+        existing = index.get(key)
+        if existing is None:
+            copy = question.model_copy(deep=True)
+            copy.target_codes = list(question.codes)
+            index[key] = copy
+            grouped.append(copy)
+            continue
+        existing.codes = list(dict.fromkeys([*existing.codes, *question.codes]))
+        existing.target_codes = list(
+            dict.fromkeys([*existing.target_codes, *question.target_codes, *question.codes])
+        )
+        merged_apply = dict(existing.apply)
+        for field in ("event_ids", "codes"):
+            values = list(
+                dict.fromkeys(
+                    [*merged_apply.get(field, []), *question.apply.get(field, [])]
+                )
+            )
+            merged_apply[field] = values
+        if (
+            merged_apply.get("stage_definition_id")
+            != question.apply.get("stage_definition_id")
+        ):
+            merged_apply["stage_definition_id"] = None
+        existing.apply = merged_apply
+        if question.kind not in {"outside_scope", "status_confirm"}:
+            existing.message_vi = (
+                f"{existing.message_vi} Áp dụng cho: {', '.join(existing.codes)}."
+            )
+    return grouped
+
+
 def progress_parse(
     db: Session,
     project_id: str,
@@ -852,7 +891,7 @@ def progress_parse(
         date_source=date_source,
         batch_id=batch_id,
         lines=out_lines,
-        questions=questions,
+        questions=_group_questions(questions),
         unknown_codes=unknown_codes,
         warnings=warnings,
     )

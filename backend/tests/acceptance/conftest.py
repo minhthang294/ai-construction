@@ -276,6 +276,11 @@ def db_engine():
 
 
 @pytest.fixture()
+def session_factory(db_engine):
+    return sessionmaker(bind=db_engine, autoflush=False, autocommit=False, future=True)
+
+
+@pytest.fixture()
 def actor():
     return type("User", (), {"id": "human-confirmer", "role": "project_manager"})()
 

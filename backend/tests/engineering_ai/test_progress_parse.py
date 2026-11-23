@@ -591,6 +591,69 @@ def test_stage_labels_and_questions_show_component_t(client, session_factory):
     assert seeded["by_code"]["I49"] == item["component_id"]
 
 
+def test_same_kind_and_options_are_grouped_for_apply_all(client, session_factory):
+    with session_factory() as db:
+        zone = StructureZone(project_id="p1", name="Cầu chính", name_key="cau chinh")
+        db.add(zone)
+        db.flush()
+        segment = Segment(zone_id=zone.id, number=2, source_code="PD2")
+        db.add(segment)
+        db.flush()
+        definitions = []
+        for index, name in enumerate(
+            (
+                "Đục bê tông om vỡ dày trung bình t",
+                "Đục bê tông om vỡ đáy sườn t",
+            )
+        ):
+            definition = StageDefinition(
+                project_id="p1",
+                component_type="pile",
+                code=f"DUP-{index}",
+                name=name,
+                position=index,
+            )
+            db.add(definition)
+            definitions.append(definition)
+        db.flush()
+        for code in ("I69", "I70"):
+            component = StructuralComponent(
+                project_id="p1",
+                segment_id=segment.id,
+                type="pile",
+                raw_code=code,
+                canonical_code=code,
+                verification="verified",
+                created_by="u1",
+            )
+            db.add(component)
+            db.flush()
+            for definition in definitions:
+                db.add(
+                    ComponentStage(
+                        component_id=component.id,
+                        stage_definition_id=definition.id,
+                        repair_scope_id="scope-1",
+                        created_by="u1",
+                    )
+                )
+        db.commit()
+
+    body = client.post(
+        "/api/v1/projects/p1/ai/progress-parse",
+        json={"text": "Cọc đục ngày 22/11\nI69,70"},
+    ).json()
+    stage_questions = [q for q in body["questions"] if q["kind"] == "multiple_stage"]
+    assert len(stage_questions) == 1
+    assert stage_questions[0]["codes"] == ["I69", "I70"]
+    assert stage_questions[0]["target_codes"] == ["I69", "I70"]
+    assert len(stage_questions[0]["options"]) == 2
+    assert {item["code"] for line in body["lines"] for item in line["items"]} == {
+        "I69",
+        "I70",
+    }
+
+
 def test_unknown_code_and_missing_status_questions(client, session_factory):
     _seed(session_factory)
     response = client.post(

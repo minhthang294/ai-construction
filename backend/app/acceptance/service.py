@@ -43,6 +43,7 @@ from .schemas import (
     ParticipantProfileUpdate,
     RecordIn,
     RecordUpdate,
+    RequestFromComponentsIn,
     RequestIn,
     RequestUpdate,
 )
@@ -1000,6 +1001,138 @@ def create_request(
 def _sync_dm(
     request: AcceptanceRequest, previous_number: Optional[str] = None
 ) -> None:
+    """Write the workbook copy without ever rolling back the saved PYC."""
+
+    result = sync_request_to_dm(request, previous_number=previous_number)
+    request.excel_sync_warning = (
+        result.message if not result.synced and result.message else None
+    )
+
+
+def _fold_text(value: object) -> str:
+    return " ".join(str(value or "").casefold().split())
+
+
+def _next_working_day(base: date) -> date:
+    candidate = base
+    while candidate.weekday() >= 5:  # Saturday/Sunday
+        candidate = date.fromordinal(candidate.toordinal() + 1)
+    return candidate
+
+
+def create_request_from_components(
+    db: Session,
+    project_id: str,
+    payload: RequestFromComponentsIn,
+    actor_id: Optional[str],
+) -> AcceptanceRequest:
+    """Create a draft PYC from pending components; no acceptance is inferred."""
+
+    from .pending import pending_acceptance
+
+    requested_ids = list(dict.fromkeys(payload.component_ids))
+    pending = pending_acceptance(
+        db,
+        project_id,
+        stage_definition_id=payload.stage_definition_id,
+    )
+    pending_by_id = {
+        component.component_id: (group, component)
+        for group in pending.groups
+        for component in group.components
+    }
+    selected = [
+        pending_by_id[component_id]
+        for component_id in requested_ids
+        if component_id in pending_by_id
+    ]
+    if len(selected) != len(requested_ids):
+        raise AcceptanceError(
+            409,
+            "Chỉ tạo PYC từ cấu kiện đang chờ nghiệm thu và chưa được xác nhận.",
+            "components_not_pending",
+        )
+
+    zones = {group.zone for group, _component in selected}
+    segments = {group.segment for group, _component in selected}
+    codes = [component.code for _group, component in selected]
+    stage_names = list(dict.fromkeys(group.stage_name for group, _component in selected))
+    if len(zones) == 1 and len(segments) == 1:
+        location = f"{next(iter(zones))} - Phân đoạn {next(iter(segments))} - {', '.join(codes)}"
+    else:
+        location = f"Nhiều vị trí - {', '.join(codes)}"
+    stage_label = stage_names[0]
+    if len(stage_names) > 1:
+        stage_label += f" (+{len(stage_names) - 1} công đoạn khác)"
+    work_item_id = None
+    if _SharedWorkItem is not None:
+        try:
+            from app.core.component_models import ComponentWorkLink
+
+            work_texts = {
+                _fold_text(value)
+                for value in db.scalars(
+                    select(ComponentWorkLink.work).where(
+                        ComponentWorkLink.component_id.in_(requested_ids)
+                    )
+                ).all()
+                if value
+            }
+            if work_texts:
+                work_items = list(
+                    db.scalars(
+                        select(_SharedWorkItem).where(
+                            _SharedWorkItem.project_id == project_id
+                        )
+                    ).all()
+                )
+                matches = [
+                    item for item in work_items if _fold_text(item.name) in work_texts
+                ]
+                if len(matches) == 1:
+                    work_item_id = matches[0].id
+        except Exception:  # noqa: BLE001 - WorkItem mapping is best effort only
+            work_item_id = None
+    proposal_base = payload.event_date or max(
+        component.event_date for _group, component in selected
+    )
+    request_date = payload.request_date or _next_working_day(
+        date.fromordinal(proposal_base.toordinal() + 1)
+    )
+    request_payload = RequestIn(
+        status="draft",
+        work_item_id=work_item_id,
+        request_date=request_date,
+        location=location[:500],
+        subject=stage_label[:500],
+        content=(
+            f"Nghiệm thu {stage_label} cho {', '.join(codes)} tại {location}. "
+            "Phiếu nháp tạo từ danh sách chờ nghiệm thu; chưa có kết luận nghiệm thu."
+        ),
+        field="construction",
+        urgency="normal",
+        notes="Tạo từ danh sách chờ nghiệm thu. Chưa xác nhận nghiệm thu.",
+    )
+    request = create_request(db, project_id, request_payload, actor_id)
+    replace_component_links(
+        db,
+        project_id,
+        request_id=request.id,
+        links=[
+            ComponentLinkIn(
+                component_id=component.component_id,
+                stage_id=component.stage_id,
+                scope_id=component.scope_id,
+            )
+            for _group, component in selected
+        ],
+        actor_id=actor_id,
+    )
+    db.refresh(request)
+    return request
+
+
+
     """Write the workbook copy without ever rolling back the saved PYC."""
 
     result = sync_request_to_dm(request, previous_number=previous_number)

@@ -218,6 +218,7 @@ class ProgressParseQuestionOut(BaseModel):
     message_vi: str
     options: List[ProgressParseQuestionOptionOut] = Field(default_factory=list)
     codes: List[str] = Field(default_factory=list)
+    target_codes: List[str] = Field(default_factory=list)
     apply: dict[str, Any] = Field(default_factory=dict)
 
 

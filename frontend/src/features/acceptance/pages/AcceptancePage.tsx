@@ -12,6 +12,7 @@ import {
   createRecord,
   createRecordRevision,
   createRequest,
+  createRequestFromComponents,
   deleteRequest,
   downloadExport,
   exportRecord,
@@ -20,6 +21,7 @@ import {
   getProjectContext,
   getRequestDailyReport,
   listParticipantProfiles,
+  listPendingAcceptance,
   listRecords,
   listRequests,
   listWorkItems,
@@ -44,12 +46,14 @@ import {
 import { confirmRecord } from "../lib/api";
 import type {
   AcceptanceExport,
+  AcceptanceNavigationPayload,
   AcceptanceRecord,
   AcceptanceRequest,
   ChecklistInput,
   LinkedDailyReport,
   ParticipantInput,
   ParticipantProfile,
+  PendingAcceptanceResponse,
   PreviewPayload,
   ProjectContext,
   RecordInput,
@@ -69,6 +73,11 @@ import {
 type Props = {
   projectId: string;
   onDirtyChange?: (dirty: boolean) => void;
+  /**
+   * App-level navigation payload from the site paste flow.  The app shell owns
+   * the type in ``frontend/src/app``; this page reads it through this prop.
+   */
+  initialState?: AcceptanceNavigationPayload | null;
 };
 
 type Tab = "requests" | "records";
@@ -97,6 +106,11 @@ type RecordDraft = {
   participants: ParticipantInput[];
   checklist: ChecklistInput[];
 };
+
+function shortDate(value: string): string {
+  const [year, month, day] = value.split("-");
+  return year && month && day ? `${day}/${month}/${year}` : value;
+}
 
 function today(): string {
   return new Intl.DateTimeFormat("en-CA", {
@@ -214,7 +228,11 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Thao tác thất bại.";
 }
 
-export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
+export default function AcceptancePage({
+  projectId,
+  onDirtyChange,
+  initialState,
+}: Props) {
   const [tab, setTab] = useState<Tab>("requests");
   const [requests, setRequests] = useState<AcceptanceRequest[]>([]);
   const [records, setRecords] = useState<AcceptanceRecord[]>([]);
@@ -237,6 +255,10 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
   const [previewBusy, setPreviewBusy] = useState(false);
   const [requestDirty, setRequestDirty] = useState(false);
   const [recordDirty, setRecordDirty] = useState(false);
+  const [pending, setPending] = useState<PendingAcceptanceResponse | null>(null);
+  const [pendingSelected, setPendingSelected] = useState<Set<string>>(new Set());
+  const [pendingBusy, setPendingBusy] = useState(false);
+  const initialComponentKey = (initialState?.component_ids ?? []).join(",");
   const onDirtyChangeRef = useRef(onDirtyChange);
 
   useEffect(() => {
@@ -273,6 +295,81 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
     setRecords(recordList);
     return { requestList, recordList };
   }
+
+  async function loadPending() {
+    const data = await listPendingAcceptance(projectId, {
+      batch_id: initialState?.batch_id,
+      stage_definition_id: initialState?.stage_definition_id,
+    });
+    setPending(data);
+    return data;
+  }
+
+  function togglePending(componentId: string) {
+    setPendingSelected((current) => {
+      const next = new Set(current);
+      if (next.has(componentId)) next.delete(componentId);
+      else next.add(componentId);
+      return next;
+    });
+  }
+
+  async function createPendingRequest() {
+    if (pendingSelected.size === 0 || pendingBusy) return;
+    setPendingBusy(true);
+    setError(null);
+    try {
+      const created = await createRequestFromComponents(projectId, {
+        component_ids: [...pendingSelected],
+        stage_definition_id: initialState?.stage_definition_id ?? null,
+        event_date: initialState?.event_date ?? null,
+      });
+      await Promise.all([refresh(), loadPending()]);
+      setPendingSelected(new Set());
+      setTab("requests");
+      setEditingRequest(created);
+      setMessage(
+        `Đã tạo PYC nháp ${created.number} cho ${pendingSelected.size} cấu kiện. Chưa xác nhận nghiệm thu.`,
+      );
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setPendingBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    let active = true;
+    setPending(null);
+    setPendingSelected(new Set(initialState?.component_ids ?? []));
+    listPendingAcceptance(projectId, {
+      batch_id: initialState?.batch_id,
+      stage_definition_id: initialState?.stage_definition_id,
+    })
+      .then((data) => {
+        if (!active) return;
+        setPending(data);
+        const pendingIds = new Set(
+          data.groups.flatMap((group) =>
+            group.components.map((component) => component.component_id),
+          ),
+        );
+        const requested = initialState?.component_ids ?? [];
+        if (requested.length) {
+          setPendingSelected(
+            new Set(requested.filter((componentId) => pendingIds.has(componentId))),
+          );
+        }
+      })
+      .catch((cause) => {
+        if (active) setError(errorMessage(cause));
+      });
+    return () => {
+      active = false;
+    };
+    // The navigation payload is read once per project/initial navigation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, initialState?.batch_id, initialState?.stage_definition_id, initialComponentKey]);
 
   useEffect(() => {
     let active = true;
@@ -579,6 +676,7 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
       const request = requestList.find((item) => item.id === confirmed.request_id);
       loadDraft(draftFor(confirmed, request, projectContext));
       setRecords(recordList);
+      await loadPending();
       setConfirming(false);
       setMessage("Đã ghi nhận xác nhận của người có quyền.");
     } catch (cause) {
@@ -819,6 +917,75 @@ export default function AcceptancePage({ projectId, onDirtyChange }: Props) {
           </span>
         ))}
       </div>
+
+      {pending && pending.total_components > 0 && (
+        <section
+          aria-label="Chờ nghiệm thu"
+          className="rounded-xl border border-amber-200 bg-amber-50/60 p-3 shadow-sm sm:p-4"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-base font-semibold text-amber-950">
+              Chờ nghiệm thu ({pending.total_components})
+            </h2>
+            <span className="text-sm text-amber-900">
+              Hoàn thành thi công, chưa có BBNT xác nhận
+            </span>
+          </div>
+          <p className="mt-1 text-sm leading-6 text-amber-900">
+            Tiến độ thi công không phải nghiệm thu. Chọn cấu kiện để lập phiếu
+            yêu cầu; BBNT chỉ được xác nhận bởi người có quyền.
+          </p>
+          <div className="mt-3 space-y-3">
+            {pending.groups.map((group) => (
+              <div
+                key={`${group.stage_name}-${group.zone}-${group.segment}`}
+                className="rounded-lg border border-amber-200 bg-white p-3"
+              >
+                <h3 className="text-sm font-semibold text-slate-900 [overflow-wrap:anywhere]">
+                  {group.stage_name}
+                </h3>
+                <p className="mt-0.5 text-sm text-slate-600">
+                  {group.zone} · Phân đoạn {group.segment} ·{" "}
+                  {group.event_dates.map(shortDate).join(", ")}
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {group.components.map((component) => {
+                    const selected = pendingSelected.has(component.component_id);
+                    return (
+                      <label
+                        key={component.component_id}
+                        className={`flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
+                          selected
+                            ? "border-teal-700 bg-teal-50 text-teal-900"
+                            : "border-slate-300 bg-white text-slate-800"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          className="h-5 w-5 accent-teal-700"
+                          checked={selected}
+                          onChange={() => togglePending(component.component_id)}
+                        />
+                        <span className="font-medium">{component.code}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => void createPendingRequest()}
+            disabled={pendingSelected.size === 0 || pendingBusy}
+            className="mt-3 min-h-11 w-full rounded bg-teal-700 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50 sm:w-auto"
+          >
+            {pendingBusy
+              ? "Đang tạo PYC nháp..."
+              : `Tạo PYC nháp cho ${pendingSelected.size} cấu kiện`}
+          </button>
+        </section>
+      )}
 
       {error && !editingRequest && !draft && (
         <div role="alert" className="rounded bg-rose-50 p-3 text-sm text-rose-900">

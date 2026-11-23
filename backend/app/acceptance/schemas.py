@@ -143,6 +143,41 @@ class RequestUpdate(BaseModel):
     notes: Optional[str] = None
 
 
+class RequestFromComponentsIn(BaseModel):
+    component_ids: List[str] = Field(min_length=1, max_length=200)
+    stage_definition_id: Optional[str] = None
+    event_date: Optional[date] = None
+    request_date: Optional[date] = None
+
+
+class PendingAcceptanceComponentOut(BaseModel):
+    component_id: str
+    code: str
+    type: str
+    event_id: str
+    event_date: date
+    stage_id: str
+    stage_definition_id: str
+    scope_id: Optional[str] = None
+    stage_name: str
+
+
+class PendingAcceptanceGroupOut(BaseModel):
+    stage_name: str
+    zone: str
+    segment: int
+    event_dates: List[date] = Field(default_factory=list)
+    components: List[PendingAcceptanceComponentOut] = Field(default_factory=list)
+
+
+class PendingAcceptanceResponse(BaseModel):
+    project_id: str
+    batch_id: Optional[str] = None
+    stage_definition_id: Optional[str] = None
+    groups: List[PendingAcceptanceGroupOut] = Field(default_factory=list)
+    total_components: int = 0
+
+
 class RequestOut(OrmBase):
     id: str
     project_id: str

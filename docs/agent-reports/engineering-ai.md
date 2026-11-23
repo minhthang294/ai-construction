@@ -1,5 +1,19 @@
 # Engineering AI Agent Report
 
+## 2026-11-23 — grouped progress-parse questions
+
+- `progress_parse` now returns grouped questions when kind and option list are
+  identical: one question with `codes` and `target_codes` listing every target
+component, merged
+  `apply.codes`/`event_ids`, and per-code ids kept in the same response lines.
+  Multiple-stage questions with component-specific `t` labels only group when
+  the labels match; otherwise they stay separate so the displayed thickness is
+  never wrong for another component.
+- New test seeds two piles with the same two stage candidates and asserts one
+  `multiple_stage` question with `codes=["I69","I70"]`.
+- Verification: engineering tests `128 passed`; full backend `374 passed,
+  6 skipped, 0 failed`; `npm test` 210 passed; `npm run build` OK.
+
 ## 2026-11-23 — per-pile design parameters in chat and progress paste
 
 Uses the shared `backend/app/core/design_parameters.py` helper (no copy or

@@ -23,6 +23,41 @@ export type FieldKind = "construction" | "electric" | "mechanical";
 export type Urgency = "normal" | "urgent" | "very_urgent";
 export type YesNo = "yes" | "no";
 
+export type AcceptanceNavigationPayload = {
+  batch_id?: string | null;
+  event_date?: string | null;
+  component_ids?: string[];
+  stage_definition_id?: string | null;
+};
+
+export type PendingAcceptanceComponent = {
+  component_id: string;
+  code: string;
+  type: string;
+  event_id: string;
+  event_date: string;
+  stage_id: string;
+  stage_definition_id: string;
+  scope_id?: string | null;
+  stage_name: string;
+};
+
+export type PendingAcceptanceGroup = {
+  stage_name: string;
+  zone: string;
+  segment: number;
+  event_dates: string[];
+  components: PendingAcceptanceComponent[];
+};
+
+export type PendingAcceptanceResponse = {
+  project_id: string;
+  batch_id?: string | null;
+  stage_definition_id?: string | null;
+  groups: PendingAcceptanceGroup[];
+  total_components: number;
+};
+
 export type AcceptanceParticipant = {
   id: string;
   role: ParticipantRole;

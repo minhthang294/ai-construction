@@ -46,21 +46,25 @@ from .schemas import (
     ParticipantProfileIn,
     ParticipantProfileOut,
     ParticipantProfileUpdate,
+    PendingAcceptanceResponse,
     PreviewOut,
     RecordIn,
     RecordOut,
     RecordUpdate,
+    RequestFromComponentsIn,
     RequestIn,
     RequestOut,
     RequestUpdate,
     WorkItemAcceptanceHistoryOut,
 )
+from .pending import pending_acceptance
 from .service import (
     confirm_record,
     create_profile,
     create_record,
     create_record_revision,
     create_request,
+    create_request_from_components,
     delete_profile,
     delete_request,
     download_filename,
@@ -248,6 +252,45 @@ def create_acceptance_request(
 ):
     try:
         request = create_request(db, project_id, payload, current_user_id(user))
+    except AcceptanceError as exc:
+        return _error(exc)
+    return RequestOut.model_validate(request)
+
+
+@router.get(
+    "/projects/{project_id}/acceptance/pending",
+    response_model=PendingAcceptanceResponse,
+)
+def get_pending_acceptance(
+    project_id: str,
+    batch_id: Optional[str] = None,
+    stage_definition_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    user=Depends(require_project_member),
+):
+    return pending_acceptance(
+        db,
+        project_id,
+        batch_id=batch_id,
+        stage_definition_id=stage_definition_id,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/acceptance/requests/from-components",
+    response_model=RequestOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_acceptance_request_from_components(
+    project_id: str,
+    payload: RequestFromComponentsIn,
+    db: Session = Depends(get_db),
+    user=Depends(require_editor),
+):
+    try:
+        request = create_request_from_components(
+            db, project_id, payload, current_user_id(user)
+        )
     except AcceptanceError as exc:
         return _error(exc)
     return RequestOut.model_validate(request)

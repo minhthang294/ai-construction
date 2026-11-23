@@ -1,6 +1,47 @@
 # Acceptance (PYC/BBNT) Agent Report
 
-## Codex integration update — 11/11/2026
+## 2026-11-23 - pending acceptance queue and PYC prefill
+
+- New read-only `GET /projects/{p}/acceptance/pending?batch_id&stage_definition_id`
+  (`pending.py`): selects components whose latest non-voided `PROGRESS` event is
+  `COMPLETED`; voided events, in-progress latest events and other projects are
+  ignored. Components with a confirmed BBNT link for the same stage/scope are
+  excluded; a PYC draft link does not count as acceptance.
+  Groups by `display_stage_name` (per-pile `t`), zone and segment, with event
+  dates and per-component event/stage/scope ids.
+- New `POST /projects/{p}/acceptance/requests/from-components` creates one draft
+  PYC from selected pending component ids: location = zone/segment/codes,
+  subject/content = stage display name + codes, request date = next working day
+  after the event date (editable), links each component/stage/scope in pending
+  request state. It rejects non-pending/confirmed components with `409`; no
+  record is created and nothing is marked accepted.
+- Nghiệm thu top section "Chờ nghiệm thu" lists grouped pending components with
+  checkboxes and "Tạo PYC nháp cho N cấu kiện". It reads an optional
+  `initialState` prop `{batch_id, event_date, component_ids,
+  stage_definition_id}` from the app-level paste navigation (app owns the type;
+  this page exposes `AcceptanceNavigationPayload`). Selected ids in the payload
+  are pre-checked only when still pending.
+- Deterministic exports/templates were not modified.
+
+Files/tests: `backend/app/acceptance/{pending.py (new), router.py, schemas.py,
+service.py}`, `backend/tests/acceptance/{conftest.py,
+test_pending_acceptance.py (new)}`, frontend acceptance page/types/api.
+Tests cover voided ignored, confirmed excluded, project scope, batch/stage
+filters, PYC prefill links and no-confirmation, next working day.
+
+Verification: full backend `374 passed, 6 skipped, 0 failed`; `npm test` 210
+passed. `npm run build` currently fails only in the site agent's in-progress
+`frontend/src/features/site/components/PhotoCapture.tsx` (JSX parse errors);
+`npx tsc -b` had passed for the acceptance changes before that concurrent edit.
+
+Unresolved: WorkItem prefill is best effort: it links a unique core WorkItem only
+when its normalized name exactly matches a `component_work_links.work` text for
+the selected components; otherwise `work_item_id` stays empty and the stage/codes
+remain in subject/content. `frontend/src/app` does not yet pass `initialState`;
+the page accepts it when the app wiring lands. The pending queue refreshes after PYC creation and BBNT
+confirmation; external progress changes require reopening/reloading the page.
+
+## Codex integration update - 11/11/2026
 
 Acceptance router and frontend page are mounted. Export history and audit use the shared `generated_documents` and `audit_logs` tables; the integrated Alembic migration omits the former module-local duplicate tables. PYC creation fills missing common project fields from `Project`; downloads are limited to acceptance kinds and the project's private export directory. Remaining integration items are recorded in the "Unresolved issues" section below.
 

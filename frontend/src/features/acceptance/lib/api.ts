@@ -7,6 +7,7 @@ import type {
   NumberingConfig,
   ParticipantProfile,
   ParticipantProfileInput,
+  PendingAcceptanceResponse,
   PreviewPayload,
   ProjectContext,
   RecordInput,
@@ -142,6 +143,36 @@ export async function getProjectContext(
 
 export function listRequests(projectId: string): Promise<AcceptanceRequest[]> {
   return jsonRequest(`/projects/${projectId}/acceptance-requests`, { method: "GET" });
+}
+
+export function listPendingAcceptance(
+  projectId: string,
+  params: { batch_id?: string | null; stage_definition_id?: string | null } = {},
+): Promise<PendingAcceptanceResponse> {
+  const query = new URLSearchParams();
+  if (params.batch_id) query.set("batch_id", params.batch_id);
+  if (params.stage_definition_id) {
+    query.set("stage_definition_id", params.stage_definition_id);
+  }
+  const suffix = query.size ? `?${query.toString()}` : "";
+  return jsonRequest(`/projects/${projectId}/acceptance/pending${suffix}`, {
+    method: "GET",
+  });
+}
+
+export function createRequestFromComponents(
+  projectId: string,
+  body: {
+    component_ids: string[];
+    stage_definition_id?: string | null;
+    event_date?: string | null;
+    request_date?: string | null;
+  },
+): Promise<AcceptanceRequest> {
+  return jsonRequest(
+    `/projects/${projectId}/acceptance/requests/from-components`,
+    jsonInit("POST", body),
+  );
 }
 
 export function getRequest(projectId: string, requestId: string): Promise<AcceptanceRequest> {
