@@ -9,9 +9,10 @@ import {
   useConstructionBatch,
   useConstructionBatches,
 } from "../features/site/hooks/useConstructionBatch";
+import { listComponentProgress } from "../features/site/lib/api";
+import type { ProgressRow } from "../features/site/lib/componentProgress";
 import {
   AcceptanceIcon,
-  ArrowRightIcon,
   CameraIcon,
   CheckCircleIcon,
   ClockIcon,
@@ -395,34 +396,33 @@ export function Dashboard({
   token,
   projectId,
   date,
-  project,
   onNavigate,
 }: {
   token: string;
   projectId: string;
   date: string;
-  project?: Project;
   onNavigate?: (page: string) => void;
 }) {
-  const [photos, setPhotos] = useState<{ id: string; upload_time: string }[]>([]);
-  const [report, setReport] = useState<{ report_date: string; manpower: { count: number | null }[] } | null>(null);
+  const [report, setReport] = useState<{ report_date: string } | null>(null);
   const [summary, setSummary] = useState<ConstructionProgressSummary | null>(null);
   const [summaryFailed, setSummaryFailed] = useState(false);
   const [latestDay, setLatestDay] = useState<LatestDay | null>(null);
   const [latestFailed, setLatestFailed] = useState(false);
   const [segments, setSegments] = useState<SegmentProgress[] | null>(null);
   const [segmentsFailed, setSegmentsFailed] = useState(false);
-  const [issueCounts, setIssueCounts] = useState<Record<string, number> | null>(null);
+  const [rows, setRows] = useState<ProgressRow[] | null>(null);
+  const [issues, setIssues] = useState<Array<{ type: string; component_id: string }> | null>(null);
   const [issuesFailed, setIssuesFailed] = useState(false);
-  const { batchId, setBatchId } = useConstructionBatch(projectId);
   const {
     batches,
     loading: batchLoading,
     error: batchError,
   } = useConstructionBatches(projectId);
+  const { batchId, setBatchId } = useConstructionBatch(projectId, batches, batchLoading);
   const batchQuery = batchId ? `?batch_id=${encodeURIComponent(batchId)}` : "";
   useEffect(() => {
     const controller = new AbortController();
+    setSummaryFailed(false);
     request(`/projects/${projectId}/progress/summary${batchQuery}`, token, { signal: controller.signal }).then(
       (data: ConstructionProgressSummary) => {
         if (!controller.signal.aborted) setSummary(data);
@@ -435,44 +435,69 @@ export function Dashboard({
   }, [projectId, token, batchQuery]);
   useEffect(() => {
     const controller = new AbortController();
+    setLatestFailed(false);
+    setSegmentsFailed(false);
+    setIssuesFailed(false);
     Promise.allSettled([
       request(`/projects/${projectId}/overview/latest-day${batchQuery}`, token, { signal: controller.signal }),
       request(`/projects/${projectId}/overview/segments${batchQuery}`, token, { signal: controller.signal }),
       request(`/projects/${projectId}/reconciliation/issues`, token, { signal: controller.signal }),
-    ]).then(([latest, segment, issues]) => {
+      listComponentProgress(projectId, undefined, batchId || undefined),
+    ]).then(([latest, segment, issuesResult, batchRows]) => {
       if (controller.signal.aborted) return;
       if (latest.status === "fulfilled") setLatestDay(latest.value);
       else setLatestFailed(true);
       if (segment.status === "fulfilled") setSegments(segment.value.segments);
       else setSegmentsFailed(true);
-      if (issues.status === "fulfilled") setIssueCounts(issues.value.counts);
+      if (issuesResult.status === "fulfilled") setIssues(issuesResult.value.issues);
       else setIssuesFailed(true);
+      if (batchRows.status === "fulfilled") setRows(batchRows.value);
+      else setRows(null);
     });
     return () => controller.abort();
-  }, [projectId, token, batchQuery]);
+  }, [projectId, token, batchQuery, batchId]);
   useEffect(() => {
     let active = true;
-    Promise.allSettled([
-      request(`/projects/${projectId}/photos`, token),
-      request(`/projects/${projectId}/daily-reports/${date}`, token),
-    ]).then(([photo, daily]) => {
-      if (!active) return;
-      if (photo.status === "fulfilled") setPhotos(photo.value);
-      if (daily.status === "fulfilled") setReport(daily.value);
-      else setReport(null);
-    });
+    request(`/projects/${projectId}/daily-reports/${date}`, token).then(
+      (daily) => {
+        if (active) setReport(daily);
+      },
+      () => {
+        if (active) setReport(null);
+      },
+    );
     return () => { active = false; };
   }, [projectId, token, date]);
-  const manpower = report ? report.manpower.reduce((sum, entry) => sum + (entry.count ?? 0), 0) : 0;
-  const totalIssues = issueCounts ? Object.values(issueCounts).reduce((sum, value) => sum + value, 0) : null;
+  const batchIds = rows ? new Set(rows.map((row) => row.id)) : null;
+  const scopedIssues = issues
+    ? batchId
+      ? batchIds
+        ? issues.filter((issue) => batchIds.has(issue.component_id))
+        : null
+      : issues
+    : null;
+  const scopedIssueCounts = scopedIssues
+    ? scopedIssues.reduce<Record<string, number>>((counts, issue) => {
+        counts[issue.type] = (counts[issue.type] ?? 0) + 1;
+        return counts;
+      }, {})
+    : null;
+  const acceptedCount = rows
+    ? rows.filter(
+        (row) => row.acceptance_status === "CONFIRMED" || row.acceptance_status === "APPROVED",
+      ).length
+    : summary?.acceptance?.confirmed ?? 0;
+  const inProgressCount = rows
+    ? rows.filter((row) => row.construction_status === "IN_PROGRESS").length
+    : summary?.construction.in_progress ?? 0;
+  const totalIssues = scopedIssues ? scopedIssues.length : null;
   const cards = [
-    ["Đang thi công", summary ? summary.construction.in_progress : "—", "Cấu kiện đang thi công", "#0369a1"],
-    ["Hoàn thành chưa nghiệm thu", issueCounts ? issueCounts.WORK_WITHOUT_ACCEPTANCE ?? 0 : "—", "Thi công xong, chưa có BBNT", "#b45309"],
-    ["Đã nghiệm thu", summary ? summary.acceptance?.confirmed ?? 0 : "—", "BBNT đã xác nhận", "#15803d"],
+    ["Đang thi công", rows ? inProgressCount : summary ? summary.construction.in_progress : "—", "Cấu kiện đang thi công", "#b45309"],
+    ["Hoàn thành chưa nghiệm thu", scopedIssueCounts ? scopedIssueCounts.WORK_WITHOUT_ACCEPTANCE ?? 0 : "—", "Thi công xong, chưa có BBNT", "#15803d"],
+    ["Đã nghiệm thu", rows || summary ? acceptedCount : "—", "BBNT đã xác nhận", "#405e9b"],
     ["Cần xử lý", totalIssues ?? "—", "Từ đối soát dữ liệu", "#b91c1c"],
   ] as const;
   const quickActions = [
-    { label: "Ghi tiến độ từ tin nhắn", page: "progress-paste", icon: WorkIcon, description: "Dán tin nhắn Zalo" },
     { label: "Cập nhật tiến độ thi công", page: "components", icon: WorkIcon, description: "Ghi tiến độ theo mã cọc, dầm" },
     { label: "Báo cáo hiện trường", page: "daily-report", icon: CameraIcon, description: "Nhân lực, ảnh, nhật ký" },
     { label: "Lập phiếu nghiệm thu", page: "acceptance", icon: AcceptanceIcon, description: "PYC và BBNT" },
@@ -481,16 +506,8 @@ export function Dashboard({
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow={project?.name || "Công trường"}
         title="Tổng quan hôm nay"
         description={`${formatDashboardDate(date)} · Nắm nhanh tiến độ, báo cáo và các việc cần xử lý.`}
-        actions={
-          onNavigate && (
-            <button type="button" className="app-button app-button-primary" onClick={() => onNavigate("daily-report")}>
-              <CameraIcon className="h-4 w-4" /> Cập nhật hiện trường
-            </button>
-          )
-        }
       />
       <ConstructionBatchSelector
         batches={batches}
@@ -499,9 +516,37 @@ export function Dashboard({
         loading={batchLoading}
         error={batchError}
       />
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        {cards.map(([label, value, hint, accent]) => (
+          <div key={label} className="app-kpi" style={{ "--kpi-accent": accent } as CSSProperties}>
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-600">{label}</p>
+            <p className="mt-1 text-3xl font-semibold tabular-nums tracking-tight text-slate-950">{value}</p>
+            <p className="mt-1 app-text-secondary">{hint}</p>
+          </div>
+        ))}
+      </div>
+      {issuesFailed && (
+        <p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          Chưa tải được số đối soát; hai thẻ “Hoàn thành chưa nghiệm thu” và “Cần xử lý” đang tạm trống.
+        </p>
+      )}
       <section className="app-card app-card-pad">
         <h2 className="text-base font-semibold text-slate-950">Việc nhanh</h2>
-        <div className="mt-3 grid gap-2 min-[375px]:grid-cols-2 xl:grid-cols-4">
+        <button
+          type="button"
+          className="mt-3 flex min-h-14 w-full items-center gap-3 rounded-xl bg-[#405e9b] px-3 py-3 text-left text-white shadow-sm hover:bg-[#344c7e] disabled:opacity-60"
+          onClick={() => onNavigate?.("progress-paste")}
+          disabled={!onNavigate}
+        >
+          <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-white/15 text-white">
+            <WorkIcon className="size-5" />
+          </span>
+          <span className="min-w-0">
+            <span className="block text-base font-semibold">Ghi tiến độ từ tin nhắn</span>
+            <span className="block text-sm text-slate-100">Dán tin nhắn Zalo, xem lại rồi ghi</span>
+          </span>
+        </button>
+        <div className="mt-2 grid gap-2 min-[375px]:grid-cols-2 xl:grid-cols-4">
           {quickActions.map(({ page, label, icon: ActionIcon, description }) => (
             <button
               key={page}
@@ -524,44 +569,20 @@ export function Dashboard({
       <LatestDayCard
         day={latestDay}
         failed={latestFailed}
-        onOpenSite={onNavigate ? () => onNavigate("daily-report") : undefined}
+        today={date}
+        todayReportExists={Boolean(report)}
+        onOpenTodayReport={onNavigate ? () => onNavigate("daily-report") : undefined}
       />
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(20rem,.75fr)]">
-        <section className="app-card app-card-pad">
-          <h2 className="text-base font-semibold text-slate-950">Tiến độ thi công</h2>
-          {summaryFailed ? (
-            <p role="alert" className="mt-3 text-sm text-red-800">Chưa tải được tiến độ thi công.</p>
-          ) : summary ? (
-            <ConstructionProgressChart summary={summary} />
-          ) : (
-            <p role="status" className="mt-3 text-sm text-slate-600">Đang tải tiến độ thi công…</p>
-          )}
-        </section>
-        <div>
-          <section className="app-card app-card-pad">
-            <h2 className="text-base font-semibold text-slate-950">Báo cáo ngày</h2>
-            <div className="mt-3 space-y-2 text-sm">
-              <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
-                <span className="text-slate-600">Trạng thái</span>
-                <span className={`font-semibold ${report ? "text-emerald-700" : "text-amber-700"}`}>{report ? "Đã ghi" : "Chưa có"}</span>
-              </div>
-              <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
-                <span className="text-slate-600">Nhân lực</span>
-                <span className="font-semibold tabular-nums text-slate-900">{report ? manpower : "—"}</span>
-              </div>
-              <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
-                <span className="text-slate-600">Ảnh mới nhất</span>
-                <span className="max-w-[10rem] truncate text-right text-xs text-slate-700">{photos[0]?.upload_time || "Chưa có"}</span>
-              </div>
-            </div>
-            {onNavigate && (
-              <button type="button" className="app-button app-button-secondary mt-3 w-full" onClick={() => onNavigate("daily-report")}>
-                Mở báo cáo hôm nay <ArrowRightIcon className="h-4 w-4" />
-              </button>
-            )}
-          </section>
-        </div>
-      </div>
+      <section className="app-card app-card-pad">
+        <h2 className="text-base font-semibold text-slate-950">Tiến độ thi công</h2>
+        {summaryFailed ? (
+          <p role="alert" className="mt-3 text-sm text-red-800">Chưa tải được tiến độ thi công.</p>
+        ) : summary ? (
+          <ConstructionProgressChart summary={summary} />
+        ) : (
+          <p role="status" className="mt-3 text-sm text-slate-600">Đang tải tiến độ thi công…</p>
+        )}
+      </section>
       <section className="app-card app-card-pad">
         <h2 className="text-base font-semibold text-slate-950">Tiến độ theo đoạn</h2>
         {segmentsFailed ? (
@@ -572,20 +593,6 @@ export function Dashboard({
           <p role="status" className="mt-3 text-sm text-slate-600">Đang tải tiến độ theo đoạn…</p>
         )}
       </section>
-      {issuesFailed && (
-        <p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-          Chưa tải được số đối soát; hai thẻ “Hoàn thành chưa nghiệm thu” và “Cần xử lý” đang tạm trống.
-        </p>
-      )}
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {cards.map(([label, value, hint, accent]) => (
-          <div key={label} className="app-kpi" style={{ "--kpi-accent": accent } as CSSProperties}>
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</p>
-            <p className="mt-1 text-3xl font-semibold tabular-nums tracking-tight text-slate-950">{value}</p>
-            <p className="mt-1 text-xs text-slate-500">{hint}</p>
-          </div>
-        ))}
-      </div>
     </div>
   );
 }

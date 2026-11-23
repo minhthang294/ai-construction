@@ -10,6 +10,7 @@ import {
   CheckCircleIcon,
   ChevronDownIcon,
   CloseIcon,
+  ComponentIcon,
   DashboardIcon,
   DocumentsIcon,
   KeyIcon,
@@ -76,7 +77,7 @@ const PAGE_META: Record<PageId, { label: string; description: string }> = {
 
 const NAV_ITEMS: Array<{ id: PageId; icon: typeof DashboardIcon }> = [
   { id: "dashboard", icon: DashboardIcon },
-  { id: "components", icon: ProjectIcon },
+  { id: "components", icon: ComponentIcon },
   { id: "daily-report", icon: SiteIcon },
   { id: "acceptance", icon: AcceptanceIcon },
   { id: "documents", icon: DocumentsIcon },
@@ -289,7 +290,7 @@ export default function App() {
   }
 
   const selected = projects.find((project) => project.id === projectId);
-  const initials = (username || "U").slice(0, 2).toUpperCase();
+  const initials = (username.trim()[0] || "U").toUpperCase();
   const meta = PAGE_META[page];
 
   return (
@@ -486,9 +487,11 @@ export default function App() {
           </div>
         </header>
 
-        <main id="main-content" className="mx-auto w-full max-w-[96rem] px-4 pb-28 pt-3 sm:px-6 sm:pt-5 lg:pb-10">
-          {page !== "dashboard" && page !== "projects" && (
-            <button type="button" onClick={goBack} className={`app-button app-button-ghost mb-3 min-h-11 px-2 ${page === "components" ? "hidden lg:inline-flex" : ""}`}>
+        <main id="main-content" className="mx-auto w-full max-w-[96rem] px-4 pb-60 pt-3 sm:px-6 sm:pt-5 lg:pb-10">
+          {page !== "dashboard" &&
+            page !== "projects" &&
+            !NAV_ITEMS.some((item) => item.id === page) && (
+            <button type="button" onClick={goBack} className="app-button app-button-ghost mb-3 min-h-11 px-2">
               <ArrowLeftIcon className="h-4 w-4" /> Quay lại
             </button>
           )}
@@ -527,7 +530,7 @@ export default function App() {
               </button>
             </section>
           ) : page === "dashboard" ? (
-            <Dashboard key={projectId} token={token} projectId={projectId} date={today} project={selected} onNavigate={(next) => navigate(next as PageId)} />
+            <Dashboard key={projectId} token={token} projectId={projectId} date={today} onNavigate={(next) => navigate(next as PageId)} />
           ) : page === "work-items" ? (
             <WorkItemList token={token} projectId={projectId} />
           ) : page === "progress-paste" ? (
@@ -569,7 +572,7 @@ export default function App() {
                 onClick={() => navigate(item)}
               >
                 <ItemIcon className="h-5 w-5" aria-hidden="true" />
-                <span className="max-w-full text-balance text-center text-[11px] leading-tight font-semibold">{PAGE_META[item].label}</span>
+                <span className="app-nav-label max-w-full text-balance text-center font-semibold">{PAGE_META[item].label}</span>
               </button>
             );
           })}

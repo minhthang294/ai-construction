@@ -81,8 +81,14 @@ function errorMessage(error: unknown): string {
 }
 
 function StatusChip({ status }: { status: string }) {
+  const tone: Record<string, string> = {
+    NOT_STARTED: "app-status app-status--not-started",
+    IN_PROGRESS: "app-status app-status--in-progress",
+    COMPLETED: "app-status app-status--completed",
+    BLOCKED: "app-status app-status--blocked",
+  };
   return (
-    <span className="inline-flex rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-800">
+    <span className={tone[status] ?? "app-status app-status--not-started"}>
       {constructionStatusLabel(status)}
     </span>
   );
@@ -840,10 +846,10 @@ export default function DailyProgressPanel({ projectId, batchId, primaryZone, in
             );
           })}
 
-          <div className="sticky bottom-0 z-20 -mx-1 flex flex-col gap-2 border-t border-slate-200 bg-white/95 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] shadow-[0_-6px_16px_rgba(15,23,42,0.08)] backdrop-blur sm:static sm:mx-0 sm:flex-row sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none sm:backdrop-blur-none">
+          <div className="sticky bottom-[calc(3.75rem+env(safe-area-inset-bottom))] z-20 -mx-1 flex flex-row items-stretch gap-2 border-t border-slate-200 bg-white/95 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] shadow-[0_-6px_16px_rgba(15,23,42,0.08)] backdrop-blur sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none sm:backdrop-blur-none">
             <button
               type="button"
-              className={`${SECONDARY_BUTTON} ${FOCUS_RING}`}
+              className={`${SECONDARY_BUTTON} shrink-0 ${FOCUS_RING}`}
               disabled={
                 busy !== null || draft.lines.length >= MAX_DAILY_PROGRESS_LINES
               }

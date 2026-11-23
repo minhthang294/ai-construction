@@ -568,6 +568,7 @@ export default function PhotoCapture({
         <select
           className="min-h-11 w-full rounded-lg border border-gray-300 bg-white px-2 text-sm"
           value={category}
+          aria-label="Phân loại ảnh"
           onChange={(event) => setCategory(event.target.value)}
         >
           <option value="">Chưa phân loại (không vào báo cáo)</option>
@@ -580,6 +581,7 @@ export default function PhotoCapture({
         <select
           className="min-h-11 w-full rounded-lg border border-gray-300 bg-white px-2 text-sm"
           value={workItemId}
+          aria-label="Gắn công việc cho ảnh"
           onChange={(event) => setWorkItemId(event.target.value)}
         >
           <option value="">Gắn công việc (tuỳ chọn)</option>
@@ -595,6 +597,7 @@ export default function PhotoCapture({
         <input
           className="min-h-11 w-full rounded-lg border border-gray-300 px-2 text-sm"
           placeholder="Vị trí ảnh (vd: Trụ T1)"
+          aria-label="Vị trí ảnh"
           value={location}
           disabled={busy || prepared.length > 0}
           onChange={(event) => setLocation(event.target.value)}
@@ -602,12 +605,14 @@ export default function PhotoCapture({
         <input
           className="min-h-11 w-full rounded-lg border border-gray-300 px-2 text-sm"
           placeholder="Hạng mục (vd: Bê tông)"
+          aria-label="Hạng mục ảnh"
           value={component}
           onChange={(event) => setComponent(event.target.value)}
         />
         <select
           className="min-h-11 w-full rounded-lg border border-gray-300 bg-white px-2 text-sm"
           value={stage}
+          aria-label="Giai đoạn ảnh"
           onChange={(event) => setStage(event.target.value)}
         >
           <option value="">Chưa phân giai đoạn</option>
@@ -755,6 +760,7 @@ export default function PhotoCapture({
           <input
             type="date"
             className="min-h-10 w-full rounded-lg border border-gray-300 px-2 text-sm"
+            aria-label="Lọc ảnh theo ngày"
             value={filterDraft.date}
             onChange={(event) =>
               setFilterDraft({ ...filterDraft, date: event.target.value })
@@ -763,6 +769,7 @@ export default function PhotoCapture({
           <input
             className="min-h-10 w-full rounded-lg border border-gray-300 px-2 text-sm"
             placeholder="Vị trí"
+            aria-label="Lọc ảnh theo vị trí"
             value={filterDraft.location}
             onChange={(event) =>
               setFilterDraft({ ...filterDraft, location: event.target.value })
@@ -771,6 +778,7 @@ export default function PhotoCapture({
           <input
             className="min-h-10 w-full rounded-lg border border-gray-300 px-2 text-sm"
             placeholder="Hạng mục"
+            aria-label="Lọc ảnh theo hạng mục"
             value={filterDraft.component}
             onChange={(event) =>
               setFilterDraft({ ...filterDraft, component: event.target.value })
@@ -778,6 +786,7 @@ export default function PhotoCapture({
           />
           <select
             className="min-h-10 w-full rounded-lg border border-gray-300 bg-white px-2 text-sm"
+            aria-label="Lọc ảnh theo giai đoạn"
             value={filterDraft.stage}
             onChange={(event) =>
               setFilterDraft({ ...filterDraft, stage: event.target.value })
@@ -792,6 +801,7 @@ export default function PhotoCapture({
           </select>
           <select
             className="min-h-10 w-full rounded-lg border border-gray-300 bg-white px-2 text-sm"
+            aria-label="Lọc ảnh theo công việc"
             value={filterDraft.work_item_id}
             onChange={(event) =>
               setFilterDraft({ ...filterDraft, work_item_id: event.target.value })

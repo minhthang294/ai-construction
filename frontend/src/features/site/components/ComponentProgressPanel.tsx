@@ -75,19 +75,15 @@ function errorMessage(error: unknown): string {
 }
 
 const STATUS_STYLES: Record<string, string> = {
-  NOT_STARTED: "border-red-300 bg-red-100 text-red-900",
-  IN_PROGRESS: "border-amber-300 bg-amber-100 text-amber-950",
-  COMPLETED: "border-emerald-300 bg-emerald-100 text-emerald-950",
-  BLOCKED: "border-violet-300 bg-violet-100 text-violet-950",
+  NOT_STARTED: "app-status app-status--not-started",
+  IN_PROGRESS: "app-status app-status--in-progress",
+  COMPLETED: "app-status app-status--completed",
+  BLOCKED: "app-status app-status--blocked",
 };
 
 function StatusChip({ status }: { status: string }) {
   return (
-    <span
-      className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${
-        STATUS_STYLES[status] ?? "border-slate-300 bg-slate-100 text-slate-800"
-      }`}
-    >
+    <span className={STATUS_STYLES[status] ?? "app-status app-status--not-started"}>
       {constructionStatusLabel(status)}
     </span>
   );
@@ -96,14 +92,14 @@ function StatusChip({ status }: { status: string }) {
 function AcceptanceChip({ status }: { status: string }) {
   const tone =
     status === "APPROVED" || status === "CONFIRMED"
-      ? "border-emerald-300 bg-emerald-100 text-emerald-950"
+      ? "app-acceptance-badge app-acceptance-badge--confirmed"
       : status === "REJECTED"
-        ? "border-red-300 bg-red-100 text-red-900"
+        ? "app-acceptance-badge app-acceptance-badge--rejected"
         : status === "PENDING" || status === "CONDITIONAL"
-          ? "border-amber-300 bg-amber-100 text-amber-950"
-          : "border-slate-300 bg-slate-100 text-slate-800";
+          ? "app-acceptance-badge app-acceptance-badge--pending"
+          : "app-acceptance-badge app-acceptance-badge--neutral";
   return (
-    <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${tone}`}>
+    <span className={tone}>
       {acceptanceStatusLabel(status)}
     </span>
   );

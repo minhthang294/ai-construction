@@ -1,4 +1,3 @@
-import { ArrowRightIcon } from "./AppIcons";
 import {
   componentUnit,
   formatLatestDayLine,
@@ -11,30 +10,27 @@ import {
 export default function LatestDayCard({
   day,
   failed,
-  onOpenSite,
+  today,
+  todayReportExists,
+  onOpenTodayReport,
 }: {
   day: LatestDay | null;
   failed: boolean;
-  onOpenSite?: () => void;
+  today: string;
+  todayReportExists: boolean;
+  onOpenTodayReport?: () => void;
 }) {
   const codes = day ? uniqueCodes(day.works) : [];
 
   return (
     <section className="app-card app-card-pad" aria-labelledby="latest-day-title">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 id="latest-day-title" className="text-base font-semibold text-slate-950">
-            Báo cáo ngày gần nhất
-          </h2>
-          <p className="mt-1 text-xs leading-5 text-slate-500">
-            Ngày gần nhất có tiến độ thi công hoặc báo cáo ngày đã ghi.
-          </p>
-        </div>
-        {onOpenSite && (
-          <button type="button" className="app-button app-button-secondary min-h-10 px-3" onClick={onOpenSite}>
-            Mở Hiện trường <ArrowRightIcon className="h-4 w-4" />
-          </button>
-        )}
+      <div>
+        <h2 id="latest-day-title" className="text-base font-semibold text-slate-950">
+          Báo cáo ngày
+        </h2>
+        <p className="mt-1 text-xs leading-5 text-slate-600">
+          Ngày gần nhất có tiến độ thi công hoặc báo cáo ngày đã ghi.
+        </p>
       </div>
 
       {failed ? (
@@ -69,9 +65,9 @@ export default function LatestDayCard({
 
           {day.works.length > 0 && (
             <details className="mt-3 rounded-xl border border-slate-200 bg-white">
-              <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 text-sm font-medium text-slate-800 [&::-webkit-details-marker]:hidden">
+              <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 text-sm font-medium text-slate-800 [&::-webkit-details-marker]:hidden">
                 Danh sách mã cấu kiện
-                <span className="text-xs font-normal text-slate-500">{codes.length} mã</span>
+                <span className="text-xs font-normal text-slate-600">{codes.length} mã</span>
               </summary>
               <div className="space-y-3 border-t border-slate-100 px-4 py-3">
                 {day.works.map((work) => (
@@ -86,7 +82,20 @@ export default function LatestDayCard({
             </details>
           )}
 
-          <p className="mt-3 text-xs text-slate-500">
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2">
+            <p className="text-sm text-slate-700">
+              Hôm nay {formatShortDate(today)}:{" "}
+              <span className="font-semibold">
+                {todayReportExists ? "đã có báo cáo" : "chưa có báo cáo"}
+              </span>
+            </p>
+            {onOpenTodayReport ? (
+              <button type="button" className="app-button app-button-secondary min-h-11 px-3" onClick={onOpenTodayReport}>
+                {todayReportExists ? "Mở báo cáo hôm nay" : "Tạo báo cáo hôm nay"}
+              </button>
+            ) : null}
+          </div>
+          <p className="mt-2 text-xs text-slate-600">
             Ngày ghi nhận {formatShortDate(day.date)} · Nghiệm thu chỉ lấy từ BBNT đã xác nhận.
           </p>
         </>

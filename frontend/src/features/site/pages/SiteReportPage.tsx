@@ -673,8 +673,7 @@ export default function SiteReportPage({
 
   return (
     <div
-      className="mx-auto w-full max-w-4xl space-y-4"
-      style={{ paddingBottom: "calc(4rem + env(safe-area-inset-bottom))" }}
+      className="mx-auto w-full max-w-4xl space-y-4 pb-[calc(11rem+env(safe-area-inset-bottom))] lg:pb-10"
     >
       <header className="app-card app-card-pad">
         <div className="flex items-start justify-between gap-2">
@@ -895,7 +894,7 @@ export default function SiteReportPage({
       </p>
 
       <div
-        className="fixed inset-x-0 bottom-0 z-30 border-t border-gray-200 bg-white/95 px-3 pt-3 backdrop-blur"
+        className="fixed inset-x-0 bottom-[calc(3.75rem+env(safe-area-inset-bottom))] z-30 border-t border-gray-200 bg-white/95 px-3 pt-3 backdrop-blur lg:bottom-0"
         style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}
       >
         <div className="mx-auto max-w-2xl space-y-2">
@@ -930,7 +929,7 @@ export default function SiteReportPage({
           <div className="flex gap-2">
             <button
               type="button"
-              className="min-h-12 flex-1 rounded-xl bg-green-700 px-4 text-base font-semibold text-white active:bg-green-800 disabled:opacity-60"
+              className="min-h-12 flex-1 rounded-xl bg-[#405e9b] px-4 text-base font-semibold text-white active:bg-[#344c7e] disabled:opacity-60"
               disabled={saving || serverConflict != null}
               onClick={() => void handleSave()}
             >

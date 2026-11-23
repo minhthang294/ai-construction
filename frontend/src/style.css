@@ -8,6 +8,18 @@
   --color-teal-900: #253e6d;
   --color-red-600: #e5322c;
 }
+
+/* Field readability tokens: phone-first sizes, outdoor contrast, status language. */
+:root {
+  --app-text-secondary: #475569;
+  --app-touch: 2.75rem;
+  --app-construction-not-started: #64748b;
+  --app-construction-in-progress: #b45309;
+  --app-construction-completed: #15803d;
+  --app-construction-blocked: #b91c1c;
+  --app-acceptance: #405e9b;
+}
+
 html {
   -webkit-text-size-adjust: 100%;
 }
@@ -128,7 +140,7 @@ a:focus-visible {
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
 }
 .app-input::placeholder {
-  color: #94a3b8;
+  color: #64748b;
 }
 .app-input:focus {
   border-color: #405e9b;
@@ -142,9 +154,9 @@ a:focus-visible {
   color: #334155;
 }
 .app-help {
-  font-size: 0.75rem;
-  line-height: 1.25rem;
-  color: #64748b;
+  font-size: 0.875rem;
+  line-height: 1.35rem;
+  color: #475569;
 }
 .app-badge {
   display: inline-flex;
@@ -154,7 +166,7 @@ a:focus-visible {
   border: 1px solid #e2e8f0;
   background: #f8fafc;
   padding: 0.125rem 0.5rem;
-  font-size: 0.6875rem;
+  font-size: 0.875rem;
   font-weight: 600;
   color: #475569;
 }
@@ -228,6 +240,133 @@ a:focus-visible {
 }
 }
 
+.app-text-secondary {
+  font-size: 0.875rem;
+  line-height: 1.4;
+  color: var(--app-text-secondary);
+}
+.app-touch {
+  min-height: var(--app-touch);
+  min-width: var(--app-touch);
+}
+.app-tab-scroll {
+  display: flex;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+.app-tab-scroll::-webkit-scrollbar {
+  display: none;
+}
+.app-status {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid;
+  border-radius: 999px;
+  padding: 0.125rem 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.35rem;
+}
+.app-status--not-started {
+  border-color: #cbd5e1;
+  background: #e2e8f0;
+  color: #334155;
+}
+.app-status--in-progress {
+  border-color: #fcd34d;
+  background: #fef3c7;
+  color: #92400e;
+}
+.app-status--completed {
+  border-color: #86efac;
+  background: #dcfce7;
+  color: #166534;
+}
+.app-status--blocked {
+  border-color: #fca5a5;
+  background: #fee2e2;
+  color: #991b1b;
+}
+.app-status-bar--not-started {
+  background: var(--app-construction-not-started);
+}
+.app-status-bar--in-progress {
+  background: var(--app-construction-in-progress);
+}
+.app-status-bar--completed {
+  background: var(--app-construction-completed);
+}
+.app-status-bar--blocked {
+  background: var(--app-construction-blocked);
+}
+.app-acceptance-badge {
+  display: inline-flex;
+  align-items: center;
+  border: 1.5px solid currentColor;
+  border-radius: 999px;
+  background: #fff;
+  padding: 0.125rem 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.35rem;
+}
+.app-acceptance-badge--confirmed {
+  color: #166534;
+}
+.app-acceptance-badge--pending {
+  color: #92400e;
+}
+.app-acceptance-badge--rejected {
+  color: #991b1b;
+}
+.app-acceptance-badge--neutral {
+  color: #475569;
+}
+.app-acceptance-track {
+  border: 1px dashed var(--app-acceptance);
+  background: #fff;
+}
+.app-acceptance-fill {
+  background: repeating-linear-gradient(
+    135deg,
+    var(--app-acceptance) 0 6px,
+    #dbe6f7 6px 12px
+  );
+}
+
+@media (max-width: 639px) {
+  body {
+    font-size: 1rem;
+  }
+  .text-xs {
+    font-size: 0.875rem;
+    line-height: 1.35rem;
+  }
+  .text-\[11px\],
+  .text-\[10px\] {
+    font-size: 0.875rem;
+  }
+  .text-slate-400,
+  .text-gray-400,
+  .text-slate-500,
+  .text-gray-500 {
+    color: var(--app-text-secondary);
+  }
+  button,
+  [role="tab"],
+  summary.app-touch,
+  select,
+  input[type="date"],
+  input[type="time"] {
+    min-height: var(--app-touch);
+  }
+  button {
+    min-width: var(--app-touch);
+  }
+}
+
 @media (min-width: 640px) {
   .app-card-pad {
     padding: 1.25rem;
@@ -242,4 +381,11 @@ a:focus-visible {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* Bottom navigation labels stay compact enough for five columns at 390px. */
+.app-nav-label {
+  font-size: 0.75rem;
+  line-height: 1.15;
+  white-space: nowrap;
 }

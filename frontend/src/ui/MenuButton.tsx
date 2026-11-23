@@ -60,6 +60,7 @@ export default function MenuButton({
         type="button"
         aria-expanded={open}
         aria-controls={panelId}
+        aria-haspopup="menu"
         onClick={() => setOpen((value) => !value)}
         className={triggerClassName}
       >

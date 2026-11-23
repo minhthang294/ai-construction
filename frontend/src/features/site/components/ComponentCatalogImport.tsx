@@ -151,13 +151,17 @@ export default function ComponentCatalogImport({ projectId, onOpenPaste }: Props
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [catalogLimit, setCatalogLimit] = useState(PAGE_SIZE);
 
-  const { batchId, setBatchId } = useConstructionBatch(projectId);
   const {
     batches,
     loading: batchesLoading,
     error: batchesError,
     reload: reloadBatches,
   } = useConstructionBatches(projectId);
+  const { batchId, setBatchId } = useConstructionBatch(
+    projectId,
+    batches,
+    batchesLoading,
+  );
   const selectedBatch = batches.find((batch) => batch.id === batchId) ?? null;
   const primaryZone = selectedBatch?.primary_zone ?? null;
 
@@ -353,6 +357,9 @@ export default function ComponentCatalogImport({ projectId, onOpenPaste }: Props
         onChange={setBatchId}
         loading={batchesLoading}
         error={batchesError}
+        onManage={() =>
+          document.getElementById("batch-manager")?.scrollIntoView({ behavior: "smooth", block: "start" })
+        }
       />
       <ConstructionBatchManager
         projectId={projectId}
@@ -362,7 +369,7 @@ export default function ComponentCatalogImport({ projectId, onOpenPaste }: Props
         onChanged={() => void reloadBatches()}
       />
       <div
-        className="grid grid-cols-3 gap-1 rounded-xl border border-gray-200 bg-white p-1 shadow-sm sm:grid-cols-5"
+        className="app-tab-scroll gap-1 rounded-xl border border-gray-200 bg-white p-1 shadow-sm"
         role="tablist"
         aria-label="Tiến độ, danh mục, nhật ký và mặt bằng cấu kiện"
         onKeyDown={(event) => {
@@ -388,7 +395,7 @@ export default function ComponentCatalogImport({ projectId, onOpenPaste }: Props
             aria-selected={view === id}
             aria-controls={`${tabId}-panel`}
             tabIndex={view === id ? 0 : -1}
-            className={`min-h-11 min-w-0 flex-1 rounded-lg px-2 sm:px-3 ${
+            className={`min-h-11 shrink-0 whitespace-nowrap rounded-lg px-3 ${
               view === id ? "bg-slate-800 text-white shadow-sm" : "text-slate-700 hover:bg-slate-100"
             } ${FOCUS_RING}`}
             onClick={() => setView(id)}

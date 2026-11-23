@@ -11,10 +11,10 @@ export type ConstructionProgressSummary = {
 };
 
 const statusStyles = [
-  ["completed", "Hoàn thành", "bg-emerald-700"],
-  ["in_progress", "Đang thi công", "bg-sky-700"],
-  ["blocked", "Tạm dừng", "bg-amber-700"],
-  ["not_started", "Chưa bắt đầu", "bg-slate-500"],
+  ["completed", "Hoàn thành", "app-status-bar--completed"],
+  ["in_progress", "Đang thi công", "app-status-bar--in-progress"],
+  ["blocked", "Tạm dừng", "app-status-bar--blocked"],
+  ["not_started", "Chưa bắt đầu", "app-status-bar--not-started"],
 ] as const;
 
 const percentage = new Intl.NumberFormat("vi-VN", {

@@ -84,12 +84,16 @@ async function copyText(value: string): Promise<boolean> {
 }
 
 export default function ProgressPastePanel({ projectId, onOpenAcceptance }: Props) {
-  const { batchId, setBatchId } = useConstructionBatch(projectId);
   const {
     batches,
     loading: batchesLoading,
     error: batchesError,
   } = useConstructionBatches(projectId);
+  const { batchId, setBatchId } = useConstructionBatch(
+    projectId,
+    batches,
+    batchesLoading,
+  );
 
   const [text, setText] = useState("");
   const [eventDate, setEventDate] = useState(todayISO());

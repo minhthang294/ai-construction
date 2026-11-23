@@ -1092,3 +1092,69 @@ DATABASE_URL="sqlite:///$TEMP/wave3b-parse.db" ../.venv/Scripts/python -m pytest
 ```
 
 Lưu ý: parser do agent engineering-ai sở hữu có thể còn chỉnh `apply` hints; UI đọc `apply.event_ids/component_ids/action` và fallback theo `id` câu hỏi. Nếu stage thực tế vẫn mơ hồ ở cấp `component_stage`, daily-preview sẽ chặn commit và người dùng quay lại chọn tay ở luồng hiện có. Chưa có E2E trình duyệt cho luồng dán tin nhắn.
+
+## UI fix wave 1 — 2026-11-23
+
+Phạm vi: `frontend/src/app/*`, `frontend/src/features/site/*`, `frontend/src/style.css`; không sửa engineering-ai/acceptance/backend.
+
+### Tổng quan
+
+- 4 KPI chuyển ngay dưới “Đợt thi công”, dạng 2×2 trên điện thoại và 4 cột desktop.
+- “Báo cáo ngày gần nhất” + “Báo cáo ngày” gộp thành một thẻ **Báo cáo ngày**: dòng ngày gần nhất, chip nhân lực/ảnh/báo cáo, danh sách mã, và dòng **“Hôm nay DD/MM: chưa/đã có báo cáo”** kèm nút Tạo/Mở báo cáo hôm nay.
+- Bỏ CTA trùng “Cập nhật hiện trường” ở header. “Ghi tiến độ từ tin nhắn” thành nút primary full-width đầu khối Việc nhanh; 4 quick action còn lại nằm dưới.
+- Thanh đoạn chỉ hiện đoạn có hoạt động (thi công/đã nghiệm thu) và nút “Xem tất cả (N đoạn chưa hoạt động)”.
+- Bỏ eyebrow tên công trình trên Tổng quan (tên đã có ở project selector/sidebar).
+- KPI được tính trong đúng batch: lấy rows `/progress?batch_id` và lọc issues đối soát theo component của batch. Nhờ vậy “Hoàn thành chưa nghiệm thu” và chart khớp nhau (trước đây batch PD2 hiện 30/88 nhưng thẻ đối soát hiện 74 toàn công trình; nay 30/30).
+
+### Đợt thi công mặc định
+
+- `useConstructionBatch(projectId, batches, loading)`:
+  - Có lựa chọn đã lưu → dùng lựa chọn đó (kể cả “Tất cả đợt” lưu sentinel `__all__`).
+  - Chưa có → gọi `/progress?batch_id` cho từng batch, chọn batch có `construction_event` mới nhất (ngày + created_at, đã bỏ sự kiện void); không có hoạt động → tất cả.
+  - Batch đã lưu không còn tồn tại → xoá lựa chọn và fallback.
+- Screenshot xác nhận mặc định chọn “PD2 Cầu chính (88)”.
+
+### Điều hướng & icon
+
+- Bỏ “Quay lại” ở 5 trang cấp 1 (Tổng quan/Cấu kiện/Hiện trường/Nghiệm thu/Hỏi AI); vẫn giữ ở `progress-paste`/Công việc.
+- Thêm `ComponentIcon` (stack) cho Cấu kiện; Hiện trường giữ icon nhà.
+- Avatar lấy chữ cái đầu của username (script chụp không set `last_username` nên ảnh vẫn hiện “U”).
+- Nhãn bottom nav 12px, nowrap để 5 mục không xuống dòng ở 390px.
+
+### Readability & design tokens (`style.css`)
+
+- Tokens: `--app-text-secondary`, `--app-touch: 2.75rem`, màu thi công not-started xám / in-progress amber / completed green / blocked red, acceptance xanh brand riêng.
+- Mobile: body 16px; `.text-xs`/`text-[11px]`/`text-[10px]` nâng 14px; `slate-400/500`, `gray-400/500` đổi sang `#475569`; button/select/tab/input ngày tối thiểu 44px.
+- Status chips dùng `.app-status--*` (ComponentProgress, DailyProgress, DrawingMap, chart). Acceptance trong ComponentProgress dùng badge viền `.app-acceptance-badge--*`; thanh nghiệm thu dùng track nét đứt + fill sọc, không cùng fill với thi công.
+- Tabs Cấu kiện chuyển sang `app-tab-scroll` (overflow-x, không wrap); nút cuối có thể phải vuốt ngang.
+- Sticky action Tiến độ trong ngày chuyển thành một hàng, nằm trên bottom nav; main padding-bottom tăng `pb-60`; trang Hiện trường có padding riêng và save bar nằm trên nav.
+- Nút “Lưu báo cáo” đổi từ xanh lá sang brand `#405e9b` để không trùng nghĩa “hoàn thành/đã nghiệm thu”.
+
+### Một entry dán tin nhắn / màn
+
+- Tổng quan: chỉ nút primary “Ghi tiến độ từ tin nhắn”.
+- Cấu kiện: chỉ nút trong khối Tiến độ trong ngày (tab Ghi theo ngày).
+- Hiện trường: chỉ nút trong header báo cáo ngày.
+- Không còn CTA “Cập nhật hiện trường” trùng.
+
+### Before/after (ảnh chụp mới)
+
+`cd C:/Users/Thang Minh Pham/.claude/jobs/0f99d406/tmp/shots && node shoot.js` → `phone errors: []`, `desktop errors: []`.
+
+| Màn | Trước | Sau |
+| --- | --- | --- |
+| Tổng quan phone | KPI sau ~20 thanh đoạn; 2 thẻ báo cáo; CTA + 5 quick action; eyebrow tên project | KPI 2×2 ngay dưới batch; 1 thẻ “Báo cáo ngày” có dòng hôm nay; primary full-width; đoạn chỉ có hoạt động; không eyebrow |
+| Tổng quan desktop | KPI dưới cùng; quick action wrap 5 | KPI 4 cột trên; primary full-width + 4 action; thẻ báo cáo gộp |
+| Cấu kiện phone | 5 tab wrap 2 hàng; chưa có nút Quản lý đợt ở selector; sticky 2 tầng | Tab scroll ngang 1 hàng; nút Quản lý đợt; sticky 1 hàng trên nav; batch mặc định PD2 |
+| Hiện trường phone | save bar xanh lá ngang nav; ngày 32px | save bar brand nằm trên nav; nút ngày 44px; chữ phụ 14px |
+| Nav | Cấu kiện/Hiện trường cùng icon nhà; label wrap | icon stack/nhà khác nhau; label 12px một dòng; không “Quay lại” cấp 1 |
+
+### Kiểm tra
+
+```bash
+cd frontend
+npm test        # 34 files, 210 tests passed
+npm run build   # OK; main 294,49 kB; CSS 59,21 kB; ComponentCatalogImport 92,85 kB; SiteReportPage 85,82 kB
+```
+
+Rủi ro/ghi chú: default batch gọi `/progress` cho từng batch khi chưa có lựa chọn — sóng yếu có thể chậm nếu có nhiều đợt; có thể thay bằng endpoint count nhẹ sau. Tabs Cấu kiện phải vuốt ngang để thấy “Nhật ký/Mặt bằng”. Nhãn bottom nav dùng 12px (ngoại lệ so với secondary 14px) để giữ 5 mục trên 390px.

@@ -169,7 +169,7 @@ export default function ConstructionBatchManager({
   }
 
   return (
-    <details className="rounded-xl border border-slate-200 bg-white shadow-sm">
+    <details id="batch-manager" className="rounded-xl border border-slate-200 bg-white shadow-sm">
       <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 text-sm font-semibold text-slate-900 [&::-webkit-details-marker]:hidden">
         Quản lý đợt thi công
         <span className="text-xs font-normal text-slate-500">

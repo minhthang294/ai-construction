@@ -66,10 +66,10 @@ const PRIMARY_BUTTON =
   "min-h-11 rounded-lg bg-slate-800 px-4 text-sm font-semibold text-white active:bg-slate-900 disabled:bg-slate-300";
 
 const STATUS_CHIP: Record<string, string> = {
-  NOT_STARTED: "border-slate-300 bg-slate-100 text-slate-800",
-  IN_PROGRESS: "border-amber-300 bg-amber-100 text-amber-950",
-  COMPLETED: "border-emerald-300 bg-emerald-100 text-emerald-950",
-  BLOCKED: "border-violet-300 bg-violet-100 text-violet-950",
+  NOT_STARTED: "app-status app-status--not-started",
+  IN_PROGRESS: "app-status app-status--in-progress",
+  COMPLETED: "app-status app-status--completed",
+  BLOCKED: "app-status app-status--blocked",
 };
 
 function errorMessage(error: unknown): string {
@@ -87,11 +87,7 @@ function isPending(error: unknown): boolean {
 
 function StatusChip({ status }: { status: string }) {
   return (
-    <span
-      className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${
-        STATUS_CHIP[status] ?? "border-slate-300 bg-slate-100 text-slate-800"
-      }`}
-    >
+    <span className={STATUS_CHIP[status] ?? "app-status app-status--not-started"}>
       {constructionStatusLabel(status)}
     </span>
   );

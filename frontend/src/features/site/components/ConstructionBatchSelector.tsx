@@ -26,7 +26,7 @@ export default function ConstructionBatchSelector({
             disabled={loading}
             onChange={(event) => onChange(event.target.value)}
           >
-            <option value="">Tất cả công trình</option>
+            <option value="">Tất cả đợt</option>
             {batches.map((batch) => (
               <option key={batch.id} value={batch.id}>
                 {batch.name} ({batch.component_count})
