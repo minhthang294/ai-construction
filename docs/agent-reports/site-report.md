@@ -945,3 +945,57 @@ Kiểm tra đọc trên DB demo thật (`data/storage/demo-live/app.db`, chỉ S
 - Tên bước lấy nguyên văn từ `component_stage_definitions.name` (dữ liệu DAP đang có hậu tố “dày trung bình t” do lần nhập trước); API không tự sửa tên.
 - Card “Cần xử lý” cộng toàn bộ `counts` đối soát; nếu muốn loại trừ một loại cụ thể cần chỉnh ở frontend.
 - Chưa có test render/E2E cho Dashboard mới; mới kiểm tra bằng helper Vitest, typecheck/build và gọi service trên DB demo.
+
+## Wave 2 UI/UX — 2026-11-23
+
+Phạm vi: `frontend/src/app/*`, `frontend/src/features/site/*`, `frontend/vite.config.ts` (không đổi), báo cáo này. Không sửa `frontend/src/features/engineering-ai`, backend, migration hay `data/`.
+
+### Điều hướng
+
+- Menu chính còn đúng 5 mục theo thứ tự: **Tổng quan, Cấu kiện, Hiện trường, Nghiệm thu, Hỏi AI**. Trang `documents` đổi nhãn thành “Hỏi AI” với mô tả “Hỏi đáp về cấu kiện, tiến độ và bản vẽ có dẫn nguồn”.
+- “Công trình” và “Công việc” chuyển vào menu “Danh mục & cài đặt” ở đáy sidebar desktop và menu tài khoản top-right trên mobile; cả hai dùng lại `frontend/src/ui/MenuButton.tsx`.
+- Bottom nav mobile giữ đúng 5 mục như trên. Page id/state giữ nguyên (`dashboard`, `components`, `daily-report`, `acceptance`, `documents`, `projects`, `work-items`).
+- Quick action ở Tổng quan đổi nhãn thành “Hỏi AI” cho khớp điều hướng.
+
+### Code splitting
+
+`App.tsx` dùng `React.lazy` + `Suspense` cho Cấu kiện, Hiện trường, Nghiệm thu và Hỏi AI, với fallback `role="status"` (“Đang tải …”). Trang Tổng quan/Công trình/Công việc vẫn tải ngay.
+
+| Chunk | Trước | Sau |
+| --- | --- | --- |
+| main `index` | 637,42 kB (gzip 172,71) | **280,53 kB (gzip 84,74)** |
+| `ComponentCatalogImport` | — | 117,78 kB |
+| `SiteReportPage` | — | 88,35 kB |
+| `AcceptancePage` | — | 64,68 kB |
+| `EngineeringAIPage` | — | 39,36 kB |
+| `datetime` shared | — | 8,20 kB |
+| CSS | 57,59 kB | 56,67 kB |
+
+Main chunk giảm ~56% và không còn cảnh báo chunk > 500 kB. Trong lúc làm, `npm run build` có lúc lỗi tạm thời do `features/engineering-ai` đang được agent khác sửa; lần chạy cuối đã build thành công, không sửa file engineering-ai nào.
+
+### Nhập nhanh mã cấu kiện
+
+- Parser thuần `frontend/src/features/site/lib/quickCodeEntry.ts`:
+  - tách theo dấu phẩy/chấm phẩy/khoảng trắng/xuống dòng;
+  - số trần dùng tiền tố chữ gần nhất: `F67,64,57,55, G65,62, H65 B153 155` → `F67 F64 F57 F55 G65 G62 H65 B153 B155`;
+  - mã dầm có gạch giữ nguyên (`I-40-42`, `I40-42`), không phân biệt hoa/thường;
+  - bỏ trùng theo thứ tự nhập, giữ danh sách trùng để hiển thị.
+- Matcher `analyzeQuickCodes` chỉ tìm trong đúng tập cấu kiện đang lọc (khu vực + phân đoạn; ở Tiến độ trong ngày còn theo bước thi công), khớp `canonical_code` trước rồi `raw_code`; cấu kiện đã chọn hoặc bị trùng được báo là bỏ qua.
+- UI `QuickCodeEntry.tsx` hiện xem trước chính xác: số mã khớp, mã khớp, mã không tìm thấy **màu đỏ**, mã trùng/đã chọn; nút “Chọn N cấu kiện đã xem trước” chỉ bấm được khi không còn mã chưa khớp. Không tự chọn từ text.
+- Tích hợp ở `DailyProgressPanel` (trong từng dòng công tác, sau khi chọn bước) và `ComponentProgressPanel` (chế độ “Chọn nhiều”, theo khu/phân đoạn đang lọc).
+
+### UX polish đã làm
+
+1. Fallback Suspense có `role="status"` + `aria-live="polite"` để trình đọc màn hình biết trang đang tải.
+2. Các mục trong menu tài khoản/overflow và menu “Danh mục & cài đặt” dùng `min-h-11` (≥ 44px); trigger sidebar giữ `app-nav-item` 44px.
+3. Dòng “Đang tải dữ liệu…” của Tiến độ trong ngày thêm `role="status"`.
+4. Xem trước nhập nhanh dùng `aria-live="polite"`, lỗi mã chưa khớp màu đỏ, trùng/đã chọn màu hổ phách, nút xác nhận bị vô hiệu khi còn mã sai.
+5. Giữ nguyên empty state hiện có (chưa có cấu kiện/công tác/phân đoạn) và bổ sung thông báo rõ khi chưa có mã khớp; menu cài đặt có icon và trạng thái `aria-current` khi đang ở trang đó.
+
+### Kiểm tra
+
+```bash
+cd frontend
+npm test        # 32 files, 200 tests passed
+npm run build   # OK, main 280,53 kB, không cảnh báo chunk >500 kB
+```

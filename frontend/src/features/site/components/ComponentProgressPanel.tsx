@@ -44,6 +44,7 @@ import {
   type StageDefinition,
 } from "../lib/componentProgress";
 import { formatISODate } from "../lib/datetime";
+import QuickCodeEntry from "./QuickCodeEntry";
 
 type Props = { projectId: string };
 
@@ -384,6 +385,16 @@ export default function ComponentProgressPanel({ projectId }: Props) {
     [selectedRows, designQuantities],
   );
   const selectedSet = useMemo(() => new Set(selected), [selected]);
+  const quickCodeRows = useMemo(
+    () =>
+      rows.filter(
+        (row) =>
+          (!filters.zone || row.zone === filters.zone) &&
+          (!filters.segment ||
+            String(row.segment_number) === filters.segment),
+      ),
+    [rows, filters.zone, filters.segment],
+  );
   const ambiguousSelectedRows = useMemo(
     () => ambiguousStageRows(selectedRows, draft.stage_definition_id),
     [selectedRows, draft.stage_definition_id],
@@ -880,6 +891,17 @@ export default function ComponentProgressPanel({ projectId }: Props) {
               <p className="text-sm text-slate-700">
                 Chọn từng cấu kiện. Đổi bộ lọc sẽ xóa lựa chọn.
               </p>
+              <QuickCodeEntry
+                rows={quickCodeRows}
+                selectedIds={selected}
+                disabled={busy !== null}
+                onConfirm={(ids) => {
+                  setSelected((current) =>
+                    Array.from(new Set([...current, ...ids])),
+                  );
+                  invalidatePreview();
+                }}
+              />
               <div
                 className={`flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-300 bg-white p-2 shadow-sm ${selected.length ? "fixed inset-x-3 bottom-[calc(3.75rem+max(0.5rem,env(safe-area-inset-bottom)))] z-20 mx-auto max-w-3xl shadow-md lg:static" : ""}`}
               >

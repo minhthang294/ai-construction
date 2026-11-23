@@ -1,8 +1,5 @@
-import { useEffect, useState } from "react";
-import { ComponentCatalogImport, SiteReportPage } from "../features/site";
+import { lazy, Suspense, useEffect, useState } from "react";
 import InstallAppButton, { useInstallApp } from "../features/site/components/InstallAppButton";
-import { AcceptancePage } from "../features/acceptance";
-import { EngineeringAIPage } from "../features/engineering-ai";
 import { Dashboard, ProjectSetup, WorkItemList, request } from "./CorePages";
 import type { Project } from "./CorePages";
 import ChangePasswordDialog from "./ChangePasswordDialog";
@@ -22,6 +19,29 @@ import {
   SiteIcon,
   WorkIcon,
 } from "./AppIcons";
+
+const SiteReportPage = lazy(() => import("../features/site/pages/SiteReportPage"));
+const ComponentCatalogImport = lazy(
+  () => import("../features/site/components/ComponentCatalogImport"),
+);
+const AcceptancePage = lazy(
+  () => import("../features/acceptance/pages/AcceptancePage"),
+);
+const EngineeringAIPage = lazy(
+  () => import("../features/engineering-ai/pages/EngineeringAIPage"),
+);
+
+function PageLoading({ label }: { label: string }) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600"
+    >
+      Đang tải {label}…
+    </div>
+  );
+}
 
 export function needsAcceptanceLeaveConfirmation(
   page: string,
@@ -47,17 +67,20 @@ const PAGE_META: Record<PageId, { label: string; description: string }> = {
   components: { label: "Cấu kiện", description: "Danh mục cọc và dầm theo phân đoạn" },
   "daily-report": { label: "Hiện trường", description: "Báo cáo ngày, nhân lực, ảnh và nhật ký" },
   acceptance: { label: "Nghiệm thu", description: "Phiếu yêu cầu và biên bản nghiệm thu" },
-  documents: { label: "Hồ sơ & AI", description: "Bản vẽ, thuyết minh và hỏi đáp có citation" },
+  documents: { label: "Hỏi AI", description: "Hỏi đáp về cấu kiện, tiến độ và bản vẽ có dẫn nguồn" },
 };
 
 const NAV_ITEMS: Array<{ id: PageId; icon: typeof DashboardIcon }> = [
   { id: "dashboard", icon: DashboardIcon },
-  { id: "work-items", icon: WorkIcon },
   { id: "components", icon: ProjectIcon },
   { id: "daily-report", icon: SiteIcon },
   { id: "acceptance", icon: AcceptanceIcon },
   { id: "documents", icon: DocumentsIcon },
+];
+
+const SETTINGS_ITEMS: Array<{ id: PageId; icon: typeof DashboardIcon }> = [
   { id: "projects", icon: ProjectIcon },
+  { id: "work-items", icon: WorkIcon },
 ];
 
 const MOBILE_NAV: PageId[] = ["dashboard", "components", "daily-report", "acceptance", "documents"];
@@ -328,6 +351,34 @@ export default function App() {
         </nav>
 
         <div className="border-t border-slate-200 p-3">
+          <MenuButton
+            className="w-full"
+            label={
+              <>
+                <MenuIcon className="h-5 w-5 shrink-0" />
+                <span>Danh mục &amp; cài đặt</span>
+                <ChevronDownIcon className="ml-auto h-4 w-4 text-slate-400" />
+              </>
+            }
+            triggerClassName="app-nav-item w-full"
+            panelClassName="bottom-full left-0 mb-1 w-full rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl"
+          >
+            {SETTINGS_ITEMS.map((item) => {
+              const ItemIcon = item.icon;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  className="flex min-h-11 w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                  aria-current={page === item.id ? "page" : undefined}
+                  onClick={() => navigate(item.id)}
+                >
+                  <ItemIcon className="h-4 w-4 shrink-0 text-slate-500" />
+                  {PAGE_META[item.id].label}
+                </button>
+              );
+            })}
+          </MenuButton>
           <InstallAppButton {...installApp} />
           <button
             type="button"
@@ -399,16 +450,32 @@ export default function App() {
               triggerClassName="flex min-h-11 cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-2 py-1.5 text-sm hover:bg-slate-50"
               panelClassName="right-0 z-50 mt-2 w-52 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl"
             >
+              {SETTINGS_ITEMS.map((item) => {
+                const ItemIcon = item.icon;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                    aria-current={page === item.id ? "page" : undefined}
+                    onClick={() => navigate(item.id)}
+                  >
+                    <ItemIcon className="h-4 w-4 shrink-0 text-slate-500" />
+                    {PAGE_META[item.id].label}
+                  </button>
+                );
+              })}
+              <div className="my-1 border-t border-slate-100" aria-hidden="true" />
               <button
                 type="button"
-                className="block min-h-10 w-full rounded-lg px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                className="block min-h-11 w-full rounded-lg px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
                 onClick={() => {
                   if (canLeaveAcceptance(page)) setShowChangePassword(true);
                 }}
               >
                 Đổi mật khẩu
               </button>
-              <button type="button" className="block min-h-10 w-full rounded-lg px-3 py-2 text-left text-sm text-red-700 hover:bg-red-50" onClick={signOut}>
+              <button type="button" className="block min-h-11 w-full rounded-lg px-3 py-2 text-left text-sm text-red-700 hover:bg-red-50" onClick={signOut}>
                 Đăng xuất
               </button>
             </MenuButton>
@@ -421,6 +488,7 @@ export default function App() {
               <ArrowLeftIcon className="h-4 w-4" /> Quay lại
             </button>
           )}
+          <Suspense fallback={<PageLoading label={meta.label} />}>
           {page === "projects" ? (
             <ProjectSetup
               token={token}
@@ -472,6 +540,7 @@ export default function App() {
           ) : (
             <EngineeringAIPage projectId={projectId} />
           )}
+          </Suspense>
         </main>
       </div>
 

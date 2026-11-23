@@ -463,7 +463,7 @@ export function Dashboard({
     { label: "Cập nhật tiến độ thi công", page: "components", icon: WorkIcon, description: "Ghi tiến độ theo mã cọc, dầm" },
     { label: "Báo cáo hiện trường", page: "daily-report", icon: CameraIcon, description: "Nhân lực, ảnh, nhật ký" },
     { label: "Lập phiếu nghiệm thu", page: "acceptance", icon: AcceptanceIcon, description: "PYC và BBNT" },
-    { label: "Hỏi đáp AI", page: "documents", icon: DocumentsIcon, description: "Hỏi nhanh về công trình" },
+    { label: "Hỏi AI", page: "documents", icon: DocumentsIcon, description: "Hỏi đáp về cấu kiện, tiến độ" },
   ];
   return (
     <div className="space-y-6">

@@ -16,6 +16,7 @@ import {
 } from "../lib/componentProgress";
 import type { ComponentSegment } from "../lib/componentImport";
 import DrawingMapPanel from "./DrawingMapPanel";
+import QuickCodeEntry from "./QuickCodeEntry";
 import { formatISODate } from "../lib/datetime";
 import {
   addDailyProgressLine,
@@ -488,7 +489,7 @@ export default function DailyProgressPanel({ projectId, initialComponentId, init
           </label>
         </div>
         {busy === "load" ? (
-          <p className="mt-2 text-xs text-slate-600">Đang tải dữ liệu…</p>
+          <p role="status" className="mt-2 text-xs text-slate-600">Đang tải dữ liệu…</p>
         ) : null}
         {!busy && !rows.length && !error ? (
           <p className="mt-2 text-sm text-slate-600">
@@ -589,6 +590,21 @@ export default function DailyProgressPanel({ projectId, initialComponentId, init
                   <p className="text-xs text-amber-800">
                     Chưa có công tác theo bộ lọc đang chọn.
                   </p>
+                ) : null}
+
+                {line.stage_definition_id ? (
+                  <QuickCodeEntry
+                    rows={eligible}
+                    selectedIds={line.selected_ids}
+                    disabled={busy !== null}
+                    onConfirm={(ids) =>
+                      updateLine(index, {
+                        selected_ids: Array.from(
+                          new Set([...line.selected_ids, ...ids]),
+                        ),
+                      })
+                    }
+                  />
                 ) : null}
 
                 <button
