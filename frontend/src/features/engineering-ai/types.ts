@@ -124,6 +124,14 @@ export type ChatMessage = {
   no_source?: boolean;
 };
 
+export type QuestionSuggestion = {
+  id: string;
+  label: string;
+  prompt: string;
+  mode: "send" | "fill";
+  badge?: "verified" | "proposed" | "navigation" | "caution" | null;
+};
+
 export type PageExtractionStatus = "proposed" | "verified" | "rejected";
 
 export type PageExtractionRecord = {

@@ -161,6 +161,14 @@ class ChatResponse(BaseModel):
     page_action: Optional[PageActionOut] = None
 
 
+class QuestionSuggestionOut(BaseModel):
+    id: str
+    label: str
+    prompt: str
+    mode: Literal["send", "fill"] = "send"
+    badge: Optional[Literal["verified", "proposed", "navigation", "caution"]] = None
+
+
 class ConversationMessageOut(BaseModel):
     role: str
     content: str

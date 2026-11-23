@@ -1,5 +1,76 @@
 # Engineering AI Agent Report
 
+## 2026-11-23 — wave 2: data-driven chat UX (suggestions, compact citations, mobile composer)
+
+Chat (Hỏi AI) is now mobile-first and suggestion-driven from the project's real
+data.
+
+Backend:
+- New read-only `GET /projects/{p}/ai/question-suggestions` (`suggestions.py`)
+  builds 1-5 chips from `structural_components`, `structure_segments`,
+  `component_stage_definitions`/`component_stages`, `component_progress_events`
+  and design groups. Examples: `PD2 còn bao nhiêu cọc chưa đục bê tông?`,
+  `Cọc F67 đang ở bước nào?`, `Tiến độ ngày 21/11?`,
+  `Mở bản vẽ nhóm cọc 2 PD2`, `Công trình có bao nhiêu cọc?`. No static/OCR-era text.
+  Endpoint returns `[]` when the project has no components.
+- `database_chat.py` now answers progress questions before component lookup:
+  daily progress by date and/or `PDn` (`Tiến độ ngày 21/11 PD2`, bare
+  `21/11 PD2`, `Tiến độ ngày gần nhất?`), pending stage counts
+  (`PD2 còn bao nhiêu cọc chưa đục bê tông?`) and current component stage
+  (`Cọc F67 đang ở bước nào?`). Answers list stage/status/quantity with
+  progress-event record-id citations and keep the "không phải nghiệm thu"
+  warning. `service.ask` tries this DB path before component-fact lookup and
+  falls back to the DB for component questions that extractions cannot answer.
+
+Frontend:
+- `QuestionSuggestions` fetches the endpoint and renders compact chips; the
+  block is hidden once the conversation has messages.
+- `CitationCard` is compact: drawing citations show version/page/drawing and a
+  3-line quote plus "Xem trang"; database component rows show
+  `Cấu kiện <code>` + table + record id and a "Mở cấu kiện" button.
+- Database citations emit `engineering-ai:open-component` with
+  `{projectId, recordId, citation}` on `window`; the app shell owns navigation
+  and can listen for it. Non-component DB rows (progress events, stages) show
+  the table and record id without a button.
+- Composer is sticky at the bottom on mobile (`lg:static` on desktop), Enter
+  sends, Shift+Enter adds a newline, send is disabled while busy, and a failed
+  request keeps the question with a "Thử lại" retry that does not duplicate the
+  user message.
+- Conversation history collapses on mobile behind a toggle (search remains);
+  desktop always shows the list.
+- Added `lib/citations.ts` + test for citation display; removed the old static
+  question library and its test.
+
+Files changed: `backend/app/engineering_ai/{suggestions.py (new),
+database_chat.py, service.py, router.py, schemas.py}`,
+`backend/tests/engineering_ai/test_database_chat.py`,
+`frontend/src/features/engineering-ai/{types.ts, lib/api.ts,
+lib/citations.ts (new), lib/citations.test.ts (new),
+components/QuestionSuggestions.tsx, components/CitationCard.tsx,
+components/ChatPanel.tsx, pages/EngineeringAIPage.tsx}`; deleted
+`frontend/src/features/engineering-ai/lib/questionSuggestions.ts` and its test.
+
+Verification:
+```bash
+cd backend
+DATABASE_URL=sqlite:///<tmp>/app.db SITE_REPORT_STORAGE=<tmp>/site \
+ENGINEERING_AI_STORAGE=<tmp>/engineering ACCEPTANCE_STORAGE=<tmp>/acceptance \
+../.venv/Scripts/python -m pytest tests -q
+# 338 passed, 6 skipped, 0 failed
+
+cd frontend && npm test   # 200 passed (32 files)
+cd frontend && npm run build  # tsc -b + vite build OK
+```
+
+Unresolved:
+- Component navigation is emitted as a browser CustomEvent only; the app shell
+  (owned elsewhere) must add the listener/route. Until then the card still
+  shows the component code, table and record id.
+- Progress date parsing accepts `d/m`, `d-m` and optional year; other date
+  wording (e.g. "hôm qua") is not parsed.
+- Suggestions depend on existing stage definitions/progress; a project with
+  components but no stages gets fewer chips.
+
 ## 2026-11-23 — chat-only module; OCR and non-chat AI removed
 
 Owner decision applied: the module now keeps only AI chat (Hỏi đáp), page

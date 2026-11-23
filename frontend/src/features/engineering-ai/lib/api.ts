@@ -3,6 +3,7 @@ import type {
   Conversation,
   DocumentPage,
   PageExtractionRecord,
+  QuestionSuggestion,
   SourceDocument,
 } from "../types";
 
@@ -58,8 +59,16 @@ export async function fetchResourceBlob(apiUrl: string): Promise<Blob> {
   return fetchAuthenticatedBlob(path);
 }
 
-export async function askEngineeringAI(
+export async function listQuestionSuggestions(
   projectId: string,
+): Promise<QuestionSuggestion[]> {
+  const response = await apiFetch(
+    `/projects/${projectId}/ai/question-suggestions`,
+  );
+  return jsonOrThrow<QuestionSuggestion[]>(response);
+}
+
+export async function askEngineeringAI(  projectId: string,
   message: string,
   conversationId?: string | null,
   topK = 6,

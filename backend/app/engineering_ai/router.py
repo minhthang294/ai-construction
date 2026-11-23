@@ -34,6 +34,7 @@ from .schemas import (
     PageExtractionIn,
     PageExtractionOut,
     PageExtractionVerifyIn,
+    QuestionSuggestionOut,
 )
 from .rate_limit import RateLimitExceeded, check_rate_limit
 from .service import (
@@ -59,6 +60,7 @@ from .service import (
     save_page_extraction,
     verify_page_extraction,
 )
+from .suggestions import question_suggestions
 
 router = APIRouter(prefix="", tags=["engineering-ai"])
 
@@ -331,6 +333,19 @@ def verify_page_extraction_route(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except DocumentValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get(
+    "/projects/{project_id}/ai/question-suggestions",
+    response_model=List[QuestionSuggestionOut],
+)
+def question_suggestions_route(
+    project_id: str,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+    _access=Depends(project_access),
+):
+    return question_suggestions(db, project_id)
 
 
 @router.post("/projects/{project_id}/ai/chat", response_model=ChatResponse)

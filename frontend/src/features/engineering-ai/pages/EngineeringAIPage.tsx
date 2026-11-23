@@ -68,6 +68,16 @@ function EngineeringAIProjectPage({ projectId }: Props) {
     setPageNumber(citation.page_number);
   }
 
+  function openComponent(recordId: string, citation: Citation) {
+    // The app shell can listen and route to the component screen; this module
+    // only emits the event because navigation is owned outside engineering-ai.
+    window.dispatchEvent(
+      new CustomEvent("engineering-ai:open-component", {
+        detail: { projectId, recordId, citation },
+      }),
+    );
+  }
+
   function closePage() {
     scrollToViewerRef.current = false;
     setSelectedId(null);
@@ -159,7 +169,12 @@ function EngineeringAIProjectPage({ projectId }: Props) {
         </div>
       )}
 
-      <ChatPanel key={projectId} projectId={projectId} onOpenCitation={openCitation} />
+      <ChatPanel
+        key={projectId}
+        projectId={projectId}
+        onOpenCitation={openCitation}
+        onOpenComponent={openComponent}
+      />
 
       <details className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
         <summary className="flex min-h-11 cursor-pointer items-center gap-2 text-sm font-semibold text-slate-800">

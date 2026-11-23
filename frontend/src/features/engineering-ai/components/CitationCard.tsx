@@ -1,63 +1,84 @@
 import type { Citation } from "../types";
 import { cx, BUTTON_SECONDARY } from "../lib/ui";
+import { citationDisplay } from "../lib/citations";
 import { ArrowLeftIcon, AlertIcon } from "./icons";
 
 type Props = {
   citation: Citation;
   onOpen?: (citation: Citation) => void;
+  onOpenComponent?: (recordId: string, citation: Citation) => void;
 };
 
-export default function CitationCard({ citation, onOpen }: Props) {
+export default function CitationCard({ citation, onOpen, onOpenComponent }: Props) {
+  const display = citationDisplay(citation);
   const lowOcr = citation.ocr_confidence != null && citation.ocr_confidence < 0.6;
-  const isDatabase = citation.source === "database";
+  const isComponentRow = display.table === "structural_components";
   return (
-    <article className="min-w-0 space-y-2 rounded-lg border border-[#405e9b]/20 bg-[#405e9b]/5 p-3">
+    <article className="min-w-0 space-y-1.5 rounded-lg border border-[#405e9b]/20 bg-[#405e9b]/5 p-2.5">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs leading-5">
         <span className="min-w-0 font-semibold text-[#2f487a] [overflow-wrap:anywhere]">
-          {citation.document_name}
+          {display.title}
         </span>
-        {isDatabase ? (
-          <span className="rounded-full border border-slate-300 bg-white px-2 py-0.5 font-medium text-slate-700">
-            bản ghi {citation.record_id ?? citation.document_id}
-          </span>
+        {display.isDatabase ? (
+          <>
+            <span className="rounded-full border border-slate-300 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-700">
+              {display.table}
+            </span>
+            {display.recordId && (
+              <span className="text-[11px] text-slate-500 [overflow-wrap:anywhere]">
+                bản ghi {display.recordId}
+              </span>
+            )}
+          </>
         ) : (
           <>
-            <span className="rounded-full border border-[#405e9b]/20 bg-white px-2 py-0.5 font-medium text-slate-700">
-              v{citation.version}
-            </span>
-            <span className="text-slate-700">trang {citation.page_number}</span>
-            {citation.drawing_number && (
-              <span className="text-slate-700">bản vẽ {citation.drawing_number}</span>
+            {display.pageLabel && (
+              <span className="rounded-full border border-[#405e9b]/20 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-700">
+                v{citation.version} · {display.pageLabel}
+              </span>
             )}
-            {citation.revision && <span className="text-slate-700">rev {citation.revision}</span>}
-            {citation.section && <span className="text-slate-700">mục {citation.section}</span>}
+            {citation.drawing_number && (
+              <span className="text-[11px] text-slate-600">
+                bản vẽ {citation.drawing_number}
+                {citation.revision ? ` rev ${citation.revision}` : ""}
+              </span>
+            )}
+            {citation.section && (
+              <span className="text-[11px] text-slate-600">mục {citation.section}</span>
+            )}
           </>
         )}
-        {citation.ocr_confidence != null && (
-          <span className={cx(lowOcr ? "font-semibold text-red-700" : "text-slate-600")}>
-            OCR {(citation.ocr_confidence * 100).toFixed(1)}%
-          </span>
-        )}
       </div>
-      <blockquote className="border-l-2 border-[#405e9b]/40 pl-3 text-sm leading-6 text-slate-800 [overflow-wrap:anywhere] whitespace-pre-wrap">
+      <blockquote className="line-clamp-3 border-l-2 border-[#405e9b]/40 pl-2 text-xs leading-5 text-slate-800 [overflow-wrap:anywhere] whitespace-pre-wrap">
         {citation.quote}
       </blockquote>
       {lowOcr && (
-        <p className="flex items-start gap-2 rounded-md bg-red-50 p-2 text-xs leading-5 text-red-800">
-          <AlertIcon className="mt-0.5 h-4 w-4 shrink-0" />
-          Thông tin chưa đủ độ tin cậy, cần kiểm tra trực tiếp bản vẽ gốc.
+        <p className="flex items-start gap-1.5 text-[11px] leading-5 text-amber-800">
+          <AlertIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          Trang nguồn có độ tin cậy thấp; cần kiểm tra bản vẽ gốc.
         </p>
       )}
-      {onOpen && !isDatabase && (
-        <button
-          type="button"
-          className={cx(BUTTON_SECONDARY, "w-full sm:w-auto")}
-          onClick={() => onOpen(citation)}
-        >
-          <ArrowLeftIcon className="h-4 w-4 rotate-180" />
-          Xem trang nguồn
-        </button>
-      )}
+      <div className="flex flex-wrap gap-2">
+        {display.isDatabase && isComponentRow && display.recordId && onOpenComponent && (
+          <button
+            type="button"
+            className={cx(BUTTON_SECONDARY, "min-h-9 px-3 py-1 text-xs")}
+            onClick={() => onOpenComponent(display.recordId!, citation)}
+          >
+            Mở cấu kiện
+          </button>
+        )}
+        {!display.isDatabase && onOpen && (
+          <button
+            type="button"
+            className={cx(BUTTON_SECONDARY, "min-h-9 px-3 py-1 text-xs")}
+            onClick={() => onOpen(citation)}
+          >
+            <ArrowLeftIcon className="h-3.5 w-3.5 rotate-180" />
+            Xem trang
+          </button>
+        )}
+      </div>
     </article>
   );
 }

@@ -27,15 +27,19 @@ import {
 import { ChatIcon, SearchIcon, SpinnerIcon } from "./icons";
 import CitationCard from "./CitationCard";
 import QuestionSuggestions from "./QuestionSuggestions";
-import type { ChatMessage, Citation, Conversation } from "../types";
-import type { QuestionSuggestion } from "../lib/questionSuggestions";
+import type { ChatMessage, Citation, Conversation, QuestionSuggestion } from "../types";
 
 type Props = {
   projectId: string;
   onOpenCitation: (citation: Citation) => void;
+  onOpenComponent?: (recordId: string, citation: Citation) => void;
 };
 
-export default function ChatPanel({ projectId, onOpenCitation }: Props) {
+export default function ChatPanel({
+  projectId,
+  onOpenCitation,
+  onOpenComponent,
+}: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [conversationId, setConversationId] = useState<string | null>(null);
@@ -45,6 +49,8 @@ export default function ChatPanel({ projectId, onOpenCitation }: Props) {
   const [scope, setScope] = useState<"effective" | "history">("effective");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [failedQuestion, setFailedQuestion] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   async function loadConversations(q = search) {
@@ -75,6 +81,7 @@ export default function ChatPanel({ projectId, onOpenCitation }: Props) {
           warnings: message.warnings ?? [],
         })),
       );
+      setHistoryOpen(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Không mở được hội thoại.");
     } finally {
@@ -90,6 +97,7 @@ export default function ChatPanel({ projectId, onOpenCitation }: Props) {
       setConversationId(created.id);
       setConversationTitle(created.title ?? null);
       setMessages([]);
+      setFailedQuestion(null);
       await loadConversations();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Không tạo được hội thoại.");
@@ -143,15 +151,22 @@ export default function ChatPanel({ projectId, onOpenCitation }: Props) {
     });
   }
 
-  async function send(questionOverride?: string) {
+  async function send(
+    questionOverride?: string,
+    options: { appendUser?: boolean } = {},
+  ) {
     const question = (questionOverride ?? input).trim();
     if (!question || busy) return;
+    const appendUser = options.appendUser ?? true;
     setBusy(true);
     setError(null);
-    setMessages((previous) => [
-      ...previous,
-      { role: "user", content: question, citations: [], warnings: [] },
-    ]);
+    setFailedQuestion(null);
+    if (appendUser) {
+      setMessages((previous) => [
+        ...previous,
+        { role: "user", content: question, citations: [], warnings: [] },
+      ]);
+    }
     setInput("");
     try {
       const response = await askEngineeringAI(
@@ -185,10 +200,16 @@ export default function ChatPanel({ projectId, onOpenCitation }: Props) {
         onOpenCitation(target);
       }
     } catch (err) {
+      setFailedQuestion(question);
       setError(err instanceof Error ? err.message : "Không gửi được câu hỏi.");
     } finally {
       setBusy(false);
     }
+  }
+
+  function retry() {
+    if (!failedQuestion || busy) return;
+    void send(failedQuestion, { appendUser: false });
   }
 
   return (
@@ -205,70 +226,86 @@ export default function ChatPanel({ projectId, onOpenCitation }: Props) {
               </h2>
               <p className={cx(META_TEXT, "mt-0.5")}>{conversations.length} hội thoại</p>
             </div>
-            <button
-              type="button"
-              className={cx(BUTTON_PRIMARY, "shrink-0 px-3")}
-              onClick={() => void newConversation()}
-              disabled={busy}
-            >
-              Tạo mới
-            </button>
+            <div className="flex shrink-0 gap-2">
+              <button
+                type="button"
+                className={cx(SECTION_TEXT, "min-h-11 rounded-lg px-2 text-xs font-medium text-[#35507f] hover:bg-slate-100 lg:hidden")}
+                aria-expanded={historyOpen}
+                aria-controls="eai-conversation-list"
+                onClick={() => setHistoryOpen((value) => !value)}
+              >
+                {historyOpen ? "Thu gọn" : "Mở"}
+              </button>
+              <button
+                type="button"
+                className={cx(BUTTON_PRIMARY, "shrink-0 px-3")}
+                onClick={() => void newConversation()}
+                disabled={busy}
+              >
+                Tạo mới
+              </button>
+            </div>
           </div>
 
-          <form
-            className="flex gap-2 p-3"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void loadConversations();
-            }}
+          <div
+            id="eai-conversation-list"
+            className={historyOpen ? "block" : "hidden lg:block"}
           >
-            <label htmlFor="eai-conversation-search" className="sr-only">
-              Tìm hội thoại
-            </label>
-            <input
-              id="eai-conversation-search"
-              className={cx(FIELD_BASE, "min-w-0 flex-1")}
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Tìm hội thoại..."
-            />
-            <button
-              type="submit"
-              className={cx(BUTTON_SECONDARY, "shrink-0 px-3")}
-              aria-label="Tìm hội thoại"
+            <form
+              className="flex gap-2 p-3"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void loadConversations();
+              }}
             >
-              <SearchIcon className="h-4 w-4" />
-            </button>
-          </form>
+              <label htmlFor="eai-conversation-search" className="sr-only">
+                Tìm hội thoại
+              </label>
+              <input
+                id="eai-conversation-search"
+                className={cx(FIELD_BASE, "min-w-0 flex-1")}
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Tìm hội thoại..."
+              />
+              <button
+                type="submit"
+                className={cx(BUTTON_SECONDARY, "shrink-0 px-3")}
+                aria-label="Tìm hội thoại"
+              >
+                <SearchIcon className="h-4 w-4" />
+              </button>
+            </form>
 
-          <div className="max-h-72 space-y-1 overflow-auto p-2 lg:max-h-[28rem]">
-            {conversations.length === 0 && (
-              <p className={cx(PANEL_EMPTY, "text-center")}>Chưa có hội thoại.</p>
-            )}
-            {conversations.map((conversation) => {
-              const active = conversation.id === conversationId;
-              return (
-                <button
-                  key={conversation.id}
-                  type="button"
-                  onClick={() => void openConversation(conversation.id)}
-                  aria-pressed={active}
-                  className={cx(
-                    "w-full min-h-11 rounded-lg p-2.5 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#405e9b]",
-                    active
-                      ? "bg-[#405e9b]/10 text-[#2f487a] ring-1 ring-inset ring-[#405e9b]/30"
-                      : "text-slate-700 hover:bg-slate-50",
-                  )}
-                >
-                  <span className="block text-sm font-medium [overflow-wrap:anywhere]">
-                    {conversation.title || "(không tên)"}
-                  </span>
-                  <span className="mt-0.5 block text-xs text-slate-500">
-                    {conversation.messages.length} lượt
-                  </span>
-                </button>
-              );
-            })}
+            <div className="max-h-72 space-y-1 overflow-auto p-2 lg:max-h-[28rem]">
+              {conversations.length === 0 && (
+                <p className={cx(PANEL_EMPTY, "text-center")}>Chưa có hội thoại.</p>
+              )}
+              {conversations.map((conversation) => {
+                const active = conversation.id === conversationId;
+                return (
+                  <button
+                    key={conversation.id}
+                    type="button"
+                    onClick={() => void openConversation(conversation.id)}
+                    aria-pressed={active}
+                    className={cx(
+                      "w-full min-h-11 rounded-lg p-2.5 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#405e9b]",
+                      active
+                        ? "bg-[#405e9b]/10 text-[#2f487a] ring-1 ring-inset ring-[#405e9b]/30"
+                        : "text-slate-700 hover:bg-slate-50",
+                    )}
+                  >
+                    <span className="block text-sm font-medium [overflow-wrap:anywhere]">
+                      {conversation.title || "(không tên)"}
+                    </span>
+                    <span className="mt-0.5 block text-xs text-slate-500">
+                      {conversation.messages.length} lượt
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </aside>
 
@@ -280,10 +317,9 @@ export default function ChatPanel({ projectId, onOpenCitation }: Props) {
                   {conversationTitle || "Hỏi đáp có citation"}
                 </h2>
                 <p className={cx(SECTION_TEXT, "mt-1 max-w-2xl")}>
-                  Chỉ trả lời từ dữ kiện AI trích xuất và database cấu kiện của công
-                  trình; không dùng văn bản OCR thô. Citation bắt buộc; câu trả lời
-                  thiếu citation sẽ bị thay bằng câu từ chối chuẩn. Tiến độ thi công
-                  không phải nghiệm thu.
+                  Trả lời từ dữ kiện AI trích xuất và database cấu kiện/tiến độ. Mỗi
+                  khẳng định phải có citation; thiếu nguồn sẽ trả câu từ chối chuẩn.
+                  Tiến độ thi công không phải nghiệm thu.
                 </p>
               </div>
               <div className="flex shrink-0 gap-2">
@@ -307,22 +343,19 @@ export default function ChatPanel({ projectId, onOpenCitation }: Props) {
             </div>
 
             <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
-              <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-                <label className="flex min-h-11 items-center gap-2 text-sm font-medium text-slate-700">
-                  Phạm vi
-                  <select
-                    className={SELECT_INLINE}
-                    value={scope}
-                    onChange={(event) =>
-                      setScope(event.target.value as "effective" | "history")
-                    }
-                  >
-                    <option value="effective">Bản có hiệu lực</option>
-                    <option value="history">Toàn bộ lịch sử</option>
-                  </select>
-                </label>
-
-              </div>
+              <label className="flex min-h-11 items-center gap-2 text-sm font-medium text-slate-700">
+                Phạm vi
+                <select
+                  className={SELECT_INLINE}
+                  value={scope}
+                  onChange={(event) =>
+                    setScope(event.target.value as "effective" | "history")
+                  }
+                >
+                  <option value="effective">Bản có hiệu lực</option>
+                  <option value="history">Toàn bộ lịch sử</option>
+                </select>
+              </label>
             </div>
           </div>
 
@@ -337,9 +370,9 @@ export default function ChatPanel({ projectId, onOpenCitation }: Props) {
                 <div className={cx(PANEL_EMPTY, "flex gap-3")}>
                   <ChatIcon className="mt-0.5 h-5 w-5 shrink-0 text-slate-400" />
                   <p>
-                    Chọn hội thoại cũ hoặc tạo mới, sau đó hỏi tiếp. Nếu không có trang
-                    nguồn, hệ thống trả: “Không tìm thấy thông tin này trong hồ sơ công
-                    trình hiện có.”
+                    Đặt câu hỏi về vị trí, công đoạn, tiến độ hoặc mở bản vẽ. Nếu
+                    không có dữ kiện phù hợp, hệ thống trả: “Không tìm thấy thông tin
+                    này trong hồ sơ công trình hiện có.”
                   </p>
                 </div>
               )}
@@ -374,22 +407,23 @@ export default function ChatPanel({ projectId, onOpenCitation }: Props) {
                     </p>
 
                     {message.no_source && (
-                      <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-950">
-                        Không có dữ kiện trích xuất hoặc bản ghi database phù hợp. Không
-                        có kết luận kỹ thuật nào được tạo.
+                      <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs leading-5 text-amber-950">
+                        Không có dữ kiện trích xuất hoặc bản ghi database phù hợp.
+                        Không có kết luận kỹ thuật nào được tạo.
                       </p>
                     )}
 
                     {message.citations.length > 0 && (
-                      <div className="mt-3 space-y-2">
+                      <div className="mt-3 space-y-1.5">
                         <p className="text-xs font-semibold text-slate-600">
-                          Nguồn trích dẫn
+                          Nguồn ({message.citations.length})
                         </p>
                         {message.citations.map((citation) => (
                           <CitationCard
-                            key={`${citation.document_id}-${citation.page_number}-${citation.chunk_id ?? ""}`}
+                            key={`${citation.document_id}-${citation.page_number}-${citation.record_id ?? citation.chunk_id ?? ""}`}
                             citation={citation}
                             onOpen={onOpenCitation}
+                            onOpenComponent={onOpenComponent}
                           />
                         ))}
                       </div>
@@ -414,28 +448,41 @@ export default function ChatPanel({ projectId, onOpenCitation }: Props) {
               </div>
             )}
 
-            {error && (
-              <div role="alert" className={PANEL_ALERT}>
-                {error}
-              </div>
-            )}
+            <div className="sticky bottom-0 z-10 -mx-4 space-y-3 border-t border-slate-200 bg-white/95 p-4 backdrop-blur supports-[backdrop-filter]:bg-white/85 sm:-mx-5 sm:p-5 lg:static lg:mx-0 lg:bg-transparent lg:p-0 lg:pt-4">
+              {error && (
+                <div role="alert" className={cx(PANEL_ALERT, "flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between")}>
+                  <span className="min-w-0 [overflow-wrap:anywhere]">{error}</span>
+                  {failedQuestion && (
+                    <button
+                      type="button"
+                      className={cx(BUTTON_SECONDARY, "min-h-9 shrink-0 px-3 py-1 text-xs")}
+                      onClick={retry}
+                      disabled={busy}
+                    >
+                      Thử lại
+                    </button>
+                  )}
+                </div>
+              )}
 
-            <div className="space-y-3 border-t border-slate-200 pt-4">
-              <QuestionSuggestions
-                busy={busy}
-                compact={messages.length > 0}
-                onPick={pickSuggestion}
-              />
+              {messages.length === 0 && (
+                <QuestionSuggestions
+                  projectId={projectId}
+                  busy={busy}
+                  onPick={pickSuggestion}
+                />
+              )}
+
               <label htmlFor="eai-chat-input" className={LABEL}>
                 Câu hỏi
               </label>
               <textarea
                 ref={textareaRef}
                 id="eai-chat-input"
-                className={cx(FIELD, "min-h-24 resize-y")}
+                className={cx(FIELD, "min-h-20 resize-y sm:min-h-24")}
                 rows={3}
                 value={input}
-                placeholder="Nhập câu hỏi về hồ sơ công trình..."
+                placeholder="Ví dụ: Tiến độ ngày 21/11 của PD2?"
                 aria-describedby="eai-chat-input-help"
                 onChange={(event) => setInput(event.target.value)}
                 disabled={busy}
@@ -448,7 +495,7 @@ export default function ChatPanel({ projectId, onOpenCitation }: Props) {
               />
               <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <p id="eai-chat-input-help" className={META_TEXT}>
-                  Enter để gửi, Shift+Enter xuống dòng. Không tự động gửi Zalo.
+                  Enter để gửi, Shift+Enter xuống dòng.
                 </p>
                 <button
                   type="button"

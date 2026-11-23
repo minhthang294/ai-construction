@@ -75,6 +75,18 @@ _DB_INTENT_RE = re.compile(
     r"\b(?:bao nhieu|tong|danh sach|liet ke|thong ke|nhom thiet ke|nhom nao|"
     r"cong doan|giai doan|tien do|pham vi sua chua|cau kien)\b"
 )
+_DATE_RE = re.compile(r"\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b")
+_SEGMENT_RE = re.compile(r"\b(?:phan\s*doan|pd)\s*(\d{1,3})\b")
+_STAGE_HINTS = ("duc", "son", "quet", "tram", "dan soi", "bom", "vet nut")
+
+
+@dataclass(frozen=True)
+class _ProgressQuery:
+    day: Optional[int] = None
+    month: Optional[int] = None
+    year: Optional[int] = None
+    segment: Optional[str] = None
+    latest: bool = False
 
 
 @dataclass
@@ -651,6 +663,445 @@ def _aggregate_candidates(
         text += f"\nĐại diện {len(citations)}/{len(components)} bản ghi; tổng hợp đếm từ toàn bộ."
     text += f"\n{PROGRESS_WARNING}"
     return citations, text, [PROGRESS_WARNING]
+
+
+def _project_rows(db: Session, project_id: str):
+    components = _load_components(db, project_id)
+    component_by_id = {row.id: row for row in components}
+    zones = {
+        row.id: row
+        for row in db.scalars(
+            select(StructureZone).where(StructureZone.project_id == project_id)
+        ).all()
+    }
+    segments = {
+        row.id: row
+        for row in (
+            db.scalars(select(Segment).where(Segment.zone_id.in_(list(zones)))).all()
+            if zones
+            else []
+        )
+    }
+    stage_definitions = {
+        row.id: row
+        for row in db.scalars(
+            select(StageDefinition).where(StageDefinition.project_id == project_id)
+        ).all()
+    }
+    stages = _related_rows(db, ComponentStage, list(component_by_id)) if component_by_id else []
+    events = _related_rows(db, ProgressEvent, list(component_by_id)) if component_by_id else []
+    return (
+        components,
+        component_by_id,
+        zones,
+        segments,
+        stage_definitions,
+        stages,
+        events,
+    )
+
+
+def _parse_progress_query(message: str) -> _ProgressQuery:
+    folded = fold_text(message)
+    date_match = _DATE_RE.search(folded)
+    segment_match = _SEGMENT_RE.search(folded)
+    day = month = year = None
+    if date_match:
+        day = int(date_match.group(1))
+        month = int(date_match.group(2))
+        raw_year = date_match.group(3)
+        if raw_year:
+            year = int(raw_year)
+            if year < 100:
+                year += 2000
+    return _ProgressQuery(
+        day=day,
+        month=month,
+        year=year,
+        segment=str(int(segment_match.group(1))) if segment_match else None,
+        latest=bool(re.search(r"\b(?:gan nhat|moi nhat|hom nay|moi cap nhat)\b", folded)),
+    )
+
+
+def is_progress_question(message: str) -> bool:
+    """True for daily-progress, pending-stage or 'current stage' questions."""
+
+    folded = fold_text(message)
+    if "tien do" in folded or "buoc nao" in folded or "dang o buoc" in folded:
+        return True
+    if _DATE_RE.search(folded) and (
+        _SEGMENT_RE.search(folded) or "thi cong" in folded
+    ):
+        return True
+    return "chua" in folded and any(hint in folded for hint in _STAGE_HINTS)
+
+
+def _stage_label(definition: Optional[StageDefinition]) -> str:
+    if definition is None:
+        return "công đoạn"
+    return f"{definition.code} {definition.name}".strip()
+
+
+def _stage_for_component(
+    stage: ComponentStage, definitions: Dict[str, StageDefinition]
+) -> StageDefinition:
+    return definitions.get(stage.stage_definition_id)
+
+
+def _event_candidate(event: ProgressEvent, label: str) -> _Candidate:
+    return _row_candidate("component_progress_events", event, label, True)
+
+
+def _daily_progress_answer(
+    db: Session,
+    project_id: str,
+    message: str,
+    query: _ProgressQuery,
+    components: List[StructuralComponent],
+    segments: Dict[str, Segment],
+    definitions: Dict[str, StageDefinition],
+    stages: List[ComponentStage],
+    events: List[ProgressEvent],
+) -> Optional[Tuple[ProviderAnswer, List[CitationOut], List[str], bool, float]]:
+    component_by_id = {row.id: row for row in components}
+    stage_by_id = {row.id: row for row in stages}
+    relevant = [
+        event
+        for event in events
+        if event.component_id in component_by_id
+        and (
+            query.segment is None
+            or (
+                component_by_id[event.component_id].segment_id in segments
+                and str(segments[component_by_id[event.component_id].segment_id].number)
+                == query.segment
+            )
+        )
+    ]
+    if query.day is not None and query.month is not None:
+        relevant = [
+            event
+            for event in relevant
+            if event.event_date.day == query.day
+            and event.event_date.month == query.month
+            and (query.year is None or event.event_date.year == query.year)
+        ]
+        if not relevant:
+            label = f"{query.day:02d}/{query.month:02d}"
+            if query.year:
+                label += f"/{query.year}"
+            return (
+                ProviderAnswer(text=NO_SOURCE_ANSWER),
+                [],
+                [
+                    f"Không có sự kiện tiến độ ngày {label}"
+                    + (f" cho PD{query.segment}" if query.segment else "")
+                    + " trong database cấu kiện."
+                ],
+                True,
+                0.0,
+            )
+    else:
+        if not relevant:
+            return (
+                ProviderAnswer(text=NO_SOURCE_ANSWER),
+                [],
+                ["Chưa có sự kiện tiến độ nào trong database cấu kiện."],
+                True,
+                0.0,
+            )
+        latest_date = max(event.event_date for event in relevant)
+        relevant = [event for event in relevant if event.event_date == latest_date]
+
+    relevant.sort(key=lambda event: (event.event_date, event.created_at), reverse=True)
+    date = relevant[0].event_date
+    status_counts: Dict[str, int] = {}
+    for event in relevant:
+        status_counts[event.status] = status_counts.get(event.status, 0) + 1
+    component_ids = {event.component_id for event in relevant}
+    header = "Tiến độ thi công ngày " + date.strftime("%d/%m/%Y")
+    if query.segment:
+        header += f" · PD{query.segment}"
+    header += " (không phải nghiệm thu):"
+    lines = [
+        header,
+        f"- {len(relevant)} sự kiện / {len(component_ids)} cấu kiện: "
+        + ", ".join(f"{key} {value}" for key, value in sorted(status_counts.items()))
+        + ".",
+    ]
+
+    candidates: List[_Candidate] = []
+    for event in relevant[:MAX_RELATED_ROWS]:
+        component = component_by_id[event.component_id]
+        stage = stage_by_id.get(event.component_stage_id)
+        definition = _stage_for_component(stage, definitions) if stage else None
+        quantity = (
+            f", {event.quantity:g} {event.unit or ''}".rstrip()
+            if event.quantity is not None
+            else ""
+        )
+        label = (
+            f"{'Cọc' if component.type == 'pile' else 'Dầm'} {component.canonical_code}"
+            f" · {_stage_label(definition)}: {event.status}{quantity} "
+            f"(ngày {event.event_date:%d/%m/%Y}) — bản ghi {event.id}"
+        )
+        candidates.append(_event_candidate(event, label))
+    if len(relevant) > MAX_RELATED_ROWS:
+        lines.append(
+            f"- Chỉ nêu {MAX_RELATED_ROWS}/{len(relevant)} sự kiện; tổng hợp đếm từ toàn bộ."
+        )
+    candidates = _finalise_lines(candidates)
+    lines.extend(candidate.line for candidate in candidates)
+    lines.append(PROGRESS_WARNING)
+    return (
+        ProviderAnswer(text="\n".join(lines)),
+        [candidate.citation for candidate in candidates],
+        [PROGRESS_WARNING],
+        False,
+        0.7,
+    )
+
+
+def _pending_stage_answer(
+    db: Session,
+    project_id: str,
+    message: str,
+    query: _ProgressQuery,
+    components: List[StructuralComponent],
+    segments: Dict[str, Segment],
+    definitions: Dict[str, StageDefinition],
+    stages: List[ComponentStage],
+    events: List[ProgressEvent],
+) -> Optional[Tuple[ProviderAnswer, List[CitationOut], List[str], bool, float]]:
+    folded = fold_text(message)
+    hints = [hint for hint in _STAGE_HINTS if hint in folded]
+    definitions_in_use = {
+        stage.stage_definition_id
+        for stage in stages
+        if stage.stage_definition_id in definitions
+    }
+    chosen = [
+        definition
+        for definition in definitions.values()
+        if definition.id in definitions_in_use
+        and any(
+            hint in fold_text(f"{definition.code} {definition.name}")
+            for hint in hints
+        )
+    ]
+    if not chosen and hints:
+        chosen = [
+            definition
+            for definition in definitions.values()
+            if definition.id in definitions_in_use
+        ]
+    if not chosen:
+        return None
+    definition_ids = {definition.id for definition in chosen}
+    definition_names = ", ".join(_stage_label(item) for item in chosen[:3])
+
+    component_type = (
+        "pile" if re.search(r"\b(?:coc|pile)\b", folded)
+        else "beam" if re.search(r"\b(?:dam|beam)\b", folded)
+        else None
+    )
+    scoped = [
+        component
+        for component in components
+        if (component_type is None or component.type == component_type)
+        and (
+            query.segment is None
+            or (
+                component.segment_id in segments
+                and str(segments[component.segment_id].number) == query.segment
+            )
+        )
+    ]
+    if not scoped:
+        return None
+    stage_by_component: Dict[str, List[ComponentStage]] = {}
+    for stage in stages:
+        if stage.stage_definition_id in definition_ids:
+            stage_by_component.setdefault(stage.component_id, []).append(stage)
+    stage_ids = {stage.id for stage in stages if stage.stage_definition_id in definition_ids}
+    completed_stage_ids = {
+        event.component_stage_id
+        for event in events
+        if event.component_stage_id in stage_ids and event.status == "COMPLETED"
+    }
+    with_stage = [component for component in scoped if stage_by_component.get(component.id)]
+    done = [component for component in with_stage if any(
+        stage.id in completed_stage_ids for stage in stage_by_component[component.id]
+    )]
+    pending = [component for component in with_stage if component not in done]
+    if not with_stage:
+        return None
+
+    noun = "cọc" if component_type == "pile" else "dầm" if component_type == "beam" else "cấu kiện"
+    scope_label = f"PD{query.segment}" if query.segment else "công trình"
+    header = (
+        f'Công đoạn "{definition_names}" tại {scope_label} '
+        f"(không phải nghiệm thu): còn {len(pending)}/{len(with_stage)} {noun} chưa hoàn thành."
+    )
+    lines = [header]
+    if len(done) == len(with_stage):
+        lines.append(f"- Đã ghi COMPLETED cho toàn bộ {len(with_stage)} {noun} có công đoạn này.")
+    citations = [
+        _row_candidate(
+            "structural_components",
+            component,
+            f"{'Cọc' if component.type == 'pile' else 'Dầm'} {component.canonical_code} "
+            f"— chưa COMPLETED — bản ghi {component.id}",
+            component.verification == "verified",
+        )
+        for component in pending[:10]
+    ]
+    if not citations:
+        citations = [
+            _row_candidate(
+                "structural_components",
+                component,
+                f"{'Cọc' if component.type == 'pile' else 'Dầm'} {component.canonical_code} "
+                f"— đã COMPLETED — bản ghi {component.id}",
+                component.verification == "verified",
+            )
+            for component in done[:5]
+        ]
+    citations = _finalise_lines(citations)
+    lines.extend(candidate.line for candidate in citations)
+    lines.append(PROGRESS_WARNING)
+    return (
+        ProviderAnswer(text="\n".join(lines)),
+        [candidate.citation for candidate in citations],
+        [PROGRESS_WARNING],
+        False,
+        0.7,
+    )
+
+
+def _component_stage_answer(
+    db: Session,
+    message: str,
+    components: List[StructuralComponent],
+    segments: Dict[str, Segment],
+    definitions: Dict[str, StageDefinition],
+    stages: List[ComponentStage],
+    events: List[ProgressEvent],
+) -> Optional[Tuple[ProviderAnswer, List[CitationOut], List[str], bool, float]]:
+    matched = _matched_components(components, {}, message)
+    if not matched:
+        return None
+    component = matched[0]
+    component_stages = [stage for stage in stages if stage.component_id == component.id]
+    stage_by_id = {stage.id: stage for stage in component_stages}
+    component_events = [
+        event for event in events if event.component_id == component.id
+    ]
+    component_events.sort(
+        key=lambda event: (event.event_date, event.created_at or event.event_date),
+        reverse=True,
+    )
+    noun = "Cọc" if component.type == "pile" else "Dầm"
+    lines = []
+    citations: List[_Candidate] = []
+    if component_events:
+        latest = component_events[0]
+        stage = stage_by_id.get(latest.component_stage_id)
+        definition = _stage_for_component(stage, definitions) if stage else None
+        lines.append(
+            f'{noun} {component.canonical_code} đang ở bước "{_stage_label(definition)}": '
+            f"{latest.status}, ngày {latest.event_date:%d/%m/%Y} (không phải nghiệm thu)."
+        )
+        citations.append(
+            _event_candidate(
+                latest,
+                f"{noun} {component.canonical_code} · {_stage_label(definition)}: "
+                f"{latest.status}, ngày {latest.event_date:%d/%m/%Y} — bản ghi {latest.id}",
+            )
+        )
+    elif component_stages:
+        labels = ", ".join(
+            _stage_label(_stage_for_component(stage, definitions))
+            for stage in component_stages[:5]
+        )
+        lines.append(
+            f"{noun} {component.canonical_code} có công đoạn ({labels}) "
+            "nhưng chưa có sự kiện tiến độ."
+        )
+        citations.extend(
+            _row_candidate(
+                "component_stages",
+                stage,
+                f"{noun} {component.canonical_code} · "
+                f"{_stage_label(_stage_for_component(stage, definitions))} "
+                f"— bản ghi {stage.id}",
+                True,
+            )
+            for stage in component_stages[:5]
+        )
+    else:
+        lines.append(
+            f"{noun} {component.canonical_code} chưa được gắn công đoạn trong database."
+        )
+    citations.append(
+        _row_candidate(
+            "structural_components",
+            component,
+            f"{noun} {component.canonical_code} — bản ghi {component.id}",
+            component.verification == "verified",
+        )
+    )
+    citations = _finalise_lines(citations)
+    lines.extend(candidate.line for candidate in citations)
+    lines.append(PROGRESS_WARNING)
+    return (
+        ProviderAnswer(text="\n".join(lines)),
+        [candidate.citation for candidate in citations],
+        [PROGRESS_WARNING],
+        False,
+        0.7,
+    )
+
+
+def answer_progress_question(
+    db: Session,
+    project_id: str,
+    message: str,
+) -> Optional[Tuple[ProviderAnswer, List[CitationOut], List[str], bool, float]]:
+    """Answer daily progress, pending stage and current-stage questions from DB rows."""
+
+    if not _component_tables_available(db) or not is_progress_question(message):
+        return None
+    (
+        components,
+        _component_by_id,
+        _zones,
+        segments,
+        definitions,
+        stages,
+        events,
+    ) = _project_rows(db, project_id)
+    if not components:
+        return None
+    query = _parse_progress_query(message)
+    folded = fold_text(message)
+    if _code_tokens(message) and ("buoc nao" in folded or "dang o buoc" in folded):
+        return _component_stage_answer(
+            db, message, components, segments, definitions, stages, events
+        )
+    if "chua" in folded and any(hint in folded for hint in _STAGE_HINTS):
+        answer = _pending_stage_answer(
+            db, project_id, message, query, components, segments, definitions, stages, events
+        )
+        if answer is not None:
+            return answer
+    if "tien do" in folded or query.latest or (
+        query.day is not None and query.month is not None
+    ):
+        return _daily_progress_answer(
+            db, project_id, message, query, components, segments, definitions, stages, events
+        )
+    return None
 
 
 def answer_database_question(
