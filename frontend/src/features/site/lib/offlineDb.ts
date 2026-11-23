@@ -36,7 +36,7 @@ export type PhotoQueuePayload = {
   reportDate?: string | null;
   category?: string | null;
   location?: string | null;
-  component?: string | null;
+  componentIds?: string[] | null;
   stage?: string | null;
   workItemIds?: string[] | null;
 };

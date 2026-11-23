@@ -308,6 +308,7 @@ class PhotoOut(UtcOutBase):
     category: Optional[str] = None
     location: Optional[str] = None
     component: Optional[str] = None
+    component_ids: List[str] = Field(default_factory=list)
     stage: Optional[str] = None
     suggested_caption: Optional[str] = None
     confirmed_caption: Optional[str] = None
@@ -332,6 +333,7 @@ class PhotoPatchIn(BaseModel):
     category: Optional[str] = Field(default=None, max_length=80)
     location: Optional[str] = Field(default=None, max_length=255)
     component: Optional[str] = Field(default=None, max_length=255)
+    component_ids: Optional[List[str]] = None
     stage: Optional[str] = Field(default=None, max_length=80)
     suggested_caption: Optional[str] = None
     confirmed_caption: Optional[str] = None

@@ -20,6 +20,7 @@ from .dependencies import (
 )
 from .manpower import manpower_team_from_entries
 from .models import GeneratedDocument, SitePhoto
+from .photo_components import photo_component_ids
 from .schemas import (
     DailyReportOut,
     DailyReportUpsertIn,
@@ -137,6 +138,7 @@ def _to_photo_out(photo: SitePhoto, db: Session) -> PhotoOut:
         category=photo.category,
         location=photo.location,
         component=photo.component,
+        component_ids=photo_component_ids(db, photo),
         stage=photo.stage,
         suggested_caption=photo.suggested_caption,
         confirmed_caption=photo.confirmed_caption,
@@ -330,6 +332,7 @@ async def upload_photos(
     category: Optional[str] = Form(None),
     location: Optional[str] = Form(None),
     component: Optional[str] = Form(None),
+    component_ids: Optional[str] = Form(None),
     stage: Optional[str] = Form(None),
     confirmed_caption: Optional[str] = Form(None),
     suggested_caption: Optional[str] = Form(None),
@@ -339,6 +342,9 @@ async def upload_photos(
     user=Depends(require_site_editor),
 ):
     ids_list = [value.strip() for value in (work_item_ids or "").split(",") if value.strip()]
+    component_id_list = [
+        value.strip() for value in (component_ids or "").split(",") if value.strip()
+    ]
     client_ids = [
         value.strip() for value in (client_upload_ids or "").split(",") if value.strip()
     ]
@@ -366,6 +372,7 @@ async def upload_photos(
                 category=category,
                 location=location,
                 component=component,
+                component_ids=component_id_list or None,
                 stage=stage,
                 confirmed_caption=confirmed_caption,
                 suggested_caption=suggested_caption,
@@ -393,6 +400,7 @@ def get_photos(
     date_filter: Optional[date] = Query(None, alias="date"),
     location: Optional[str] = None,
     component: Optional[str] = None,
+    component_id: Optional[str] = None,
     stage: Optional[str] = None,
     work_item_id: Optional[str] = None,
     db: Session = Depends(get_db),
@@ -411,6 +419,7 @@ def get_photos(
         photo_date=date_filter,
         location=location,
         component=component,
+        component_id=component_id,
         stage=stage,
         work_item_id=work_item_id,
     )

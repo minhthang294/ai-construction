@@ -120,6 +120,7 @@ export type UploadPhotoMeta = {
   category?: string;
   location?: string;
   component?: string;
+  componentIds?: string[];
   stage?: string;
   confirmedCaption?: string;
   suggestedCaption?: string;
@@ -138,6 +139,7 @@ export async function uploadPhotos(
   if (meta.category) form.append("category", meta.category);
   if (meta.location) form.append("location", meta.location);
   if (meta.component) form.append("component", meta.component);
+  if (meta.componentIds?.length) form.append("component_ids", meta.componentIds.join(","));
   if (meta.stage) form.append("stage", meta.stage);
   if (meta.confirmedCaption) form.append("confirmed_caption", meta.confirmedCaption);
   if (meta.suggestedCaption) form.append("suggested_caption", meta.suggestedCaption);
@@ -163,6 +165,7 @@ export async function listPhotos(
   if (filters?.date) params.set("date", filters.date);
   if (filters?.location) params.set("location", filters.location);
   if (filters?.component) params.set("component", filters.component);
+  if (filters?.component_id) params.set("component_id", filters.component_id);
   if (filters?.stage) params.set("stage", filters.stage);
   if (filters?.work_item_id) params.set("work_item_id", filters.work_item_id);
   const query = params.toString() ? `?${params.toString()}` : "";
@@ -176,6 +179,7 @@ export type PhotoPatch = {
   category?: string | null;
   location?: string | null;
   component?: string | null;
+  component_ids?: string[] | null;
   stage?: string | null;
   suggested_caption?: string | null;
   confirmed_caption?: string | null;

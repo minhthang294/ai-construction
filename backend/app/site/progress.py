@@ -27,6 +27,7 @@ from .dependencies import (
     require_site_editor,
 )
 from .models import SitePhoto, SiteProgressBulkBatch
+from .photo_components import photo_component_label
 from app.core.batch_scope import batch_component_ids
 from app.core.design_parameters import display_stage_name, load_t_values
 from app.core.models import ProjectMember
@@ -1385,7 +1386,7 @@ def _journal_evidence(
                 "category": photo.category,
                 "confirmed_caption": photo.confirmed_caption,
                 "location": photo.location,
-                "component": photo.component,
+                "component": photo_component_label(db, photo),
                 "stage": photo.stage,
                 "sources": item["sources"],
             }

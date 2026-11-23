@@ -38,7 +38,18 @@ import {
   type ManualComponentDraft,
 } from "../lib/componentImport";
 
-type Props = { projectId: string; onOpenPaste?: () => void };
+type Props = {
+  projectId: string;
+  onOpenPaste?: () => void;
+  /** Initial tab chosen by an app-level deep link. */
+  initialView?: ComponentView;
+  initialJournalDate?: string | null;
+  /** Open this component's detail when set (e.g. from AI citations). */
+  focusComponentId?: string | null;
+  onFocusHandled?: () => void;
+  /** Called after the journal deep link has been opened once. */
+  onJournalOpened?: () => void;
+};
 
 const PAGE_SIZE = 100;
 const COMPONENT_VIEWS = [
@@ -48,6 +59,7 @@ const COMPONENT_VIEWS = [
   { id: "journal", label: "Nhật ký" },
   { id: "map", label: "Mặt bằng" },
 ] as const;
+type ComponentView = (typeof COMPONENT_VIEWS)[number]["id"];
 const FOCUS_RING =
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2";
 const FIELD_CLASS = `min-h-11 w-full rounded-lg border border-gray-300 bg-white px-3 text-base text-slate-900 placeholder:text-slate-400 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-slate-500 ${FOCUS_RING}`;
@@ -129,7 +141,15 @@ function CandidateCard({ component }: { component: ComponentCandidate }) {
   );
 }
 
-export default function ComponentCatalogImport({ projectId, onOpenPaste }: Props) {
+export default function ComponentCatalogImport({
+  projectId,
+  onOpenPaste,
+  initialView,
+  initialJournalDate,
+  focusComponentId,
+  onFocusHandled,
+  onJournalOpened,
+}: Props) {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<ComponentPreview | null>(null);
   const [idempotencyKey, setIdempotencyKey] = useState<string | null>(null);
@@ -174,8 +194,8 @@ export default function ComponentCatalogImport({ projectId, onOpenPaste }: Props
 
   const inputRef = useRef<HTMLInputElement | null>(null);
   const tabId = useId();
-  const [view, setView] = useState<(typeof COMPONENT_VIEWS)[number]["id"]>(
-    "daily",
+  const [view, setView] = useState<ComponentView>(
+    focusComponentId ? "progress" : initialView ?? "daily",
   );
   const [progressRequest, setProgressRequest] = useState<{ componentId: string; stageDefinitionId?: string | null } | null>(null);
   const requestDailyProgress = useCallback((componentId: string, stageDefinitionId?: string | null) => {
@@ -183,6 +203,16 @@ export default function ComponentCatalogImport({ projectId, onOpenPaste }: Props
     setView("daily");
   }, []);
   const clearProgressRequest = useCallback(() => setProgressRequest(null), []);
+
+  useEffect(() => {
+    if (focusComponentId) setView("progress");
+  }, [focusComponentId]);
+
+  useEffect(() => {
+    if (initialView === "journal") onJournalOpened?.();
+    // Deep link applies once per mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const loadCatalog = useCallback(
     async (query: string) => {
@@ -426,9 +456,11 @@ export default function ComponentCatalogImport({ projectId, onOpenPaste }: Props
           projectId={projectId}
           batchId={batchId}
           primaryZone={primaryZone}
+          focusComponentId={focusComponentId}
+          onFocusHandled={onFocusHandled}
         />
       ) : view === "journal" ? (
-        <JournalPanel projectId={projectId} />
+        <JournalPanel projectId={projectId} initialDate={initialJournalDate} />
       ) : view === "map" ? (
         <DrawingMapPanel projectId={projectId} batchId={batchId} onRequestProgress={requestDailyProgress} />
       ) : (

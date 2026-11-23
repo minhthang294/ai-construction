@@ -392,6 +392,21 @@ function formatDashboardDate(value: string): string {
   }).format(date);
 }
 
+const ACTIONABLE_ISSUE_TYPES = new Set([
+  "ACCEPTANCE_WITHOUT_PROGRESS",
+  "ACCEPTANCE_BEFORE_PROGRESS",
+  "MISSING_SOURCE",
+  "DUPLICATE_OR_AMBIGUOUS_CODE",
+  "UNVERIFIED_COMPONENT",
+]);
+const ACTIONABLE_ISSUE_LABELS: Record<string, string> = {
+  ACCEPTANCE_WITHOUT_PROGRESS: "Có nghiệm thu nhưng chưa ghi tiến độ",
+  ACCEPTANCE_BEFORE_PROGRESS: "Nghiệm thu trước khi thi công",
+  MISSING_SOURCE: "Thiếu nguồn dữ liệu",
+  DUPLICATE_OR_AMBIGUOUS_CODE: "Mã trùng hoặc mơ hồ",
+  UNVERIFIED_COMPONENT: "Chưa xác minh",
+};
+
 export function Dashboard({
   token,
   projectId,
@@ -413,6 +428,7 @@ export function Dashboard({
   const [rows, setRows] = useState<ProgressRow[] | null>(null);
   const [issues, setIssues] = useState<Array<{ type: string; component_id: string }> | null>(null);
   const [issuesFailed, setIssuesFailed] = useState(false);
+  const [showIssues, setShowIssues] = useState(false);
   const {
     batches,
     loading: batchLoading,
@@ -482,6 +498,15 @@ export function Dashboard({
         return counts;
       }, {})
     : null;
+  const actionableIssues = scopedIssues
+    ? scopedIssues.filter((issue) => ACTIONABLE_ISSUE_TYPES.has(issue.type))
+    : null;
+  const actionableCounts = actionableIssues
+    ? actionableIssues.reduce<Record<string, number>>((counts, issue) => {
+        counts[issue.type] = (counts[issue.type] ?? 0) + 1;
+        return counts;
+      }, {})
+    : null;
   const acceptedCount = rows
     ? rows.filter(
         (row) => row.acceptance_status === "CONFIRMED" || row.acceptance_status === "APPROVED",
@@ -490,12 +515,12 @@ export function Dashboard({
   const inProgressCount = rows
     ? rows.filter((row) => row.construction_status === "IN_PROGRESS").length
     : summary?.construction.in_progress ?? 0;
-  const totalIssues = scopedIssues ? scopedIssues.length : null;
+  const totalIssues = actionableIssues ? actionableIssues.length : null;
   const cards = [
     ["Đang thi công", rows ? inProgressCount : summary ? summary.construction.in_progress : "—", "Cấu kiện đang thi công", "#b45309"],
     ["Hoàn thành chưa nghiệm thu", scopedIssueCounts ? scopedIssueCounts.WORK_WITHOUT_ACCEPTANCE ?? 0 : "—", "Thi công xong, chưa có BBNT", "#15803d"],
     ["Đã nghiệm thu", rows || summary ? acceptedCount : "—", "BBNT đã xác nhận", "#405e9b"],
-    ["Cần xử lý", totalIssues ?? "—", "Từ đối soát dữ liệu", "#b91c1c"],
+    ["Cần xử lý", totalIssues ?? "—", "Chạm để xem chi tiết", "#b91c1c"],
   ] as const;
   const quickActions = [
     { label: "Cập nhật tiến độ thi công", page: "components", icon: WorkIcon, description: "Ghi tiến độ theo mã cọc, dầm" },
@@ -517,14 +542,54 @@ export function Dashboard({
         error={batchError}
       />
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        {cards.map(([label, value, hint, accent]) => (
-          <div key={label} className="app-kpi" style={{ "--kpi-accent": accent } as CSSProperties}>
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-600">{label}</p>
-            <p className="mt-1 text-3xl font-semibold tabular-nums tracking-tight text-slate-950">{value}</p>
-            <p className="mt-1 app-text-secondary">{hint}</p>
-          </div>
-        ))}
+        {cards.map(([label, value, hint, accent]) => {
+          const body = (
+            <>
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-600">{label}</p>
+              <p className="mt-1 text-3xl font-semibold tabular-nums tracking-tight text-slate-950">{value}</p>
+              <p className="mt-1 app-text-secondary">{hint}</p>
+            </>
+          );
+          const style = { "--kpi-accent": accent } as CSSProperties;
+          return label === "Cần xử lý" ? (
+            <button
+              key={label}
+              type="button"
+              className="app-kpi text-left"
+              style={style}
+              aria-expanded={showIssues}
+              aria-controls="dashboard-issue-breakdown"
+              onClick={() => setShowIssues((current) => !current)}
+            >
+              {body}
+            </button>
+          ) : (
+            <div key={label} className="app-kpi" style={style}>
+              {body}
+            </div>
+          );
+        })}
       </div>
+      {showIssues ? (
+        <section id="dashboard-issue-breakdown" className="app-card app-card-pad" aria-live="polite">
+          <h2 className="text-base font-semibold text-slate-950">Chi tiết cần xử lý</h2>
+          {actionableCounts && Object.keys(actionableCounts).length ? (
+            <ul className="mt-2 space-y-1 text-sm text-slate-800">
+              {Object.entries(actionableCounts).map(([type, count]) => (
+                <li key={type} className="flex items-baseline justify-between gap-3">
+                  <span>{ACTIONABLE_ISSUE_LABELS[type] ?? type}</span>
+                  <span className="font-semibold tabular-nums">{count}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-2 text-sm text-slate-600">Không có dữ liệu cần xử lý.</p>
+          )}
+          <p className="mt-2 text-xs text-slate-600">
+            Cấu kiện hoàn thành chưa nghiệm thu là bình thường, không tính vào đây.
+          </p>
+        </section>
+      ) : null}
       {issuesFailed && (
         <p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
           Chưa tải được số đối soát; hai thẻ “Hoàn thành chưa nghiệm thu” và “Cần xử lý” đang tạm trống.

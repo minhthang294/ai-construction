@@ -177,6 +177,21 @@ class PhotoWorkItemLink(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
 
 
+class SitePhotoComponent(Base):
+    __tablename__ = "site_photo_components"
+
+    photo_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("site_photos.id", ondelete="CASCADE"), primary_key=True
+    )
+    component_id: Mapped[str] = mapped_column(String(36), primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    # Nullable because rows migrated from the old encoded text have no author.
+    created_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+
+
 class SiteProgressBulkBatch(Base):
     """One reviewed bulk progress update; idempotent per project and key."""
 

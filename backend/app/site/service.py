@@ -44,6 +44,12 @@ from .models import (
     NextDayPlan,
     PhotoWorkItemLink,
     SitePhoto,
+    SitePhotoComponent,
+)
+from .photo_components import (
+    photo_component_label,
+    replace_photo_components,
+    resolve_components,
 )
 from .schemas import (
     DailyReportUpsertIn,
@@ -856,8 +862,17 @@ def _attach_links(db: Session, photos: List[SitePhoto]) -> None:
     by_photo: Dict[str, List[str]] = {photo_id: [] for photo_id in ids}
     for link in links:
         by_photo.setdefault(link.photo_id, []).append(link.work_item_id)
+    component_links = db.execute(
+        select(SitePhotoComponent.photo_id, SitePhotoComponent.component_id)
+        .where(SitePhotoComponent.photo_id.in_(ids))
+        .order_by(SitePhotoComponent.photo_id, SitePhotoComponent.component_id)
+    ).all()
+    components_by_photo: Dict[str, List[str]] = {photo_id: [] for photo_id in ids}
+    for photo_id, component_id in component_links:
+        components_by_photo.setdefault(photo_id, []).append(component_id)
     for photo in photos:
         photo._work_item_ids = sorted(by_photo.get(photo.id, []))  # type: ignore[attr-defined]
+        photo._component_ids = components_by_photo.get(photo.id, [])  # type: ignore[attr-defined]
 
 
 def list_photos(
@@ -868,6 +883,7 @@ def list_photos(
     photo_date: Optional[date] = None,
     location: Optional[str] = None,
     component: Optional[str] = None,
+    component_id: Optional[str] = None,
     stage: Optional[str] = None,
     work_item_id: Optional[str] = None,
 ) -> List[SitePhoto]:
@@ -891,6 +907,15 @@ def list_photos(
         stmt = stmt.where(SitePhoto.location == cleaned_location)
     if cleaned_component:
         stmt = stmt.where(SitePhoto.component == cleaned_component)
+    if component_id:
+        stmt = stmt.where(
+            SitePhoto.id.in_(
+                select(SitePhotoComponent.photo_id).where(
+                    SitePhotoComponent.project_id == project_id,
+                    SitePhotoComponent.component_id == component_id,
+                )
+            )
+        )
     if cleaned_stage:
         stmt = stmt.where(SitePhoto.stage == cleaned_stage)
     if photo_date is not None:
@@ -951,6 +976,7 @@ def create_photo(
     category: Optional[str] = None,
     location: Optional[str] = None,
     component: Optional[str] = None,
+    component_ids: Optional[List[str]] = None,
     stage: Optional[str] = None,
     confirmed_caption: Optional[str] = None,
     suggested_caption: Optional[str] = None,
@@ -982,6 +1008,12 @@ def create_photo(
 
     _validate_report_id(db, project_id, report_id)
     validate_work_item_refs(db, project_id, work_item_ids or [])
+    linked_component_ids: List[str] = []
+    if component_ids is not None:
+        try:
+            linked_component_ids, _ = resolve_components(db, project_id, component_ids)
+        except ValueError as exc:
+            raise ProjectResourceNotFound("Component not found") from exc
 
     project_dir = _project_dir(project_id) / "photos"
     project_dir.mkdir(parents=True, exist_ok=True)
@@ -1018,6 +1050,15 @@ def create_photo(
         db.flush()
         for work_item_id in work_item_ids or []:
             db.add(PhotoWorkItemLink(photo_id=photo.id, work_item_id=work_item_id))
+        for component_id in linked_component_ids:
+            db.add(
+                SitePhotoComponent(
+                    photo_id=photo.id,
+                    component_id=component_id,
+                    project_id=project_id,
+                    created_by=actor_id,
+                )
+            )
         _audit(
             db,
             project_id=project_id,
@@ -1060,6 +1101,17 @@ def patch_photo(
 
     if "report_id" in changes:
         _validate_report_id(db, project_id, changes["report_id"])
+    if "component_ids" in changes:
+        try:
+            replace_photo_components(
+                db,
+                photo.id,
+                project_id,
+                changes.pop("component_ids") or [],
+                actor_id,
+            )
+        except ValueError as exc:
+            raise ProjectResourceNotFound("Component not found") from exc
     for field in (
         "report_id",
         "category",
@@ -1395,6 +1447,11 @@ def delete_photo(
                 PhotoWorkItemLink.photo_id == photo.id
             )
         )
+        db.execute(
+            SitePhotoComponent.__table__.delete().where(
+                SitePhotoComponent.photo_id == photo.id
+            )
+        )
         db.delete(photo)
         db.flush()
         _audit(
@@ -1555,7 +1612,7 @@ def build_report_snapshot(db: Session, report: DailyReport) -> Dict[str, Any]:
             "filename": photo.filename,
             "category": photo.category,
             "location": photo.location,
-            "component": photo.component,
+            "component": photo_component_label(db, photo),
             "stage": photo.stage,
             "confirmed_caption": photo.confirmed_caption,
             "capture_time": _iso_utc(photo.capture_time),

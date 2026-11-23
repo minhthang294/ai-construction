@@ -141,7 +141,9 @@ export type SitePhoto = {
   device?: string | null;
   category?: string | null;
   location?: string | null;
+  /** Human caption only; component ids live in ``component_ids``. */
   component?: string | null;
+  component_ids?: string[];
   stage?: string | null;
   suggested_caption?: string | null;
   confirmed_caption?: string | null;
@@ -224,6 +226,7 @@ export type PhotoFilters = {
   date: string;
   location: string;
   component: string;
+  component_id: string;
   stage: string;
   work_item_id: string;
 };
@@ -232,6 +235,7 @@ export const EMPTY_PHOTO_FILTERS: PhotoFilters = {
   date: "",
   location: "",
   component: "",
+  component_id: "",
   stage: "",
   work_item_id: "",
 };

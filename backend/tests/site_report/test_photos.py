@@ -75,6 +75,76 @@ def test_patch_photo_caption_and_explicit_clear(client):
     assert r3.json()["confirmed_caption"] == "Confirmed"
 
 
+def test_photo_component_links_round_trip_filter_and_scope(client, db_engine):
+    from sqlalchemy.orm import sessionmaker
+
+    from app.core.component_models import Segment, StructuralComponent, StructureZone
+
+    Session = sessionmaker(bind=db_engine)
+    with Session() as db:
+        db.add(StructureZone(id="z1", project_id="p1", name="Z", name_key="z"))
+        db.add(Segment(id="s1", zone_id="z1", number=1, source_code="P1"))
+        db.add(
+            StructuralComponent(
+                id="c-other",
+                project_id="other",
+                segment_id="s1",
+                type="PILE",
+                raw_code="X1",
+                canonical_code="X1",
+                verification="VERIFIED",
+                created_by="test-user",
+            )
+        )
+        component_ids = [f"c{index:02d}" for index in range(21)]
+        for index, component_id in enumerate(component_ids):
+            db.add(
+                StructuralComponent(
+                    id=component_id,
+                    project_id="p1",
+                    segment_id="s1",
+                    type="PILE",
+                    raw_code=f"F{index}",
+                    canonical_code=f"F{index:02d}",
+                    verification="VERIFIED",
+                    created_by="test-user",
+                )
+            )
+        db.commit()
+
+    r = _upload(
+        client,
+        b"component-img",
+        component_ids=",".join(component_ids),
+        component="Mốc thân trụ",
+    )
+    assert r.status_code == 201, r.text
+    photo = r.json()[0]
+    assert photo["component"] == "Mốc thân trụ"
+    assert sorted(photo["component_ids"]) == component_ids
+    assert len(photo["component_ids"]) == 21
+
+    listing = client.get("/api/v1/projects/p1/photos", params={"component_id": "c07"})
+    assert [item["id"] for item in listing.json()] == [photo["id"]]
+
+    foreign = _upload(client, b"foreign-component", component_ids="c-other")
+    assert foreign.status_code == 404
+
+    patched = client.patch(
+        f"/api/v1/projects/p1/photos/{photo['id']}",
+        json={"component_ids": ["c00"], "component": "Đã sửa"},
+    )
+    assert patched.status_code == 200
+    assert patched.json()["component_ids"] == ["c00"]
+    assert patched.json()["component"] == "Đã sửa"
+
+    cleared = client.patch(
+        f"/api/v1/projects/p1/photos/{photo['id']}", json={"component_ids": []}
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["component_ids"] == []
+
+
 def test_photo_report_link_must_belong_to_project(client):
     report = client.put(
         "/api/v1/projects/p1/daily-reports/2026-11-11",

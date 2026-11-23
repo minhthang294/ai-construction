@@ -20,7 +20,7 @@ import {
 import { todayISO } from "../lib/componentProgress";
 import { formatISODate } from "../lib/datetime";
 
-type Props = { projectId: string };
+type Props = { projectId: string; initialDate?: string | null };
 
 function errorMessage(error: unknown): string {
   if (error instanceof ApiError) return error.message;
@@ -32,8 +32,8 @@ function shortHash(value: string): string {
   return value ? `${value.slice(0, 12)}…` : "—";
 }
 
-export default function JournalPanel({ projectId }: Props) {
-  const [date, setDate] = useState(todayISO());
+export default function JournalPanel({ projectId, initialDate }: Props) {
+  const [date, setDate] = useState(initialDate || todayISO());
   const [preview, setPreview] = useState<JournalPreview | null>(null);
   const [snapshots, setSnapshots] = useState<JournalSnapshot[]>([]);
   const [exports, setExports] = useState<JournalExport[]>([]);

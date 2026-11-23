@@ -44,6 +44,10 @@ import ManpowerPresets from "../components/ManpowerPresets";
 import SiteNotesForm from "../components/SiteNotesForm";
 import OfflineQueuePanel from "../components/OfflineQueuePanel";
 import AcceptanceHistoryPanel from "../components/AcceptanceHistoryPanel";
+import {
+  useConstructionBatch,
+  useConstructionBatches,
+} from "../hooks/useConstructionBatch";
 import { EMPTY_PHOTO_FILTERS } from "../types";
 import type {
   DailyReport,
@@ -69,6 +73,11 @@ type Props = {
   onOpenAcceptance?: () => void;
   /** Optional app-shell navigation to the "Dán tin nhắn" progress flow. */
   onOpenProgressPaste?: () => void;
+  /** Components preselected from the paste flow for photo capture. */
+  photoPreselectComponentIds?: string[];
+  /** Notes prefill from the paste flow; applied only for the matching date. */
+  prefill?: { date: string; text: string } | null;
+  onPrefillConsumed?: () => void;
 };
 
 function mergePhotos(previous: SitePhoto[], incoming: SitePhoto[]): SitePhoto[] {
@@ -96,7 +105,19 @@ export default function SiteReportPage({
   onDateChange,
   onOpenAcceptance,
   onOpenProgressPaste,
+  photoPreselectComponentIds,
+  prefill,
+  onPrefillConsumed,
 }: Props) {
+  const {
+    batches: batchOptions,
+    loading: batchOptionsLoading,
+  } = useConstructionBatches(projectId);
+  const { batchId } = useConstructionBatch(
+    projectId,
+    batchOptions,
+    batchOptionsLoading,
+  );
   const [report, setReport] = useState<DailyReport | null>(null);
   const [manpower, setManpower] = useState<ManpowerEntry[]>([]);
   const [workLogs, setWorkLogs] = useState<DailyWorkLog[]>([]);
@@ -141,6 +162,12 @@ export default function SiteReportPage({
     }),
     [manpower, notes, plans, siteNotes, status, workLogs],
   );
+
+  useEffect(() => {
+    if (!prefill || !loaded || prefill.date !== date) return;
+    setNotes((current) => (current.trim() ? current : prefill.text));
+    onPrefillConsumed?.();
+  }, [prefill, loaded, date, onPrefillConsumed]);
 
   useEffect(() => {
     reportRef.current = report;
@@ -843,6 +870,8 @@ export default function SiteReportPage({
 
       <PhotoCapture
         projectId={projectId}
+        batchId={batchId}
+        initialComponentIds={photoPreselectComponentIds}
         reportId={report?.id ?? null}
         reportDate={date}
         photos={photos}

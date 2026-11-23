@@ -18,11 +18,13 @@ import {
   buildZaloSummary,
   formatPasteDate,
   groupCodesByPrefix,
+  groupPasteQuestions,
   pasteIdempotencyKey,
   type PasteAnswers,
   type PasteApplyResult,
   type PasteManualStages,
   type PasteParse,
+  type PasteQuestionGroup,
 } from "../lib/progressPaste";
 import { deleteDraft, loadDraft, saveDraft } from "../lib/offlineDb";
 import { todayISO } from "../lib/componentProgress";
@@ -45,7 +47,18 @@ const FOCUS =
 
 type Props = {
   projectId: string;
-  onOpenAcceptance?: () => void;
+  onOpenDailyReport?: (eventDate: string, text: string) => void;
+  onOpenJournal?: (eventDate: string) => void;
+  onOpenPhotos?: (componentIds: string[]) => void;
+  /** App-level handoff; the acceptance module owns reading this request. */
+  onOpenAcceptance?: (request: {
+    projectId: string;
+    batchId: string | null;
+    eventDate: string;
+    componentIds: string[];
+    componentCodes: string[];
+    stageDefinitionIds: string[];
+  }) => void;
 };
 
 function draftKey(projectId: string) {
@@ -83,7 +96,13 @@ async function copyText(value: string): Promise<boolean> {
   }
 }
 
-export default function ProgressPastePanel({ projectId, onOpenAcceptance }: Props) {
+export default function ProgressPastePanel({
+  projectId,
+  onOpenDailyReport,
+  onOpenJournal,
+  onOpenPhotos,
+  onOpenAcceptance,
+}: Props) {
   const {
     batches,
     loading: batchesLoading,
@@ -112,6 +131,11 @@ export default function ProgressPastePanel({ projectId, onOpenAcceptance }: Prop
     created: number;
     corrections: number;
     batchAdded: number;
+    eventDate: string;
+    componentIds: string[];
+    componentCodes: string[];
+    stageDefinitionIds: string[];
+    workSummary: string;
   } | null>(null);
   const [zalo, setZalo] = useState("");
   const [pending, setPending] = useState<ProgressRow[] | null>(null);
@@ -154,6 +178,28 @@ export default function ProgressPastePanel({ projectId, onOpenAcceptance }: Prop
   const answeredAll = parsed
     ? parsed.questions.every((question) => Boolean(answers[question.id]))
     : false;
+  const questionGroups = parsed ? groupPasteQuestions(parsed.questions) : [];
+  const remainingQuestions = parsed
+    ? parsed.questions.filter((question) => !answers[question.id]).length
+    : 0;
+
+  function answerGroup(group: PasteQuestionGroup, value: string) {
+    setAnswers((current) => {
+      const next = { ...current };
+      for (const question of group.questions) {
+        if (question.options.some((option) => option.value === value)) {
+          next[question.id] = value;
+        }
+      }
+      return next;
+    });
+    invalidatePreview();
+  }
+
+  function answerQuestion(questionId: string, value: string) {
+    setAnswers((current) => ({ ...current, [questionId]: value }));
+    invalidatePreview();
+  }
 
   function resetFlow() {
     setParsed(null);
@@ -317,7 +363,31 @@ export default function ProgressPastePanel({ projectId, onOpenAcceptance }: Prop
           postErrors.push(`Sửa sự kiện trước: ${errorMessage(cause)}`);
         }
       }
-      setSaved({ created: result.created, corrections, batchAdded });
+      setSaved({
+        created: result.created,
+        corrections,
+        batchAdded,
+        eventDate,
+        componentIds: [
+          ...new Set(applied.savedLines.flatMap((line) => line.component_ids)),
+        ],
+        componentCodes: [
+          ...new Set(applied.savedLines.flatMap((line) => line.codes)),
+        ],
+        stageDefinitionIds: [
+          ...new Set(
+            applied.savedLines
+              .map((line) => line.stage_definition_id)
+              .filter(Boolean),
+          ),
+        ],
+        workSummary: applied.savedLines
+          .map(
+            (line) =>
+              `${line.stage_display_name || line.work_text}: ${line.codes.join(", ")}`,
+          )
+          .join("\n"),
+      });
       await deleteDraft(draftKey(projectId)).catch(() => undefined);
       let rows: ProgressRow[] | null = null;
       try {
@@ -594,39 +664,90 @@ export default function ProgressPastePanel({ projectId, onOpenAcceptance }: Prop
                 <h2 id="paste-questions" className="text-base font-semibold text-slate-900">
                   Câu hỏi cần xác nhận ({parsed.questions.length})
                 </h2>
-                <p className="text-xs text-slate-600">Phải trả lời tất cả trước khi xem lại và ghi.</p>
+                <p className="text-xs text-slate-600">
+                  Trả lời theo nhóm hoặc mở từng mã để chỉnh riêng. Còn {remainingQuestions} câu chưa trả lời.
+                </p>
               </div>
-              {parsed.questions.map((question) => (
-                <fieldset key={question.id} className="rounded-xl border border-slate-200 p-3">
-                  <legend className="px-1 text-sm font-medium text-slate-800">{question.message_vi}</legend>
-                  {question.codes?.length ? (
-                    <p className="mt-1 break-words font-mono text-xs text-slate-600">
-                      {question.codes.join(", ")}
-                    </p>
+              {questionGroups.map((group) => (
+                <fieldset key={group.kind} className="rounded-xl border border-slate-200 p-3">
+                  <legend className="px-1 text-sm font-semibold text-slate-800">
+                    {group.label} ({group.questions.length})
+                  </legend>
+                  {group.commonOptions.length && group.questions.length > 1 ? (
+                    <div className="mt-2 rounded-lg bg-slate-50 p-2">
+                      <p className="text-xs font-medium text-slate-700">
+                        Áp dụng cho cả nhóm ({group.questions.length} mã)
+                      </p>
+                      <div className="mt-1 flex flex-wrap gap-2">
+                        {group.commonOptions.map((option) => (
+                          <button
+                            key={option.value}
+                            type="button"
+                            className={`min-h-11 rounded-lg border px-3 text-sm font-semibold ${FOCUS} border-slate-300 bg-white text-slate-800 hover:bg-slate-100`}
+                            onClick={() => answerGroup(group, option.value)}
+                          >
+                            {option.label_vi}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   ) : null}
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {question.options.map((option) => {
-                      const active = answers[question.id] === option.value;
-                      return (
-                        <button
-                          key={option.value}
-                          type="button"
-                          aria-pressed={active}
-                          className={`min-h-11 rounded-lg border px-3 text-sm font-semibold ${FOCUS} ${
-                            active
-                              ? "border-slate-800 bg-slate-800 text-white"
-                              : "border-slate-300 bg-white text-slate-800 hover:bg-slate-50"
-                          }`}
-                          onClick={() => {
-                            setAnswers((current) => ({ ...current, [question.id]: option.value }));
-                            invalidatePreview();
-                          }}
-                        >
-                          {option.label_vi}
-                        </button>
-                      );
-                    })}
-                  </div>
+                  <details className="mt-2" open={group.questions.length <= 2}>
+                    <summary className="min-h-11 cursor-pointer list-none py-2 text-xs font-medium text-slate-700 [&::-webkit-details-marker]:hidden">
+                      Chọn riêng từng mã ({group.questions.length})
+                    </summary>
+                    <div className="space-y-2">
+                      {group.questions.map((question) => {
+                        const code = question.codes?.join(", ") || question.id;
+                        const stageQuestion =
+                          group.kind === "multiple_stage" || group.kind === "stage";
+                        return (
+                          <div key={question.id} className="rounded-lg border border-slate-200 p-2">
+                            <p className="break-words font-mono text-xs font-semibold text-slate-800">
+                              {code}
+                            </p>
+                            <p className="mt-1 text-xs text-slate-600">{question.message_vi}</p>
+                            {stageQuestion ? (
+                              <select
+                                className="mt-1 min-h-11 w-full rounded-lg border border-slate-300 bg-white px-2 text-base sm:text-sm"
+                                aria-label={`Công đoạn cho ${code}`}
+                                value={answers[question.id] ?? ""}
+                                onChange={(event) => answerQuestion(question.id, event.target.value)}
+                              >
+                                <option value="">— Chọn công đoạn —</option>
+                                {question.options.map((option) => (
+                                  <option key={option.value} value={option.value}>
+                                    {option.label_vi}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : (
+                              <div className="mt-1 flex flex-wrap gap-2">
+                                {question.options.map((option) => {
+                                  const active = answers[question.id] === option.value;
+                                  return (
+                                    <button
+                                      key={option.value}
+                                      type="button"
+                                      aria-pressed={active}
+                                      className={`min-h-11 rounded-lg border px-3 text-sm font-semibold ${FOCUS} ${
+                                        active
+                                          ? "border-slate-800 bg-slate-800 text-white"
+                                          : "border-slate-300 bg-white text-slate-800 hover:bg-slate-50"
+                                      }`}
+                                      onClick={() => answerQuestion(question.id, option.value)}
+                                    >
+                                      {option.label_vi}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </details>
                 </fieldset>
               ))}
             </section>
@@ -732,6 +853,56 @@ export default function ProgressPastePanel({ projectId, onOpenAcceptance }: Prop
             </p>
           </div>
           <div>
+            <h3 className="text-sm font-semibold text-slate-900">Bước tiếp theo</h3>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {onOpenDailyReport ? (
+                <button
+                  type="button"
+                  className={SECONDARY}
+                  onClick={() => onOpenDailyReport(saved.eventDate, saved.workSummary)}
+                >
+                  Mở báo cáo ngày {formatPasteDate(saved.eventDate)}
+                </button>
+              ) : null}
+              {onOpenJournal ? (
+                <button
+                  type="button"
+                  className={SECONDARY}
+                  onClick={() => onOpenJournal(saved.eventDate)}
+                >
+                  Xem nhật ký ngày {formatPasteDate(saved.eventDate)}
+                </button>
+              ) : null}
+              {onOpenPhotos && saved.componentIds.length ? (
+                <button
+                  type="button"
+                  className={SECONDARY}
+                  onClick={() => onOpenPhotos(saved.componentIds)}
+                >
+                  Chụp ảnh cho các cọc vừa ghi ({saved.componentCodes.length})
+                </button>
+              ) : null}
+              {onOpenAcceptance && saved.componentIds.length ? (
+                <button
+                  type="button"
+                  className={PRIMARY}
+                  onClick={() =>
+                    onOpenAcceptance({
+                      projectId,
+                      batchId,
+                      eventDate: saved.eventDate,
+                      componentIds: saved.componentIds,
+                      componentCodes: saved.componentCodes,
+                      stageDefinitionIds: saved.stageDefinitionIds,
+                    })
+                  }
+                >
+                  Tạo PYC nháp
+                </button>
+              ) : null}
+            </div>
+          </div>
+          <div>
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-sm font-semibold text-slate-900">Tin nhắn Zalo</h3>
               <button
@@ -768,11 +939,6 @@ export default function ProgressPastePanel({ projectId, onOpenAcceptance }: Prop
             ) : (
               <p className="mt-1 text-sm text-slate-600">Không còn cấu kiện chờ nghiệm thu trong đợt.</p>
             )}
-            {onOpenAcceptance ? (
-              <button type="button" className={`${SECONDARY} mt-2`} onClick={onOpenAcceptance}>
-                Mở Nghiệm thu
-              </button>
-            ) : null}
           </div>
           <button
             type="button"

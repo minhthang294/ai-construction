@@ -27,9 +27,16 @@ import {
   photoStageLabel,
 } from "../types";
 import type { PhotoFilters, SitePhoto, WorkItem } from "../types";
+import ComponentPicker from "./ComponentPicker";
+import {
+  loadPhotoComponentOptions,
+  type PhotoComponentOption,
+} from "../lib/photoComponents";
 
 type Props = {
   projectId: string;
+  batchId?: string | null;
+  initialComponentIds?: string[];
   reportId?: string | null;
   reportDate?: string | null;
   photos: SitePhoto[];
@@ -102,19 +109,21 @@ function PhotoCard({
   projectId,
   photo,
   online,
+  componentOptions,
   onPatched,
   onDeleted,
 }: {
   projectId: string;
   photo: SitePhoto;
   online: boolean;
+  componentOptions: PhotoComponentOption[];
   onPatched: (photo: SitePhoto) => void;
   onDeleted: (photoId: string) => void;
 }) {
   const [caption, setCaption] = useState(photo.confirmed_caption ?? "");
   const [category, setCategory] = useState(photo.category ?? "");
   const [location, setLocation] = useState(photo.location ?? "");
-  const [component, setComponent] = useState(photo.component ?? "");
+  const [componentIds, setComponentIds] = useState<string[]>(photo.component_ids ?? []);
   const [stage, setStage] = useState(photo.stage ?? "");
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -124,13 +133,13 @@ function PhotoCard({
     setCaption(photo.confirmed_caption ?? "");
     setCategory(photo.category ?? "");
     setLocation(photo.location ?? "");
-    setComponent(photo.component ?? "");
+    setComponentIds(photo.component_ids ?? []);
     setStage(photo.stage ?? "");
   }, [
     photo.confirmed_caption,
     photo.category,
     photo.location,
-    photo.component,
+    photo.component_ids,
     photo.stage,
   ]);
 
@@ -175,7 +184,7 @@ function PhotoCard({
     try {
       const updated = await patchPhoto(projectId, photo.id, {
         location: location.trim() || null,
-        component: component.trim() || null,
+        component_ids: componentIds,
         stage: stage || null,
       });
       onPatched(updated);
@@ -235,6 +244,10 @@ function PhotoCard({
     }
   }
 
+  const componentLabels = componentIds.map(
+    (id) => componentOptions.find((option) => option.id === id)?.code ?? id,
+  );
+
   return (
     <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
       <AuthenticatedImage projectId={projectId} photo={photo} />
@@ -246,9 +259,22 @@ function PhotoCard({
           </span>
         </div>
         <p className="text-gray-500">
-          {location || "Chưa có vị trí"} · {component || "Chưa có hạng mục"} ·{" "}
-          {photoStageLabel(stage)}
+          {location || "Chưa có vị trí"} · {photoStageLabel(stage)}
         </p>
+        <div className="flex flex-wrap gap-1" aria-label="Cấu kiện của ảnh">
+          {componentLabels.length ? (
+            componentLabels.map((label) => (
+              <span
+                key={label}
+                className="rounded-full border border-[#405e9b]/30 bg-[#eff4fc] px-2 py-0.5 text-xs font-semibold text-[#304b80]"
+              >
+                {label}
+              </span>
+            ))
+          ) : (
+            <span className="text-xs text-gray-500">Chưa có cấu kiện</span>
+          )}
+        </div>
         <input
           className="min-h-10 w-full rounded-lg border border-gray-300 px-2 text-sm"
           placeholder="Chú thích xác nhận"
@@ -274,11 +300,12 @@ function PhotoCard({
           value={location}
           onChange={(event) => setLocation(event.target.value)}
         />
-        <input
-          className="min-h-9 w-full rounded-lg border border-gray-300 px-2 text-sm"
-          placeholder="Hạng mục (vd: Bê tông)"
-          value={component}
-          onChange={(event) => setComponent(event.target.value)}
+        <ComponentPicker
+          options={componentOptions}
+          selectedIds={componentIds}
+          onChange={setComponentIds}
+          disabled={saving}
+          label="Cấu kiện của ảnh"
         />
         <select
           className="min-h-9 w-full rounded-lg border border-gray-300 bg-white px-2 text-sm"
@@ -339,6 +366,8 @@ function PhotoCard({
 
 export default function PhotoCapture({
   projectId,
+  batchId,
+  initialComponentIds,
   reportId,
   reportDate,
   photos,
@@ -354,7 +383,9 @@ export default function PhotoCapture({
   const [category, setCategory] = useState("");
   const [workItemId, setWorkItemId] = useState("");
   const [location, setLocation] = useState("");
-  const [component, setComponent] = useState("");
+  const [componentIds, setComponentIds] = useState<string[]>([]);
+  const [caption, setCaption] = useState("");
+  const [componentOptions, setComponentOptions] = useState<PhotoComponentOption[]>([]);
   const [stage, setStage] = useState("");
   const [filterDraft, setFilterDraft] = useState<PhotoFilters>(filters);
   const [busy, setBusy] = useState(false);
@@ -369,6 +400,24 @@ export default function PhotoCapture({
   useEffect(() => {
     setFilterDraft(filters);
   }, [filters]);
+
+  useEffect(() => {
+    let active = true;
+    void loadPhotoComponentOptions(projectId, batchId)
+      .then((options) => {
+        if (active) setComponentOptions(options);
+      })
+      .catch(() => {
+        if (active) setComponentOptions([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [projectId, batchId]);
+
+  useEffect(() => {
+    if (initialComponentIds?.length) setComponentIds(initialComponentIds);
+  }, [initialComponentIds]);
 
   useEffect(() => {
     return () => {
@@ -418,7 +467,7 @@ export default function PhotoCapture({
           reportDate: reportDate ?? null,
           category: category || null,
           location: location.trim() || null,
-          component: component.trim() || null,
+          componentIds: componentIds.length ? componentIds : null,
           stage: stage || null,
           workItemIds: workItemId ? [workItemId] : null,
         },
@@ -517,7 +566,8 @@ export default function PhotoCapture({
             reportId: reportId ?? undefined,
             category: category || undefined,
             location: location.trim() || undefined,
-            component: component.trim() || undefined,
+            componentIds: componentIds.length ? componentIds : undefined,
+            confirmedCaption: caption.trim() || undefined,
             stage: stage || undefined,
             workItemIds: workItemId ? [workItemId] : undefined,
             clientUploadIds: items.map((item) => item.id),
@@ -602,13 +652,6 @@ export default function PhotoCapture({
           disabled={busy || prepared.length > 0}
           onChange={(event) => setLocation(event.target.value)}
         />
-        <input
-          className="min-h-11 w-full rounded-lg border border-gray-300 px-2 text-sm"
-          placeholder="Hạng mục (vd: Bê tông)"
-          aria-label="Hạng mục ảnh"
-          value={component}
-          onChange={(event) => setComponent(event.target.value)}
-        />
         <select
           className="min-h-11 w-full rounded-lg border border-gray-300 bg-white px-2 text-sm"
           value={stage}
@@ -622,21 +665,37 @@ export default function PhotoCapture({
             </option>
           ))}
         </select>
-        <button
-          type="button"
-          className="min-h-11 rounded-lg border border-gray-300 text-xs"
-          disabled={busy || prepared.length > 0}
-          onClick={() => {
-            setLocation("");
-            setComponent("");
-            setStage("");
-            setCategory("");
-            setWorkItemId("");
-          }}
-        >
-          Xoá metadata
-        </button>
       </div>
+      <ComponentPicker
+        options={componentOptions}
+        selectedIds={componentIds}
+        onChange={setComponentIds}
+        disabled={busy || prepared.length > 0}
+        label="Cấu kiện trong ảnh"
+      />
+      <input
+        className="min-h-11 w-full rounded-lg border border-gray-300 px-2 text-sm"
+        placeholder="Chú thích hạng mục (tuỳ chọn)"
+        aria-label="Chú thích hạng mục ảnh"
+        value={caption}
+        disabled={busy || prepared.length > 0}
+        onChange={(event) => setCaption(event.target.value)}
+      />
+      <button
+        type="button"
+        className="min-h-11 rounded-lg border border-gray-300 text-xs"
+        disabled={busy || prepared.length > 0}
+        onClick={() => {
+          setLocation("");
+          setComponentIds([]);
+          setCaption("");
+          setStage("");
+          setCategory("");
+          setWorkItemId("");
+        }}
+      >
+        Xoá metadata
+      </button>
       <p className="text-xs text-gray-500">
         Nhập vị trí trước khi chụp/chọn ảnh nếu muốn in vị trí đó lên ảnh. Ảnh
         chọn từ máy không có EXIF sẽ ghi “Chưa xác định”, không tự lấy vị trí hiện tại.
@@ -775,15 +834,21 @@ export default function PhotoCapture({
               setFilterDraft({ ...filterDraft, location: event.target.value })
             }
           />
-          <input
-            className="min-h-10 w-full rounded-lg border border-gray-300 px-2 text-sm"
-            placeholder="Hạng mục"
-            aria-label="Lọc ảnh theo hạng mục"
-            value={filterDraft.component}
+          <select
+            className="min-h-10 w-full rounded-lg border border-gray-300 bg-white px-2 text-sm"
+            aria-label="Lọc ảnh theo cấu kiện"
+            value={filterDraft.component_id}
             onChange={(event) =>
-              setFilterDraft({ ...filterDraft, component: event.target.value })
+              setFilterDraft({ ...filterDraft, component_id: event.target.value })
             }
-          />
+          >
+            <option value="">Mọi cấu kiện</option>
+            {componentOptions.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.code} · {option.zone} PĐ{option.segment}
+              </option>
+            ))}
+          </select>
           <select
             className="min-h-10 w-full rounded-lg border border-gray-300 bg-white px-2 text-sm"
             aria-label="Lọc ảnh theo giai đoạn"
@@ -861,6 +926,7 @@ export default function PhotoCapture({
             projectId={projectId}
             photo={photo}
             online={online}
+            componentOptions={componentOptions}
             onPatched={(updated) => onUploaded([updated])}
             onDeleted={(photoId) => onDeleted?.(photoId)}
           />

@@ -1165,3 +1165,97 @@ Rủi ro/ghi chú: default batch gọi `/progress` cho từng batch khi chưa c�
 - CLI `scripts/import_design_parameters.py` preview/commit; preview trên bản copy thật: 393 dòng, 392 dòng/392 cọc khớp, 390 cọc có `t`, 2.525 tham số, 1 mã không khớp (`Cầu chính / M263`), 0 mơ hồ/0 xung đột; `A162/A163` thiếu t trong nguồn.
 - Tên bước được render `t = X cm`/dải `a–b cm`/`(chưa có số liệu)` trong component detail, history, daily preview, overview latest-day, journal, drawing popup và paste/Zalo summary.
 - Chi tiết + test: `docs/agent-reports/site-design-parameters.md`.
+
+## UI/field-work wave 2 - 2026-11-23
+
+Phạm vi: `frontend/src/app/*`, `frontend/src/features/site/*`, `backend/app/site/*`, `backend/tests/site_report/*`, báo cáo này. Không sửa `engineering_ai`, `acceptance`, `data/app.db`, không migration, không commit/push.
+
+### Ảnh gắn cấu kiện (không migration)
+
+- `SitePhoto.component` (text cũ) lưu `@components:{"ids":[...],"label":"F1, F2"}` qua `backend/app/site/photo_components.py`; text cũ không đổi.
+- Upload nhận form `component_ids` (csv), PATCH nhận `component_ids`; `PhotoOut.component` trả nhãn, `component_ids` trả id. Lọc ảnh thêm `component_id`.
+- Frontend: picker tìm mã trong đợt/zone, mã có tiến độ mới nhất trước, chọn nhiều; chip mã trên thumbnail; bỏ ô "Hạng mục" free-text, giữ chú thích; lọc theo cấu kiện; payload offline có `componentIds`.
+- Sau khi ghi tiến độ: nút "Chụp ảnh cho các cọc vừa ghi" mở Hiện trường với các cấu kiện đã chọn trước.
+- Rủi ro đã biết: cột `component` khai báo `String(255)` nhưng SQLite không ép độ dài; JSON id nhiều cấu kiện có thể vượt 255 ký tự. Cần migration sang bảng liên kết nếu chuyển DB ép độ dài.
+
+### Câu hỏi dán tin nhắn
+
+- `groupPasteQuestions` gom câu hỏi cùng `kind`; card nhóm có "Áp dụng cho cả nhóm" và mở từng mã để chọn riêng. Frontend-only, API engineering-ai giữ nguyên.
+
+### Bước tiếp theo sau khi lưu
+
+- Nút mở báo cáo ngày đúng ngày, điền ghi chú bằng tóm tắt công việc (không tự lưu; chỉ điền khi ngày khớp và ghi chú đang trống).
+- Nút mở nhật ký đúng ngày (tab Nhật ký, ngày đã chọn).
+- Nút "Tạo PYC nháp" phát `AcceptanceDraftRequest {projectId,batchId,eventDate,componentIds,componentCodes}` qua `frontend/src/app/acceptanceHandoff.ts` (event `acceptance:create-draft` + sessionStorage `acceptance_draft_request`); module nghiệm thu đọc payload này.
+
+### "Cần xử lý" trên Tổng quan
+
+- Chỉ tính `ACCEPTANCE_WITHOUT_PROGRESS`, `ACCEPTANCE_BEFORE_PROGRESS`, `MISSING_SOURCE`, `DUPLICATE_OR_AMBIGUOUS_CODE`, `UNVERIFIED_COMPONENT`; loại `WORK_WITHOUT_ACCEPTANCE` (bình thường).
+- Bấm thẻ "Cần xử lý" mở breakdown theo loại; thẻ "Hoàn thành chưa nghiệm thu" giữ nguyên.
+- Screenshot DAP PD2: "Hoàn thành chưa nghiệm thu" 30, "Cần xử lý" 0.
+
+### Mở cấu kiện từ Hỏi AI
+
+- `App.tsx` nghe `engineering-ai:open-component`, chuyển sang trang Cấu kiện, tab Theo cấu kiện, mở editor/detail đúng component; đổi project nếu payload khác project hiện tại.
+
+### Kiểm tra
+
+```bash
+cd frontend
+npm test        # 34 files, 210 tests passed
+npm run build   # OK; main 297,25 kB; ComponentCatalogImport 93,53 kB; SiteReportPage 89,67 kB
+cd ../backend
+.venv/Scripts/python.exe -m pytest tests -q
+# 375 passed, 6 skipped
+cd C:/Users/Thang Minh Pham/.claude/jobs/0f99d406/tmp/shots
+node shoot.js
+# phone/desktop chụp xong; còn 404 /acceptance/pending (thuộc module nghiệm thu)
+```
+
+**Chưa kiểm**: E2E bấm luồng dán tin nhắn → bước tiếp theo → PYC nháp (module nghiệm thu đọc payload). Đã bấm thử thẻ "Cần xử lý" trên trình duyệt: breakdown mở và hiện "Không có dữ liệu cần xử lý" với dữ liệu DAP PD2.
+
+## Orchestrator fixes: PYC handoff + photo component links - 2026-11-23
+
+Phạm vi: `frontend/src/app/*`, `frontend/src/features/site/*`, `backend/app/site/*`, một migration mới, test và báo cáo này. Không sửa `frontend/src/features/acceptance`, `engineering_ai`, không commit/push, không ghi `data/app.db`.
+
+### 1. Sửa handoff "Tạo PYC nháp"
+
+- `frontend/src/app/acceptanceHandoff.ts`: bỏ event `acceptance:create-draft` + sessionStorage; giữ type request và thêm `toAcceptanceInitialState()` map camelCase → `{batch_id, event_date, component_ids, stage_definition_id}`.
+- `stage_definition_id` chỉ lấy khi tất cả dòng vừa lưu dùng đúng một công đoạn; nhiều công đoạn → `null`.
+- `ProgressPastePanel`: request gửi thêm `stageDefinitionIds` lấy từ `savedLines`.
+- `App.tsx`: giữ payload trong state `{projectId, state}`, đổi project nếu request thuộc project khác, truyền `initialState` cho `AcceptancePage`. State bị xoá khi rời trang Nghiệm thu hoặc đổi project để không áp dụng lại.
+- Test: `frontend/src/app/acceptanceHandoff.test.ts` (2 ca: map đầy đủ + nhiều công đoạn/null batch).
+
+### 2. Photo component links (bỏ mã hoá trong cột `component`)
+
+- Migration `e6f7a8b9c0d1` (head cũ `b7c8d9e0f1a2`) tạo `site_photo_components(photo_id, component_id, project_id, created_by, created_at, PK(photo_id, component_id))`, index `component_id`/`project_id`, FK `photo_id` → `site_photos` cascade.
+- Upgrade đọc mọi `site_photos.component` dạng `@components:{...}`, chỉ nhập các id đúng project, rồi đặt cột `component = NULL` (cột chỉ còn caption người dùng).
+- Downgrade gom link theo ảnh, dựng lại `@components:{ids,label}` (giữ caption nếu có) rồi xoá bảng — round trip có dữ liệu đã test.
+- `SitePhotoComponent` model; `photo_components.py` cung cấp `replace_photo_components`, `photo_component_ids(db, photo)`, `photo_component_label(db, photo)`, validate id theo project.
+- Upload/PATCH nhận `component_ids`; PATCH thay toàn bộ link; `PhotoOut` trả `component` (caption) + `component_ids`; filter `component_id` dùng bảng link; xoá ảnh xoá link; export/journal evidence đọc mã qua bảng link.
+- Frontend: bỏ fallback chip từ cột `component`, offline queue chỉ gửi `componentIds`, type ghi rõ `component` là caption.
+- Test backend: 21 cấu kiện trên một ảnh, filter theo id, cấu kiện project khác → 404, PATCH thay/xoá link; migration round trip có dữ liệu (2 id).
+
+### Kiểm tra
+
+```bash
+# Backend
+.venv/Scripts/python.exe -m pytest backend/tests -q
+# 376 passed, 6 skipped
+.venv/Scripts/python.exe -m pytest backend/tests/test_component_migration.py backend/tests/site_report -q
+# 97 passed
+
+# Migration thật trên SQLite tạm: upgrade -> downgrade b7c8d9e0f1a2 -> upgrade (log OK)
+cd backend
+$env:DATABASE_URL="sqlite:///$env:TEMP/photo-links-migration-check.db"
+..\.venv\Scripts\python.exe -m alembic upgrade head
+..\.venv\Scripts\python.exe -m alembic downgrade b7c8d9e0f1a2
+..\.venv\Scripts\python.exe -m alembic upgrade head
+
+# Frontend
+cd frontend
+npm test        # 35 files, 212 tests
+npm run build   # OK; main 297,60 kB; SiteReportPage 89,54 kB
+```
+
+Lưu ý vận hành: DB thật cần `alembic upgrade head` trước khi chạy code mới; migration tự chuyển dữ liệu `@components:` cũ. Ảnh legacy có caption text thường (không phải `@components:`) được giữ nguyên.

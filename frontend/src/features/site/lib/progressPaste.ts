@@ -49,6 +49,44 @@ export type PasteQuestion = {
   apply?: Record<string, unknown>;
 };
 
+export type PasteQuestionGroup = {
+  kind: string;
+  label: string;
+  questions: PasteQuestion[];
+  commonOptions: PasteQuestionOption[];
+};
+
+const QUESTION_LABELS: Record<string, string> = {
+  multiple_stage: "Chọn công đoạn",
+  stage: "Chọn công đoạn",
+  completed_earlier: "Cấu kiện đã hoàn thành trước đó",
+  duplicate_code: "Mã trùng trong tin nhắn",
+  unknown_code: "Mã không tìm thấy",
+  outside_scope: "Cấu kiện ngoài phạm vi",
+  status_confirm: "Xác nhận trạng thái",
+};
+
+export function groupPasteQuestions(questions: PasteQuestion[]): PasteQuestionGroup[] {
+  const groups = new Map<string, PasteQuestion[]>();
+  for (const question of questions) {
+    groups.set(question.kind, [...(groups.get(question.kind) ?? []), question]);
+  }
+  return [...groups.entries()].map(([kind, items]) => {
+    const values = items.map(
+      (question) => new Set(question.options.map((option) => option.value)),
+    );
+    const commonOptions = items[0].options.filter((option) =>
+      values.every((set) => set.has(option.value)),
+    );
+    return {
+      kind,
+      label: QUESTION_LABELS[kind] ?? kind,
+      questions: items,
+      commonOptions,
+    };
+  });
+}
+
 export type PasteParse = {
   event_date?: string | null;
   date_source?: string | null;

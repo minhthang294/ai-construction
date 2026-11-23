@@ -52,6 +52,9 @@ type Props = {
   projectId: string;
   batchId?: string | null;
   primaryZone?: string | null;
+  /** Open this component's detail/editor when set (e.g. from AI citations). */
+  focusComponentId?: string | null;
+  onFocusHandled?: () => void;
 };
 
 const PAGE_SIZE = 20;
@@ -290,7 +293,13 @@ function ProgressCard({
   );
 }
 
-export default function ComponentProgressPanel({ projectId, batchId, primaryZone }: Props) {
+export default function ComponentProgressPanel({
+  projectId,
+  batchId,
+  primaryZone,
+  focusComponentId,
+  onFocusHandled,
+}: Props) {
   const [rows, setRows] = useState<ProgressRow[]>([]);
   const [definitions, setDefinitions] = useState<StageDefinition[]>([]);
   const [definitionsError, setDefinitionsError] = useState(false);
@@ -352,6 +361,27 @@ export default function ComponentProgressPanel({ projectId, batchId, primaryZone
     void load();
     void loadDefinitions();
   }, [load, loadDefinitions]);
+
+  useEffect(() => {
+    if (!focusComponentId || rows.length === 0) return;
+    const row = rows.find((item) => item.id === focusComponentId);
+    onFocusHandled?.();
+    if (!row) return;
+    setFilters({ ...EMPTY_PROGRESS_FILTERS });
+    setVisibleCount(PAGE_SIZE);
+    setDesignQuantities({});
+    setDesignStatus("loading");
+    setSelected([row.id]);
+    setDraft({ ...EMPTY_BULK_PROGRESS, event_date: todayISO() });
+    setStageSelections({});
+    setPreview(null);
+    setConfirmed(false);
+    setIdempotencyKey(null);
+    setError(null);
+    setMessage(null);
+    setSelectionMode(false);
+    setMode("editor");
+  }, [focusComponentId, rows, onFocusHandled]);
 
   useEffect(() => {
     if (previousMode.current === mode) return;

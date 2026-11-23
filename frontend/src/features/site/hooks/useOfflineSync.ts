@@ -98,7 +98,7 @@ export function useOfflineSync(projectId: string, onChanged?: () => void) {
               reportId,
               category: payload.category ?? undefined,
               location: payload.location ?? undefined,
-              component: payload.component ?? undefined,
+              componentIds: payload.componentIds ?? undefined,
               stage: payload.stage ?? undefined,
               workItemIds: payload.workItemIds?.length
                 ? payload.workItemIds

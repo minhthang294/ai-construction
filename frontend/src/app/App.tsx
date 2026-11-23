@@ -4,6 +4,7 @@ import { Dashboard, ProjectSetup, WorkItemList, request } from "./CorePages";
 import type { Project } from "./CorePages";
 import ChangePasswordDialog from "./ChangePasswordDialog";
 import MenuButton from "../ui/MenuButton";
+import { toAcceptanceInitialState, type AcceptanceDraftRequest, type AcceptanceInitialState } from "./acceptanceHandoff";
 import {
   AcceptanceIcon,
   ArrowLeftIcon,
@@ -104,6 +105,14 @@ export default function App() {
   const [loginNotice, setLoginNotice] = useState("");
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [acceptanceDirty, setAcceptanceDirty] = useState(false);
+  const [reportPrefill, setReportPrefill] = useState<{ date: string; text: string } | null>(null);
+  const [journalRequest, setJournalRequest] = useState<{ date: string } | null>(null);
+  const [photoPreselect, setPhotoPreselect] = useState<string[] | null>(null);
+  const [componentFocus, setComponentFocus] = useState<{ projectId: string; componentId: string } | null>(null);
+  const [acceptanceNavigation, setAcceptanceNavigation] = useState<{
+    projectId: string;
+    state: AcceptanceInitialState;
+  } | null>(null);
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "Asia/Ho_Chi_Minh",
     year: "numeric",
@@ -123,6 +132,36 @@ export default function App() {
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [menuOpen]);
+
+  useEffect(() => {
+    function openComponent(event: Event) {
+      const detail = (event as CustomEvent<{ projectId?: string; recordId?: string }>).detail;
+      if (!detail?.recordId) return;
+      if (detail.projectId && detail.projectId !== projectId) {
+        setProjectId(detail.projectId);
+        localStorage.setItem("last_project_id", detail.projectId);
+      }
+      setPageHistory((current) => [...current, page]);
+      setPage("components");
+      setComponentFocus({
+        projectId: detail.projectId || projectId,
+        componentId: detail.recordId,
+      });
+      setMenuOpen(false);
+    }
+    window.addEventListener("engineering-ai:open-component", openComponent);
+    return () => window.removeEventListener("engineering-ai:open-component", openComponent);
+  }, [page, projectId]);
+
+  useEffect(() => {
+    if (page !== "acceptance") setAcceptanceNavigation(null);
+  }, [page]);
+
+  useEffect(() => {
+    if (acceptanceNavigation && acceptanceNavigation.projectId !== projectId) {
+      setAcceptanceNavigation(null);
+    }
+  }, [acceptanceNavigation, projectId]);
 
   useEffect(() => {
     if (!token) return;
@@ -536,10 +575,42 @@ export default function App() {
           ) : page === "progress-paste" ? (
             <ProgressPastePanel
               projectId={projectId}
-              onOpenAcceptance={() => navigate("acceptance")}
+              onOpenDailyReport={(eventDate, text) => {
+                setReportDate(eventDate);
+                setReportPrefill({ date: eventDate, text });
+                navigate("daily-report");
+              }}
+              onOpenJournal={(eventDate) => {
+                setJournalRequest({ date: eventDate });
+                navigate("components");
+              }}
+              onOpenPhotos={(componentIds) => {
+                setPhotoPreselect(componentIds);
+                navigate("daily-report");
+              }}
+              onOpenAcceptance={(request: AcceptanceDraftRequest) => {
+                if (request.projectId && request.projectId !== projectId) {
+                  setProjectId(request.projectId);
+                  localStorage.setItem("last_project_id", request.projectId);
+                }
+                setAcceptanceNavigation({
+                  projectId: request.projectId || projectId,
+                  state: toAcceptanceInitialState(request),
+                });
+                navigate("acceptance");
+              }}
             />
           ) : page === "components" ? (
-            <ComponentCatalogImport key={projectId} projectId={projectId} onOpenPaste={() => navigate("progress-paste")} />
+            <ComponentCatalogImport
+              key={projectId}
+              projectId={projectId}
+              onOpenPaste={() => navigate("progress-paste")}
+              initialView={journalRequest ? "journal" : undefined}
+              initialJournalDate={journalRequest?.date}
+              onJournalOpened={() => setJournalRequest(null)}
+              focusComponentId={componentFocus?.componentId}
+              onFocusHandled={() => setComponentFocus(null)}
+            />
           ) : page === "daily-report" ? (
             <SiteReportPage
               projectId={projectId}
@@ -547,9 +618,20 @@ export default function App() {
               onDateChange={setReportDate}
               onOpenAcceptance={() => navigate("acceptance")}
               onOpenProgressPaste={() => navigate("progress-paste")}
+              prefill={reportPrefill}
+              onPrefillConsumed={() => setReportPrefill(null)}
+              photoPreselectComponentIds={photoPreselect ?? undefined}
             />
           ) : page === "acceptance" ? (
-            <AcceptancePage projectId={projectId} onDirtyChange={setAcceptanceDirty} />
+            <AcceptancePage
+              projectId={projectId}
+              onDirtyChange={setAcceptanceDirty}
+              initialState={
+                acceptanceNavigation?.projectId === projectId
+                  ? acceptanceNavigation.state
+                  : null
+              }
+            />
           ) : (
             <EngineeringAIPage projectId={projectId} />
           )}
