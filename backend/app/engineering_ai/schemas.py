@@ -137,6 +137,10 @@ class CitationOut(BaseModel):
     extraction_method: Optional[str] = None
     score: Optional[float] = None
     section: Optional[str] = None
+    # Structured-source traceability: page_extraction or database.  A database
+    # citation carries the row id in record_id (document/page fields are blank).
+    record_id: Optional[str] = None
+    source: Optional[str] = None
 
 
 class SearchResponse(BaseModel):

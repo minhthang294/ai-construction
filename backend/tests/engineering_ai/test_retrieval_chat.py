@@ -1,4 +1,9 @@
-from .conftest import make_scanned_pdf, upload_pdf
+from .conftest import (
+    add_page_extraction,
+    cover_extraction,
+    make_scanned_pdf,
+    upload_pdf,
+)
 
 
 def _search(client, query, project_id="p1"):
@@ -69,10 +74,26 @@ def test_chat_no_source_uses_exact_refusal_and_persists_conversation(client):
     assert messages[1]["content"] == body["answer"]
 
 
-def test_chat_returns_citations_and_provider_answer(
+def _seed_cover_extraction(client, session_factory, digital_document, value="50"):
+    pages = client.get(
+        f"/api/v1/projects/p1/documents/{digital_document['id']}"
+    ).json()["pages"]
+    page = next(item for item in pages if item["page_number"] == 2)
+    add_page_extraction(
+        session_factory,
+        project_id="p1",
+        document_id=digital_document["id"],
+        page_id=page["id"],
+        page_number=2,
+        extraction=cover_extraction(value),
+    )
+
+
+def test_chat_answers_from_ai_extracted_page_data(
     client, digital_document, answer_provider, session_factory
 ):
-    answer_provider.response = "Thông tin tại [1] cho biết lớp bảo vệ bê tông."
+    _seed_cover_extraction(client, session_factory, digital_document)
+    answer_provider.response = "Thông tin tại [1] cho biết lớp bảo vệ bê tông là 50 mm."
     response = client.post(
         "/api/v1/projects/p1/ai/chat",
         json={"message": "concrete cover abutment"},
@@ -84,7 +105,12 @@ def test_chat_returns_citations_and_provider_answer(
     assert len(body["citations"]) == 1
     assert body["confidence"] > 0
     assert answer_provider.calls
-    assert body["citations"][0]["quote"] in client.get(body["citations"][0]["url"]).json()["text"]
+    citation = body["citations"][0]
+    assert citation["document_id"] == digital_document["id"]
+    assert citation["page_number"] == 2
+    assert citation["source"] == "page_extraction"
+    assert citation["record_id"]
+    assert "50 mm" in citation["quote"]
 
     from sqlalchemy import select
 
@@ -93,13 +119,14 @@ def test_chat_returns_citations_and_provider_answer(
     with session_factory() as db:
         rows = db.scalars(select(AICitation)).all()
     assert len(rows) == 1
-    assert rows[0].page_number == body["citations"][0]["page_number"]
-    assert rows[0].quote == body["citations"][0]["quote"]
+    assert rows[0].page_number == citation["page_number"]
+    assert rows[0].quote == citation["quote"]
 
 
-def test_uncited_provider_answer_is_replaced_with_direct_citation(
-    client, digital_document, answer_provider
+def test_uncited_provider_answer_is_replaced_with_extracted_data(
+    client, digital_document, answer_provider, session_factory
 ):
+    _seed_cover_extraction(client, session_factory, digital_document)
     answer_provider.response = "Kết luận không có nguồn."
     response = client.post(
         "/api/v1/projects/p1/ai/chat",
@@ -108,16 +135,17 @@ def test_uncited_provider_answer_is_replaced_with_direct_citation(
     assert response.status_code == 200, response.text
     body = response.json()
     assert "Kết luận không có nguồn." not in body["answer"]
-    assert "Các đoạn hồ sơ" in body["answer"]
+    assert "Dữ kiện AI trích xuất" in body["answer"]
     assert any("thiếu citation" in warning for warning in body["warnings"])
     assert body["citations"]
 
 
-def test_provider_invented_dimension_is_replaced_with_extractive_citation(
-    client, digital_document, answer_provider
+def test_provider_invented_dimension_is_replaced_with_extracted_citation(
+    client, digital_document, answer_provider, session_factory
 ):
     from app.engineering_ai.constants import GROUNDING_WARNING
 
+    _seed_cover_extraction(client, session_factory, digital_document)
     answer_provider.response = "Lớp bảo vệ bê tông là 75 mm [1]."
     response = client.post(
         "/api/v1/projects/p1/ai/chat",
@@ -127,17 +155,18 @@ def test_provider_invented_dimension_is_replaced_with_extractive_citation(
     body = response.json()
     assert body["no_source"] is False
     assert "75 mm" not in body["answer"]
-    assert "Các đoạn hồ sơ" in body["answer"]
+    assert "Dữ kiện AI trích xuất" in body["answer"]
     assert GROUNDING_WARNING in body["warnings"]
     assert body["citations"]
     assert any("50 mm" in citation["quote"] for citation in body["citations"])
 
 
 def test_provider_valid_dimension_present_in_cited_quote_is_retained(
-    client, digital_document, answer_provider
+    client, digital_document, answer_provider, session_factory
 ):
     from app.engineering_ai.constants import GROUNDING_WARNING
 
+    _seed_cover_extraction(client, session_factory, digital_document)
     answer_provider.response = "Lớp bảo vệ bê tông là 50 mm [1]."
     response = client.post(
         "/api/v1/projects/p1/ai/chat",
@@ -151,11 +180,10 @@ def test_provider_valid_dimension_present_in_cited_quote_is_retained(
     assert any("50 mm" in citation["quote"] for citation in body["citations"])
 
 
-def test_chat_vision_sends_only_top_one_rendered_page(
-    client, ocr_engine, answer_provider, vision_provider
+def test_chat_vision_sends_only_cited_top_page(
+    client, ocr_engine, answer_provider, vision_provider, session_factory
 ):
     from app.engineering_ai.ocr import OcrResult
-    from .conftest import make_scanned_pdf, upload_pdf
 
     ocr_engine.result = OcrResult(
         text="Concrete cover for abutment is 50 mm.",
@@ -164,6 +192,18 @@ def test_chat_vision_sends_only_top_one_rendered_page(
     )
     upload = upload_pdf(client, filename="vision-scan.pdf", data=make_scanned_pdf())
     assert upload.status_code == 201, upload.text
+    document = client.get(
+        f"/api/v1/projects/p1/documents/{upload.json()['id']}"
+    ).json()
+    page = document["pages"][0]
+    add_page_extraction(
+        session_factory,
+        project_id="p1",
+        document_id=document["id"],
+        page_id=page["id"],
+        page_number=1,
+        extraction=cover_extraction(),
+    )
     answer_provider.response = "Lớp bảo vệ bê tông là 50 mm [1]."
 
     response = client.post(
@@ -173,7 +213,7 @@ def test_chat_vision_sends_only_top_one_rendered_page(
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["vision_used"] is True
-    assert "Vision top-1" in body["vision_note"]
+    assert "Vision" in body["vision_note"]
     assert body["citations"]
     assert vision_provider.calls == 1
     assert any("Vision chỉ nhận một trang" in warning for warning in body["warnings"])
@@ -191,7 +231,7 @@ def test_chat_vision_is_off_by_default(client, digital_document, vision_provider
 
 
 def test_low_ocr_confidence_adds_fixed_warning_and_caps_confidence(
-    client, ocr_engine, digital_document
+    client, ocr_engine, session_factory
 ):
     from app.engineering_ai.ocr import OcrResult
 
@@ -202,6 +242,31 @@ def test_low_ocr_confidence_adds_fixed_warning_and_caps_confidence(
     )
     upload = upload_pdf(client, filename="low-confidence.pdf", data=make_scanned_pdf())
     assert upload.status_code == 201, upload.text
+    document = client.get(
+        f"/api/v1/projects/p1/documents/{upload.json()['id']}"
+    ).json()
+    page = document["pages"][0]
+    add_page_extraction(
+        session_factory,
+        project_id="p1",
+        document_id=document["id"],
+        page_id=page["id"],
+        page_number=1,
+        extraction={
+            **cover_extraction("60"),
+            "title": "Concrete cover for pier",
+            "drawing_number": "BV-03",
+            "revision": "C",
+            "key_values": [
+                {
+                    "name": "concrete cover for pier",
+                    "value": "60",
+                    "unit": "mm",
+                    "quote": "Concrete cover for pier is 60 mm",
+                }
+            ],
+        },
+    )
 
     response = client.post(
         "/api/v1/projects/p1/ai/chat",
@@ -238,7 +303,10 @@ def test_conversation_cannot_cross_projects(client, digital_document):
     assert fetched.status_code == 404
 
 
-def test_conversation_create_search_rename_delete(client, digital_document):
+def test_conversation_create_search_rename_delete(
+    client, digital_document, session_factory
+):
+    _seed_cover_extraction(client, session_factory, digital_document)
     created = client.post(
         "/api/v1/projects/p1/ai/conversations",
         json={"title": "Hoi ve be tong"},

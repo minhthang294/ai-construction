@@ -89,6 +89,8 @@ export type Citation = {
   extraction_method?: string | null;
   score?: number | null;
   section?: string | null;
+  record_id?: string | null;
+  source?: "page_extraction" | "database" | string | null;
 };
 
 export type SearchResponse = {

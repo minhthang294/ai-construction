@@ -287,8 +287,10 @@ export default function ChatPanel({ projectId, onOpenCitation }: Props) {
                   {conversationTitle || "Hỏi đáp có citation"}
                 </h2>
                 <p className={cx(SECTION_TEXT, "mt-1 max-w-2xl")}>
-                  Chỉ trả lời từ hồ sơ đã tải lên; hồ sơ chưa được kiểm chứng. Citation
-                  bắt buộc; câu trả lời thiếu citation sẽ bị thay bằng trích dẫn trực tiếp.
+                  Chỉ trả lời từ dữ kiện AI trích xuất và database cấu kiện của công
+                  trình; không dùng văn bản OCR thô. Citation bắt buộc; câu trả lời
+                  thiếu citation sẽ bị thay bằng câu từ chối chuẩn. Tiến độ thi công
+                  không phải nghiệm thu.
                 </p>
               </div>
               <div className="flex shrink-0 gap-2">

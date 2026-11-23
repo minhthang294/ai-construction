@@ -1,5 +1,104 @@
 # Engineering AI Agent Report
 
+## 2026-11-23 — chat answers from AI extractions and the component database
+
+Owner decision applied: chat answers from AI-extracted structured data and the
+component database, never from raw OCR chunks. WIP commit `43ed7b8` had bypassed
+page navigation and component lookup and broken 47 tests; both are restored.
+
+- Chat order: `answer_page_navigation` -> `answer_component_query` -> new
+  `answer_structured_question` (extractions first, then component DB). Navigation
+  and exact component lookup are unchanged.
+- Generic fallback reads `PageExtraction.extraction_json` only (component facts,
+  key values, page title/summary) joined to its document/page. Verified rows are
+  preferred; proposed rows are labelled and capped at 0.4 confidence. No
+  `DocumentChunk`/`document_chunks` text is read for chat.
+- Provider answers must cite `[n]` and their technical values must appear in the
+  cited extraction quotes; otherwise a deterministic extracted-data answer is
+  used. Low-OCR pages still add the fixed warning and cap confidence.
+- Component DB path (`database_chat.answer_database_question`): exact whole-token
+  code matches (canonical or alias) return the component plus repair scopes,
+  work links, stages and progress rows. If a code matches nothing the answer is
+  the fixed refusal plus a "name a specific code" warning; it never dumps the
+  project. Aggregate/count questions return deterministic counts (type, segment,
+  design groups, stages, progress events) with at most 5 representative row
+  citations. Size caps: 40 000 chars of context, 20 matched components, 40
+  related rows, 5 aggregate citations.
+- Code matching normalises separators for comparison but matches whole tokens:
+  `A2` does not match `A23`; alias `I40-42` matches question `I-40-42`.
+- Every chat answer must carry citations. Extraction citations carry document,
+  page, drawing, revision and extraction record id; database citations carry the
+  row record id (`source=database`, `record_id=<row id>`). `CitationOut` gained
+  optional `record_id`/`source`; the citation card renders a record badge and no
+  page-open button for database rows.
+- Progress rows are labelled "không phải nghiệm thu" and every database answer
+  carries `Tiến độ thi công không phải nghiệm thu; database chưa có kết luận
+  nghiệm thu.` No acceptance table is read and acceptance is never inferred.
+- Vision (opt-in) now sends the first cited extract/page render instead of the
+  OCR top-1 chunk; it is still only one rendered page.
+
+Changed files:
+- `backend/app/engineering_ai/database_chat.py` (rewritten: extraction + DB
+  context, whole-token matching, aggregate/no-dump, record-id citations)
+- `backend/app/engineering_ai/service.py` (restore navigation/component order;
+  structured fallback; citation invariant; vision takes a cited page)
+- `backend/app/engineering_ai/schemas.py` (optional `record_id`, `source`)
+- `frontend/src/features/engineering-ai/types.ts`,
+  `components/CitationCard.tsx`, `components/ChatPanel.tsx` (database citation
+  display and updated chat copy)
+- `backend/tests/engineering_ai/test_database_chat.py` (new)
+- `backend/tests/engineering_ai/test_retrieval_chat.py`
+- `backend/tests/engineering_ai/test_documents.py`
+- `backend/tests/engineering_ai/test_opencode_provider.py`
+- `backend/tests/engineering_ai/conftest.py`
+- `backend/tests/test_addendum_dod.py`
+
+Tests changed and why (OCR-chunk chat expectations rewritten, not deleted):
+- `test_retrieval_chat.py`: `test_chat_returns_citations_and_provider_answer` ->
+  `test_chat_answers_from_ai_extracted_page_data`; uncited/invented/valid
+  provider tests now seed a verified extraction and assert extraction citations;
+  `test_chat_vision_sends_only_top_one_rendered_page` ->
+  `test_chat_vision_sends_only_cited_top_page`; low-OCR and conversation
+  create/search tests now seed an extraction. The old assertions that a citation
+  quote is a substring of page text no longer apply: chat cites extraction data,
+  not OCR text (search still does).
+- `test_documents.py::test_duplicate_same_bytes_...`: chat still checks
+  effective/history version scoping, but now seeds one extraction per revision
+  because chat no longer reads chunk text.
+- `test_opencode_provider.py`: the provider-error service fallback test now calls
+  `answer_structured_question` (the removed `_grounded_answer` was the OCR-chunk
+  path) and asserts the extracted-data fallback.
+- `conftest.py`: added `add_page_extraction` and `cover_extraction` helpers.
+- `test_addendum_dod.py` (coordinator-owned): the chat DoD step now seeds one
+  verified page extraction for page 2 before asking; chat assertions were not
+  weakened.
+- New `test_database_chat.py`: whole-token `A2`/`A23`, alias `I40-42`/`I-40-42`,
+  aggregate answer without a full project dump, unmatched code refusal, and chat
+  exact-code fallback to a database row citation.
+
+Verification (temporary DB/storage, never `data/app.db`):
+
+```bash
+cd backend
+DATABASE_URL=sqlite:///<tmp>/app.db SITE_REPORT_STORAGE=<tmp>/site \
+ENGINEERING_AI_STORAGE=<tmp>/engineering ACCEPTANCE_STORAGE=<tmp>/acceptance \
+../.venv/Scripts/python -m pytest tests -q
+# 374 passed, 7 skipped, 0 failed
+```
+
+Frontend type-check: `cd frontend && npx tsc -b` (exit 0).
+
+Unresolved:
+- The generic extraction fallback is lexical (accent-folded token overlap), not
+  semantic; an ambiguous question returns up to 5 best-matching extraction pages.
+- Aggregate database answers cite up to 5 representative rows, not a dedicated
+  aggregate record; the counts themselves are deterministic over all rows.
+- Component DB data is current state, not document-versioned; `scope` only
+  applies to extraction/document selection.
+- Database answers are deterministic and do not call the answer provider.
+- `record_id` survives in conversation message JSON but there is no
+  `AICitation` column for it; add one only if citation analytics need it.
+
 ## Status and source truth
 
 - **Real source scans are now available** in `/home/thangpham/Downloads` (133-page drawing, 108-page report), but they have **not been ingested**. Only four pages were measured and a temporary 2-page cut was piped through the API. Project knowledge remains unverified until an engineer reviews citations from the actual uploaded documents.
@@ -490,6 +589,7 @@ Full-suite note: the coordinator gate now passes `171 passed` with a temporary D
 
 - Page-extraction verify/reject currently checks project access/membership, not a dedicated reviewer role; coordinator should map it to shared role policy. Re-saving the same unique extraction resets it to `proposed` and clears prior verification.
 - Verified extraction is intentionally not merged into retrieval/citation text yet; only the original page/chunk text is cited. A future coordinator decision must define how verified enrichment is exposed without replacing source text.
+- **Chat (2026-11-23) no longer uses raw OCR/chunk retrieval at all.** Generic chat now answers from `PageExtraction` structured data (verified preferred, proposed labelled) and from the component DB; `/ai/search` and inspection checklists still use page/chunk retrieval. `record_id` is kept in conversation message JSON but not in the `AICitation` table (no migration was taken by this agent).
 - The OpenCode DeepSeek path has no real-model integration test by design; tests mock `_opencode_call`. Coordinator must run one live smoke with `ENGINEERING_AI_PROVIDER=opencode_deepseek` and the OpenCode service authenticated.
 - Real-scan ingest is not executed yet. Required before it: raise `ENGINEERING_AI_MAX_PDF_BYTES` above 66,405,004 B (recommended 70 MiB), raise reverse-proxy/body limits, and reserve ~1 GB storage for OCR renders/originals.
 - Real scans are available but not ingested; only four pages and a temporary 2-page cut were measured. No verified project knowledge exists yet.

@@ -162,6 +162,51 @@ def test_system_a_persistent_citations_versions_and_conversations(harness):
         stored = db.get(SourceDocument, document_id)
         assert stored is not None and Path(stored.original_path).is_file()
 
+    # Chat answers only from AI-extracted structured data, never raw OCR text.
+    with harness["factory"]() as db:
+        import json
+
+        from app.engineering_ai.models import DocumentPage, PageExtraction
+
+        page = db.query(DocumentPage).filter_by(
+            document_id=document_id, page_number=2
+        ).one()
+        db.add(
+            PageExtraction(
+                project_id=project_id,
+                document_id=document_id,
+                page_id=page.id,
+                page_number=2,
+                model="test",
+                prompt_version="test",
+                mode="direct",
+                status="verified",
+                confidence=0.9,
+                extraction_json=json.dumps(
+                    {
+                        "page_type": "drawing",
+                        "title": "Anchor length",
+                        "drawing_number": "BV-DOD",
+                        "revision": "A",
+                        "summary": "Anchor length is 50 mm.",
+                        "key_values": [
+                            {
+                                "name": "Anchor length",
+                                "value": "50",
+                                "unit": "mm",
+                                "quote": "Anchor length is 50 mm.",
+                            }
+                        ],
+                        "table_rows": [],
+                        "warnings": [],
+                        "confidence": 0.9,
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+        )
+        db.commit()
+
     first_chat = client.post(
         f"{base}/ai/chat", headers=headers, json={"message": "Anchor length?"}
     )

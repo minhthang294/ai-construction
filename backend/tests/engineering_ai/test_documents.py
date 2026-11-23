@@ -1,6 +1,6 @@
 import io
 
-from .conftest import make_scanned_pdf, make_text_pdf, upload_pdf
+from .conftest import add_page_extraction, make_scanned_pdf, make_text_pdf, upload_pdf
 
 
 def test_digital_pdf_extracts_each_page_with_hash_version(client, digital_document):
@@ -35,11 +35,36 @@ def test_digital_pdf_extracts_each_page_with_hash_version(client, digital_docume
     assert original.content.startswith(b"%PDF-")
 
 
-def test_duplicate_same_bytes_is_idempotent_and_new_bytes_create_version(client):
+def test_duplicate_same_bytes_is_idempotent_and_new_bytes_create_version(
+    client, session_factory
+):
     original_bytes = make_text_pdf(["Asbestos membrane old revision"])
     first = upload_pdf(client, filename="same-name.pdf", data=original_bytes)
     assert first.status_code == 201, first.text
     first_id = first.json()["id"]
+    first_document = client.get(f"/api/v1/projects/p1/documents/{first_id}").json()
+    add_page_extraction(
+        session_factory,
+        project_id="p1",
+        document_id=first_id,
+        page_id=first_document["pages"][0]["id"],
+        page_number=1,
+        extraction={
+            "page_type": "specification",
+            "title": "Asbestos membrane",
+            "summary": "Asbestos membrane old revision.",
+            "key_values": [
+                {
+                    "name": "asbestos membrane",
+                    "value": "old revision",
+                    "quote": "Asbestos membrane old revision",
+                }
+            ],
+            "table_rows": [],
+            "warnings": [],
+            "confidence": 0.8,
+        },
+    )
 
     duplicate = upload_pdf(client, filename="same-name.pdf", data=original_bytes)
     assert duplicate.status_code == 200, duplicate.text
@@ -50,6 +75,31 @@ def test_duplicate_same_bytes_is_idempotent_and_new_bytes_create_version(client)
     assert second.status_code == 201, second.text
     assert second.json()["version"] == 2
     assert second.json()["is_current"] is True
+    second_document = client.get(
+        f"/api/v1/projects/p1/documents/{second.json()['id']}"
+    ).json()
+    add_page_extraction(
+        session_factory,
+        project_id="p1",
+        document_id=second.json()["id"],
+        page_id=second_document["pages"][0]["id"],
+        page_number=1,
+        extraction={
+            "page_type": "specification",
+            "title": "Steel anchor",
+            "summary": "Steel anchor new revision.",
+            "key_values": [
+                {
+                    "name": "steel anchor",
+                    "value": "new revision",
+                    "quote": "Steel anchor new revision",
+                }
+            ],
+            "table_rows": [],
+            "warnings": [],
+            "confidence": 0.8,
+        },
+    )
 
     history = client.get("/api/v1/projects/p1/documents").json()
     assert len(history) == 2

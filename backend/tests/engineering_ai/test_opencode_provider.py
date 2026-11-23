@@ -72,7 +72,7 @@ def test_opencode_provider_success_sends_grounded_prompt_and_deletes_session(mon
     assert all(call["timeout"] == 7 for call in calls[:4])
 
 
-def test_opencode_provider_raises_provider_error_and_service_falls_back(monkeypatch):
+def test_opencode_provider_error_degrades_to_extracted_data(monkeypatch, session_factory):
     def failing_call(*args, **kwargs):
         raise ProviderError("opencode request timed out")
 
@@ -81,24 +81,47 @@ def test_opencode_provider_raises_provider_error_and_service_falls_back(monkeypa
     with pytest.raises(ProviderError):
         provider.answer("Lớp bảo vệ?", [_context()])
 
-    from app.engineering_ai.retrieval import RetrievedChunk
-    from app.engineering_ai.service import _grounded_answer
+    from app.engineering_ai.database_chat import answer_structured_question
+    from app.engineering_ai.models import DocumentPage, SourceDocument
 
-    result = RetrievedChunk(
-        chunk_id="chunk-1",
-        page_id="page-1",
+    from .conftest import add_page_extraction, cover_extraction
+
+    with session_factory() as db:
+        db.add(
+            SourceDocument(
+                id="doc-1",
+                project_id="p1",
+                type="specification",
+                original_name="BV-01.pdf",
+                document_key="bv-01",
+                original_path="/tmp/BV-01.pdf",
+                sha256="a" * 64,
+                status="ready",
+                is_current=True,
+                is_effective=True,
+                page_count=1,
+                drawing_number="BV-01",
+                revision="A",
+            )
+        )
+        db.add(
+            DocumentPage(
+                id="page-1",
+                project_id="p1",
+                document_id="doc-1",
+                page_number=2,
+                drawing_number="BV-01",
+                revision="A",
+            )
+        )
+        db.commit()
+    add_page_extraction(
+        session_factory,
+        project_id="p1",
         document_id="doc-1",
-        document_name="BV-01.pdf",
-        version=1,
+        page_id="page-1",
         page_number=2,
-        drawing_number="BV-01",
-        revision="A",
-        quote="Lớp bảo vệ bê tông 50 mm.",
-        url="/api/v1/projects/p1/documents/doc-1/pages/2",
-        ocr_confidence=None,
-        extraction_method="text",
-        score=1.0,
-        text="Lớp bảo vệ bê tông 50 mm.",
+        extraction={**cover_extraction(), "title": "Lớp bảo vệ bê tông"},
     )
 
     class FailingProvider:
@@ -107,9 +130,13 @@ def test_opencode_provider_raises_provider_error_and_service_falls_back(monkeypa
         def answer(self, question, contexts):
             raise ProviderError("timeout")
 
-    answer, used, warnings = _grounded_answer(FailingProvider(), "Lớp bảo vệ?", [result])
-    assert "Các đoạn hồ sơ" in answer.text
-    assert used
+    with session_factory() as db:
+        answer, citations, warnings, no_source, _confidence = answer_structured_question(
+            db, "p1", "Lớp bảo vệ bê tông là bao nhiêu?", 6, FailingProvider()
+        )
+    assert "Dữ kiện AI trích xuất" in answer.text
+    assert no_source is False
+    assert citations
     assert any("AI provider không khả dụng" in warning for warning in warnings)
 
 

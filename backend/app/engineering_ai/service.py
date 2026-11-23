@@ -21,7 +21,6 @@ from .constants import (
     DAILY_REPORT_DRAFT_DISCLAIMER,
     DAILY_REPORT_DRAFT_WARNING,
     DOCUMENT_TYPES,
-    GROUNDING_WARNING,
     INSPECTION_CHECKLIST_DISCLAIMER,
     LOW_OCR_THRESHOLD,
     LOW_OCR_WARNING,
@@ -32,9 +31,9 @@ from .constants import (
     VISION_DISCLAIMER,
 )
 from .crossref import suggest_discrepancies
+from .database_chat import answer_database_question, answer_structured_question
 from .embeddings import EmbeddingProvider, HashingEmbeddingProvider, tokenize
 from .extraction import ExtractionError, extract_document
-from .grounding import unsupported_technical_values
 from .inspection import choose_checklist_criterion
 from .models import (
     AICitation,
@@ -50,11 +49,9 @@ from .page_extraction import validate_extraction
 from .page_navigation import answer_page_navigation
 from .providers import (
     AnswerProvider,
-    ExtractiveProvider,
     ProviderAnswer,
-    SourceContext,
 )
-from .retrieval import RetrievedChunk, low_confidence_citations, quote_window, search_chunks
+from .retrieval import RetrievedChunk, quote_window, search_chunks
 from .schemas import (
     ChatResponse,
     CitationOut,
@@ -1503,102 +1500,28 @@ def cross_reference(
     )
 
 
-def _contexts(results: List[RetrievedChunk]) -> List[SourceContext]:
-    return [
-        SourceContext(
-            index=index,
-            text=result.text,
-            document_name=result.document_name,
-            version=result.version,
-            page_number=result.page_number,
-            drawing_number=result.drawing_number,
-            revision=result.revision,
-            ocr_confidence=result.ocr_confidence,
-        )
-        for index, result in enumerate(results, start=1)
-    ]
-
-
-def _reference_indexes(answer: str, maximum: int) -> List[int]:
-    import re
-
-    indexes: List[int] = []
-    for match in re.finditer(r"\[(\d{1,2})\]", answer or ""):
-        value = int(match.group(1))
-        if 1 <= value <= maximum and value not in indexes:
-            indexes.append(value)
-    return indexes
-
-
-def _grounded_answer(
-    provider: AnswerProvider,
-    question: str,
-    results: List[RetrievedChunk],
-) -> Tuple[ProviderAnswer, List[RetrievedChunk], List[str]]:
-    contexts = _contexts(results)
-    warnings: List[str] = []
-    try:
-        answer = provider.answer(question, contexts)
-    except Exception:  # noqa: BLE001 - degrade to citations only
-        answer = ExtractiveProvider().answer(question, contexts)
-        warnings.append("AI provider không khả dụng; đã dùng trích dẫn trực tiếp từ hồ sơ.")
-
-    text = (answer.text or "").strip()
-    if text == NO_SOURCE_ANSWER:
-        return ProviderAnswer(text=NO_SOURCE_ANSWER), [], warnings
-
-    indexes = _reference_indexes(text, len(results))
-    if indexes:
-        used = [results[index - 1] for index in indexes]
-        unsupported = unsupported_technical_values(
-            text,
-            [result.quote for result in used],
-        )
-        if unsupported:
-            fallback = ExtractiveProvider().answer(question, contexts)
-            warnings.append(GROUNDING_WARNING)
-            return fallback, list(results), warnings
-        return ProviderAnswer(text=text, warnings=answer.warnings), used, warnings
-
-    # A provider answer without [n] citations is not acceptable: replace it with
-    # the deterministic extractive answer so every statement is page-grounded.
-    fallback = ExtractiveProvider().answer(question, contexts)
-    if text:
-        warnings.append("Câu trả lời của provider thiếu citation; đã thay bằng trích dẫn trực tiếp.")
-    return fallback, list(results), warnings
-
-
-def _confidence(results: List[RetrievedChunk], low_ocr: bool) -> float:
-    if not results:
-        return 0.0
-    top = max(result.score for result in results)
-    value = 0.38 + min(0.34, top / 8.0) + 0.03 * min(3, len(results) - 1)
-    if low_ocr:
-        value = min(value, 0.4)
-    return round(max(0.0, min(0.85, value)), 2)
-
-
-def _vision_for_top_result(
+def _vision_for_page(
     db: Session,
-    result: Optional[RetrievedChunk],
+    page_id: Optional[str],
+    page_number: int,
     provider,
 ) -> tuple[bool, Optional[str], List[str]]:
-    """Send only the top-1 page render to an explicitly configured provider."""
+    """Send only the cited top page render to an explicitly configured provider."""
 
-    if result is None:
+    if not page_id:
         return False, None, []
     if provider is None or getattr(provider, "name", "none") in {"none", "noop"}:
         return False, None, ["Vision chưa được cấu hình; không gửi ảnh."]
-    page = db.get(DocumentPage, result.page_id)
+    page = db.get(DocumentPage, page_id)
     if page is None or not page.rendered_path:
-        return False, None, ["Không có trang render cho chunk top-1; bỏ qua Vision."]
+        return False, None, ["Không có trang render cho citation đầu tiên; bỏ qua Vision."]
     path = Path(page.rendered_path)
     if not path.is_file():
-        return False, None, ["Trang render top-1 không tồn tại; bỏ qua Vision."]
+        return False, None, ["Trang render đầu tiên không tồn tại; bỏ qua Vision."]
     try:
         data = path.read_bytes()
         if len(data) > storage.max_image_bytes():
-            return False, None, ["Trang render top-1 vượt dung lượng Vision; bỏ qua."]
+            return False, None, ["Trang render đầu tiên vượt dung lượng Vision; bỏ qua."]
         suggestion = provider.suggest(data, "image/png")
     except Exception:  # noqa: BLE001 - vision is optional
         return False, None, ["Vision provider lỗi; bỏ qua phân tích ảnh."]
@@ -1608,9 +1531,9 @@ def _vision_for_top_result(
     if suggestion.suggested_caption:
         parts.append(f"caption đề xuất: {suggestion.suggested_caption}")
     note = (
-        f"Vision top-1 trang {result.page_number}: " + "; ".join(parts)
+        f"Vision trang {page_number}: " + "; ".join(parts)
         if parts
-        else f"Vision top-1 trang {result.page_number}: không có đề xuất."
+        else f"Vision trang {page_number}: không có đề xuất."
     )
     warnings = list(suggestion.warnings)
     warnings.append(VISION_CHAT_DISCLAIMER)
@@ -1643,20 +1566,58 @@ def ask(
 
     page_action = None
     warnings: List[str] = []
-    from .database_chat import answer_database_question
-    answer, database_warnings = answer_database_question(db, project_id, message, provider)
-    citations = []
-    warnings.extend(database_warnings)
-    no_source = answer.text.strip() == NO_SOURCE_ANSWER
-    confidence = 0.0 if no_source else 0.8
-    used = []
+    navigation = answer_page_navigation(db, project_id, message, scope)
+    if navigation is not None:
+        answer = navigation.answer
+        citations = navigation.citations
+        warnings = list(navigation.warnings)
+        no_source = navigation.no_source
+        confidence = navigation.confidence
+        page_action = navigation.page_action
+    else:
+        component_query = parse_component_query(message)
+        if component_query is not None:
+            answer, citations, component_warnings, no_source, confidence = (
+                answer_component_query(
+                    db, project_id, message, component_query, scope
+                )
+            )
+            warnings.extend(component_warnings)
+            # The component DB can still answer an exact code that has no
+            # verified extraction; never fall through to generic page matching.
+            if no_source and component_query.code:
+                database = answer_database_question(db, project_id, message)
+                if database is not None:
+                    answer, citations, db_warnings, no_source, confidence = database
+                    warnings.extend(db_warnings)
+        else:
+            warnings = [UNVERIFIED_KB_NOTE]
+            answer, citations, structured_warnings, no_source, confidence = (
+                answer_structured_question(
+                    db, project_id, message, top_k, provider, scope
+                )
+            )
+            warnings.extend(structured_warnings)
+
+    # A sourced answer without a citation is not acceptable.
+    if not no_source and not citations:
+        answer = ProviderAnswer(text=NO_SOURCE_ANSWER)
+        no_source = True
+        confidence = 0.0
+        warnings.append("Câu trả lời không có citation nên đã thay bằng câu từ chối chuẩn.")
+
     vision_used = False
     vision_note = None
-    if use_vision and used:
-        vision_used, vision_note, vision_warnings = _vision_for_top_result(
-            db, used[0], vision_provider
+    if use_vision and citations:
+        first = next(
+            (citation for citation in citations if citation.page_id and citation.page_number > 0),
+            None,
         )
-        warnings.extend(vision_warnings)
+        if first is not None:
+            vision_used, vision_note, vision_warnings = _vision_for_page(
+                db, first.page_id, first.page_number, vision_provider
+            )
+            warnings.extend(vision_warnings)
 
     if conversation is None:
         conversation = AIConversation(

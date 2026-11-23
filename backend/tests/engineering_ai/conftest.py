@@ -183,6 +183,61 @@ def upload_pdf(client, project_id="p1", filename="drawing.pdf", data=None):
     )
 
 
+def add_page_extraction(
+    session_factory,
+    *,
+    project_id,
+    document_id,
+    page_id,
+    page_number,
+    extraction,
+    status="verified",
+):
+    """Insert one AI page extraction, the source chat answers are allowed to use."""
+
+    import json
+
+    from app.engineering_ai.models import PageExtraction
+
+    with session_factory() as db:
+        db.add(
+            PageExtraction(
+                project_id=project_id,
+                document_id=document_id,
+                page_id=page_id,
+                page_number=page_number,
+                model="test",
+                prompt_version="test",
+                mode="direct",
+                status=status,
+                confidence=extraction.get("confidence"),
+                extraction_json=json.dumps(extraction, ensure_ascii=False),
+            )
+        )
+        db.commit()
+
+
+def cover_extraction(value="50"):
+    return {
+        "page_type": "specification",
+        "title": "Concrete cover for abutment",
+        "drawing_number": "BV-01",
+        "revision": "A",
+        "summary": f"Lớp bảo vệ bê tông cho mố là {value} mm.",
+        "key_values": [
+            {
+                "name": "concrete cover for abutment",
+                "value": value,
+                "unit": "mm",
+                "quote": f"concrete cover for abutment is {value} mm",
+            }
+        ],
+        "table_rows": [],
+        "warnings": [],
+        "confidence": 0.9,
+    }
+
+
 @pytest.fixture()
 def digital_document(client):
     pdf = make_text_pdf(
