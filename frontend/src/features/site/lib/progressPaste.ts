@@ -64,6 +64,7 @@ const QUESTION_LABELS: Record<string, string> = {
   unknown_code: "Mã không tìm thấy",
   outside_scope: "Cấu kiện ngoài phạm vi",
   status_confirm: "Xác nhận trạng thái",
+  future_date: "Ngày trong tương lai",
 };
 
 export function groupPasteQuestions(questions: PasteQuestion[]): PasteQuestionGroup[] {
@@ -126,6 +127,45 @@ export function formatPasteDate(value: string | null | undefined): string {
   if (!value) return "—";
   const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
   return match ? `${match[3]}/${match[2]}/${match[1]}` : value;
+}
+
+const DAILY_ERROR_TRANSLATIONS: Array<[RegExp, string]> = [
+  [
+    /event_date must not be in the future/i,
+    "Ngày thi công không được ở tương lai. Chọn hôm nay hoặc ngày trước đó.",
+  ],
+  [
+    /a daily entry supports at most (\d+) components/i,
+    "Một lần ghi tối đa $1 cấu kiện.",
+  ],
+  [/Input should be a valid date/i, "Ngày thi công không hợp lệ."],
+];
+
+function translateDailyMessage(message: string): string {
+  const cleaned = message.replace(/^Value error,\s*/i, "").trim();
+  for (const [pattern, replacement] of DAILY_ERROR_TRANSLATIONS) {
+    if (pattern.test(cleaned)) return cleaned.replace(pattern, replacement);
+  }
+  return cleaned;
+}
+
+/** Turn FastAPI 422/409 text into a visible Vietnamese reason for the action. */
+export function dailyProgressErrorMessage(cause: unknown): string {
+  const message = cause instanceof Error ? cause.message.trim() : "";
+  if (!message) return "Không gửi được dữ liệu tiến độ. Thử lại.";
+  try {
+    const body = JSON.parse(message);
+    const detail = body?.detail;
+    if (Array.isArray(detail)) {
+      const messages = detail
+        .map((item) => String(item?.msg ?? ""))
+        .filter(Boolean);
+      if (messages.length) return messages.map(translateDailyMessage).join(" ");
+    }
+  } catch {
+    // Plain text from a 409/500 or a network error.
+  }
+  return translateDailyMessage(message);
 }
 
 function applyIds(question: PasteQuestion): string[] {

@@ -1259,3 +1259,23 @@ npm run build   # OK; main 297,60 kB; SiteReportPage 89,54 kB
 ```
 
 Lưu ý vận hành: DB thật cần `alembic upgrade head` trước khi chạy code mới; migration tự chuyển dữ liệu `@components:` cũ. Ảnh legacy có caption text thường (không phải `@components:`) được giữ nguyên.
+
+## Polish luồng dán tin nhắn - 2026-11-23
+
+Phạm vi: `frontend/src/features/site/*` (ProgressPastePanel + helper/test), báo cáo này. Không sửa acceptance/engineering-ai/backend.
+
+- **Công đoạn dễ đọc trên 390px**: nhãn "Công đoạn" nằm trên select, select rộng hết dòng trên mobile (không còn `max-w-56`), và tên công đoạn đã chọn được in lại bên dưới với `break-words`; tên này lấy từ candidate của parser nên giữ đầy đủ hậu tố `t = X cm` do backend đã render.
+- **Lỗi 422/409 không im lặng**: `dailyProgressErrorMessage()` đọc `detail` dạng mảng của FastAPI, dịch lỗi ngày tương lai thành "Ngày thi công không được ở tương lai. Chọn hôm nay hoặc ngày trước đó.", và giữ nguyên thông báo backend khác. Lỗi preview hiện ngay dưới nút "Xem lại trước khi ghi"; lỗi lưu hiện ngay trên nút "Ghi tiến độ".
+- **Question kind `future_date`**: nhãn nhóm "Ngày trong tương lai"; card câu hỏi generic hiện lựa chọn như các kind khác.
+- **Vùng chạm xác nhận**: label checkbox cao tối thiểu 48px (`min-h-12`, padding dọc), checkbox 24px. Khi nút "Ghi tiến độ" bị tắt, có dòng giải thích: chưa tích xác nhận hoặc máy chủ chưa cho phép ghi.
+- Test helper: `progressPaste.test.ts` thêm ca dịch lỗi future-date 422, giữ lỗi backend lạ, và nhãn `future_date`.
+
+### Kiểm tra
+
+```bash
+cd frontend
+npm test        # 35 files, 215 tests
+npm run build   # OK; ProgressPastePanel 25,82 kB
+```
+
+**Chưa kiểm**: ảnh chụp 390px sau thay đổi (chỉ kiểm bằng type-check/build/test helper).

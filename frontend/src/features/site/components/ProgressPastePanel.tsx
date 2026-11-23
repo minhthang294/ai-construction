@@ -16,6 +16,7 @@ import {
 import {
   applyPasteAnswers,
   buildZaloSummary,
+  dailyProgressErrorMessage,
   formatPasteDate,
   groupCodesByPrefix,
   groupPasteQuestions,
@@ -126,6 +127,8 @@ export default function ProgressPastePanel({
   const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState<"parse" | "preview" | "save" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [saved, setSaved] = useState<{
     created: number;
@@ -214,6 +217,8 @@ export default function ProgressPastePanel({
     setAnswers({});
     setManualStages({});
     setError(null);
+    setPreviewError(null);
+    setSaveError(null);
     setMessage(null);
   }
 
@@ -285,6 +290,8 @@ export default function ProgressPastePanel({
     setApplied(null);
     setConfirmed(false);
     setIdempotencyKey(null);
+    setPreviewError(null);
+    setSaveError(null);
   }
 
   function chooseStage(lineIndex: number, value: string) {
@@ -294,6 +301,9 @@ export default function ProgressPastePanel({
 
   async function buildPreview() {
     if (!parsed || busy) return;
+    setError(null);
+    setPreviewError(null);
+    setSaveError(null);
     const result = applyPasteAnswers(parsed, answers, manualStages, eventDate);
     setApplied(result);
     if (result.errors.length) {
@@ -305,7 +315,6 @@ export default function ProgressPastePanel({
       return;
     }
     setBusy("preview");
-    setError(null);
     try {
       const data = await previewDailyProgress(projectId, result.payload);
       setApplied({
@@ -323,7 +332,7 @@ export default function ProgressPastePanel({
       if (isNetworkError(cause)) {
         await keepOfflineDraft();
       } else {
-        setError(errorMessage(cause));
+        setPreviewError(dailyProgressErrorMessage(cause));
       }
     } finally {
       setBusy(null);
@@ -335,6 +344,7 @@ export default function ProgressPastePanel({
     if (!preview.can_commit) return;
     setBusy("save");
     setError(null);
+    setSaveError(null);
     try {
       const result = await saveDailyProgress(projectId, applied.payload, idempotencyKey);
       let batchAdded = 0;
@@ -436,7 +446,7 @@ export default function ProgressPastePanel({
       if (isNetworkError(cause)) {
         await keepOfflineDraft();
       } else {
-        setError(errorMessage(cause));
+        setSaveError(dailyProgressErrorMessage(cause));
       }
     } finally {
       setBusy(null);
@@ -461,6 +471,18 @@ export default function ProgressPastePanel({
       (candidate, index) =>
         options.findIndex((item) => item.id === candidate.id) === index,
     );
+  };
+
+  const selectedStageForLine = (
+    line: PasteParse["lines"][number],
+    index: number,
+  ) => {
+    const selectedId =
+      manualStages[index] ??
+      (line.stage_candidates?.length === 1
+        ? line.stage_candidates[0].stage_definition_id
+        : "");
+    return stageOptionsForLine(line).find((candidate) => candidate.id === selectedId) ?? null;
   };
 
   return (
@@ -573,25 +595,28 @@ export default function ProgressPastePanel({
             ) : null}
 
             <div className="space-y-3">
-              {parsed.lines.map((line, lineIndex) => (
+              {parsed.lines.map((line, lineIndex) => {
+                const selectedStage = selectedStageForLine(line, lineIndex);
+                return (
                 <article key={`${line.work_text}-${lineIndex}`} className="rounded-xl border border-slate-200 p-3">
                   <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div>
+                    <div className="min-w-0">
                       <h3 className="text-sm font-semibold text-slate-900">
                         {line.component_type === "pile" ? "Cọc" : "Dầm"} · {line.work_text}
                       </h3>
                       <p className="text-xs text-slate-600">{line.items.length} mã trong dòng</p>
                     </div>
-                    <label className="min-w-0 text-xs font-medium text-slate-700">
-                      Công đoạn
+                    <div className="w-full min-w-0 sm:w-auto sm:max-w-72">
+                      <label
+                        htmlFor={`stage-${lineIndex}`}
+                        className="block text-xs font-medium text-slate-700"
+                      >
+                        Công đoạn
+                      </label>
                       <select
-                        className={`${FIELD} max-w-56`}
-                        value={
-                          manualStages[lineIndex] ??
-                          (line.stage_candidates?.length === 1
-                            ? line.stage_candidates[0].stage_definition_id
-                            : "")
-                        }
+                        id={`stage-${lineIndex}`}
+                        className={FIELD}
+                        value={selectedStage?.id ?? ""}
                         onChange={(event) => chooseStage(lineIndex, event.target.value)}
                       >
                         <option value="">— Chọn công đoạn —</option>
@@ -601,7 +626,12 @@ export default function ProgressPastePanel({
                           </option>
                         ))}
                       </select>
-                    </label>
+                      {selectedStage ? (
+                        <p className="mt-1 break-words text-xs leading-5 text-slate-700">
+                          {selectedStage.name}
+                        </p>
+                      ) : null}
+                    </div>
                   </div>
 
                   <div className="mt-2 space-y-1">
@@ -629,7 +659,8 @@ export default function ProgressPastePanel({
                     ))}
                   </div>
                 </article>
-              ))}
+                );
+              })}
             </div>
 
             {parsedComponentIds.length ? (
@@ -763,6 +794,11 @@ export default function ProgressPastePanel({
               {busy === "preview" ? "Đang kiểm tra…" : "Xem lại trước khi ghi"}
             </button>
           </div>
+          {previewError ? (
+            <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+              {previewError}
+            </p>
+          ) : null}
         </>
       ) : null}
 
@@ -801,10 +837,10 @@ export default function ProgressPastePanel({
               </div>
             ))}
           </div>
-          <label className="flex min-h-11 items-start gap-2 rounded-lg border border-slate-200 p-2 text-sm text-slate-800">
+          <label className="flex min-h-12 w-full items-start gap-2 rounded-lg border border-slate-200 px-3 py-3 text-sm leading-6 text-slate-800">
             <input
               type="checkbox"
-              className="mt-0.5 h-5 w-5 shrink-0 accent-slate-700"
+              className="mt-0.5 h-6 w-6 shrink-0 accent-slate-700"
               checked={confirmed}
               disabled={!preview.can_commit || busy !== null}
               onChange={(event) => setConfirmed(event.target.checked)}
@@ -817,6 +853,18 @@ export default function ProgressPastePanel({
           {!preview.can_commit ? (
             <p className="text-sm text-red-800">
               Máy chủ chưa cho ghi. Quay lại chỉnh câu trả lời/công đoạn rồi kiểm tra lại.
+            </p>
+          ) : null}
+          {!preview.can_commit || !confirmed ? (
+            <p role="status" className="text-xs leading-5 text-slate-600">
+              {!preview.can_commit
+                ? "Nút Ghi tiến độ đang tắt vì máy chủ chưa cho phép ghi."
+                : "Tích ô xác nhận bên trên để bật nút Ghi tiến độ."}
+            </p>
+          ) : null}
+          {saveError ? (
+            <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+              {saveError}
             </p>
           ) : null}
           <div className="flex flex-wrap gap-2">

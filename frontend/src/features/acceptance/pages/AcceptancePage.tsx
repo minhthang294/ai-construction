@@ -258,6 +258,12 @@ export default function AcceptancePage({
   const [pending, setPending] = useState<PendingAcceptanceResponse | null>(null);
   const [pendingSelected, setPendingSelected] = useState<Set<string>>(new Set());
   const [pendingBusy, setPendingBusy] = useState(false);
+  const [pendingFilterCleared, setPendingFilterCleared] = useState(false);
+  const [pendingTotalAll, setPendingTotalAll] = useState<number | null>(null);
+  const hasPendingFilter = Boolean(
+    initialState?.stage_definition_id || initialState?.batch_id,
+  );
+  const pendingFilterActive = hasPendingFilter && !pendingFilterCleared;
   const initialComponentKey = (initialState?.component_ids ?? []).join(",");
   const onDirtyChangeRef = useRef(onDirtyChange);
 
@@ -296,13 +302,31 @@ export default function AcceptancePage({
     return { requestList, recordList };
   }
 
-  async function loadPending() {
-    const data = await listPendingAcceptance(projectId, {
-      batch_id: initialState?.batch_id,
-      stage_definition_id: initialState?.stage_definition_id,
-    });
+  async function loadPending(options: { all?: boolean } = {}) {
+    const useFilter = pendingFilterActive && !options.all;
+    const filters = useFilter
+      ? {
+          batch_id: initialState?.batch_id,
+          stage_definition_id: initialState?.stage_definition_id,
+        }
+      : {};
+    const [data, all] = await Promise.all([
+      listPendingAcceptance(projectId, filters),
+      useFilter ? listPendingAcceptance(projectId) : Promise.resolve(null),
+    ]);
     setPending(data);
+    setPendingTotalAll(all ? all.total_components : data.total_components);
     return data;
+  }
+
+  async function clearPendingFilter() {
+    setPendingFilterCleared(true);
+    setPendingSelected(new Set());
+    try {
+      await loadPending({ all: true });
+    } catch (cause) {
+      setError(errorMessage(cause));
+    }
   }
 
   function togglePending(componentId: string) {
@@ -321,7 +345,9 @@ export default function AcceptancePage({
     try {
       const created = await createRequestFromComponents(projectId, {
         component_ids: [...pendingSelected],
-        stage_definition_id: initialState?.stage_definition_id ?? null,
+        stage_definition_id: pendingFilterActive
+          ? initialState?.stage_definition_id ?? null
+          : null,
         event_date: initialState?.event_date ?? null,
       });
       await Promise.all([refresh(), loadPending()]);
@@ -341,14 +367,24 @@ export default function AcceptancePage({
   useEffect(() => {
     let active = true;
     setPending(null);
+    setPendingFilterCleared(false);
     setPendingSelected(new Set(initialState?.component_ids ?? []));
-    listPendingAcceptance(projectId, {
-      batch_id: initialState?.batch_id,
-      stage_definition_id: initialState?.stage_definition_id,
-    })
-      .then((data) => {
+    const filters = hasPendingFilter
+      ? {
+          batch_id: initialState?.batch_id,
+          stage_definition_id: initialState?.stage_definition_id,
+        }
+      : {};
+    Promise.all([
+      listPendingAcceptance(projectId, filters),
+      hasPendingFilter
+        ? listPendingAcceptance(projectId)
+        : Promise.resolve(null),
+    ])
+      .then(([data, all]) => {
         if (!active) return;
         setPending(data);
+        setPendingTotalAll(all ? all.total_components : data.total_components);
         const pendingIds = new Set(
           data.groups.flatMap((group) =>
             group.components.map((component) => component.component_id),
@@ -918,19 +954,40 @@ export default function AcceptancePage({
         ))}
       </div>
 
-      {pending && pending.total_components > 0 && (
+      {pending && (pending.total_components > 0 || pendingFilterActive) && (
         <section
           aria-label="Chờ nghiệm thu"
           className="rounded-xl border border-amber-200 bg-amber-50/60 p-3 shadow-sm sm:p-4"
         >
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-base font-semibold text-amber-950">
-              Chờ nghiệm thu ({pending.total_components})
+              Chờ nghiệm thu (
+              {pendingFilterActive && pendingTotalAll !== null
+                ? `${pending.total_components} / ${pendingTotalAll}`
+                : pending.total_components}
+              )
             </h2>
             <span className="text-sm text-amber-900">
               Hoàn thành thi công, chưa có BBNT xác nhận
             </span>
           </div>
+          {pendingFilterActive && (
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <span className="rounded-full border border-amber-300 bg-white px-3 py-1 text-sm text-amber-950">
+                Đang lọc:{" "}
+                <strong className="[overflow-wrap:anywhere]">
+                  {pending.stage_name ?? "đợt thi công đã chọn"}
+                </strong>
+              </span>
+              <button
+                type="button"
+                onClick={() => void clearPendingFilter()}
+                className="min-h-11 text-sm font-medium text-teal-800 underline"
+              >
+                Xem tất cả
+              </button>
+            </div>
+          )}
           <p className="mt-1 text-sm leading-6 text-amber-900">
             Tiến độ thi công không phải nghiệm thu. Chọn cấu kiện để lập phiếu
             yêu cầu; BBNT chỉ được xác nhận bởi người có quyền.

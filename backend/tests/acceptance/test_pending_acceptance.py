@@ -195,6 +195,13 @@ def test_pending_queue_filters_batch_and_stage(client, session_factory):
     assert batch["total_components"] == 1
     assert [item["code"] for item in batch["groups"][0]["components"]] == ["F67"]
 
+    filtered = client.get(
+        "/api/v1/projects/p1/acceptance/pending",
+        params={"stage_definition_id": seeded["definition_id"]},
+    ).json()
+    assert filtered["total_components"] == 2
+    assert filtered["stage_name"].endswith("t = 3–5 cm")
+
     other_stage = client.get(
         "/api/v1/projects/p1/acceptance/pending",
         params={"stage_definition_id": "missing-definition"},

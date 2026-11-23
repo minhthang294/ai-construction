@@ -174,6 +174,7 @@ class PendingAcceptanceResponse(BaseModel):
     project_id: str
     batch_id: Optional[str] = None
     stage_definition_id: Optional[str] = None
+    stage_name: Optional[str] = None
     groups: List[PendingAcceptanceGroupOut] = Field(default_factory=list)
     total_components: int = 0
 

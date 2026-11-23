@@ -51,6 +51,11 @@ _BEAM_CANONICAL_RE = re.compile(
     r"^[A-Za-z]{1,3}-(?:[A-Za-z]{1,3}-\d{1,4}|\d{1,4}-\d{1,4})$"
 )
 _GENERIC_WORK_TOKENS = {"coc", "dam", "pile", "beam", "be", "tong", "concrete", "thi", "cong"}
+STATUS_LABELS = {
+    "COMPLETED": "Hoàn thành",
+    "IN_PROGRESS": "Đang thi công",
+    "PAUSED": "Tạm dừng",
+}
 
 
 def _code_key(value: str) -> str:
@@ -696,7 +701,8 @@ def progress_parse(
                     id=f"completed:{component.id}:{latest.id}",
                     kind="completed_earlier",
                     message_vi=(
-                        f"{component.canonical_code} đã có COMPLETED ngày "
+                        f"{component.canonical_code} đã có "
+                        f"{STATUS_LABELS['COMPLETED']} ngày "
                         f"{latest.event_date:%d/%m/%Y}, trước ngày {event_date:%d/%m/%Y} "
                         f"cho công đoạn '{choice.labels.get(selected.id, selected.name)}'. "
                         "Bạn muốn ghi thế nào?"
@@ -814,7 +820,43 @@ def progress_parse(
 
     if not in_progress:
         warnings.append(
-            "Trạng thái mặc định là COMPLETED cho công tác đã làm; sửa nếu thực tế khác."
+            f"Trạng thái mặc định là {STATUS_LABELS['COMPLETED']} cho công tác đã làm; "
+            "sửa nếu thực tế khác."
+        )
+
+    if event_date is not None and event_date > date.today():
+        resolved_codes = list(
+            dict.fromkeys(
+                item.code
+                for line in lines
+                for item in line.items
+                if item.component is not None
+            )
+        )
+        questions.append(
+            ProgressParseQuestionOut(
+                id="date:future",
+                kind="future_date",
+                message_vi=(
+                    f"Ngày thi công {event_date:%d/%m/%Y} sau ngày hôm nay "
+                    f"({date.today():%d/%m/%Y}); báo cáo ngày sẽ không lưu được. "
+                    "Chọn ngày hôm nay hoặc giữ ngày đã nhập và sửa tay:"
+                ),
+                options=[
+                    _question_option("Dùng ngày hôm nay", "today"),
+                    _question_option("Giữ ngày và sửa tay", "keep"),
+                ],
+                codes=resolved_codes,
+                apply={
+                    "action": "fix_future_date",
+                    "event_date": event_date.isoformat(),
+                    "today": date.today().isoformat(),
+                },
+            )
+        )
+        warnings.append(
+            "Ngày thi công sau ngày hôm nay; cần đổi sang hôm nay hoặc sửa tay "
+            "trước khi ghi báo cáo ngày."
         )
 
     out_lines: List[ProgressParseLineOut] = []

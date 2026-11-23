@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   applyPasteAnswers,
   buildZaloSummary,
+  dailyProgressErrorMessage,
+  groupPasteQuestions,
   pasteIdempotencyKey,
   type PasteParse,
 } from "./progressPaste";
@@ -234,5 +236,43 @@ describe("idempotency and Zalo summary", () => {
     expect(text).toContain("G50, G65");
     expect(text).toContain("F-66-67, A-B-153, B-D-153");
     expect(text).toContain("Chưa nghiệm thu: 5 cấu kiện đã xong");
+  });
+});
+
+describe("daily progress errors and question labels", () => {
+  it("turns a FastAPI future-date 422 into a Vietnamese message", () => {
+    const error = new Error(
+      JSON.stringify({
+        detail: [
+          {
+            type: "value_error",
+            loc: ["body", "event_date"],
+            msg: "Value error, event_date must not be in the future",
+          },
+        ],
+      }),
+    );
+    expect(dailyProgressErrorMessage(error)).toBe(
+      "Ngày thi công không được ở tương lai. Chọn hôm nay hoặc ngày trước đó.",
+    );
+  });
+
+  it("keeps an unknown backend message visible", () => {
+    expect(dailyProgressErrorMessage(new Error("Máy chủ đang bận"))).toBe(
+      "Máy chủ đang bận",
+    );
+  });
+
+  it("labels a future_date question for the generic card", () => {
+    const [group] = groupPasteQuestions([
+      {
+        id: "future-date:1",
+        kind: "future_date",
+        message_vi: "Ngày trong tương lai",
+        options: [{ label_vi: "Dùng hôm nay", value: "today" }],
+      },
+    ]);
+    expect(group.label).toBe("Ngày trong tương lai");
+    expect(group.questions).toHaveLength(1);
   });
 });

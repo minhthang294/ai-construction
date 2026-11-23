@@ -1,5 +1,20 @@
 # Acceptance (PYC/BBNT) Agent Report
 
+## 2026-11-23 - pending queue filter chip
+
+- The pending response now carries `stage_name` for a `stage_definition_id`
+  filter (display name with per-pile `t`, e.g. `... t = 3–5 cm`).
+- Nghiệm thu shows a visible chip `Đang lọc: <stage display name>` with
+  `Xem tất cả` when `initialState` carries a stage/batch filter. `Xem tất cả`
+  clears the filter, reloads the full project queue and clears the selection.
+  The header count is `filtered / total` (e.g. `17 / 76`) while filtered, and
+  the plain total otherwise. PYC creation after clearing does not send the
+  cleared stage filter.
+- Test: filtered pending response exposes the display stage name; tests still
+  cover batch/stage filtering and project scope.
+- Verification: engineering + acceptance backend tests pass; `npm test` 215
+  passed; `npm run build` OK.
+
 ## 2026-11-23 - pending acceptance queue and PYC prefill
 
 - New read-only `GET /projects/{p}/acceptance/pending?batch_id&stage_definition_id`
@@ -30,9 +45,7 @@ Tests cover voided ignored, confirmed excluded, project scope, batch/stage
 filters, PYC prefill links and no-confirmation, next working day.
 
 Verification: full backend `374 passed, 6 skipped, 0 failed`; `npm test` 210
-passed. `npm run build` currently fails only in the site agent's in-progress
-`frontend/src/features/site/components/PhotoCapture.tsx` (JSX parse errors);
-`npx tsc -b` had passed for the acceptance changes before that concurrent edit.
+passed; `npm run build` OK after the site agent fixed `PhotoCapture.tsx`.
 
 Unresolved: WorkItem prefill is best effort: it links a unique core WorkItem only
 when its normalized name exactly matches a `component_work_links.work` text for

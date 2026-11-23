@@ -1,10 +1,26 @@
 # Engineering AI Agent Report
 
+## 2026-11-23 — future-date guard and Vietnamese parse messages
+
+- `progress_parse` now compares the parsed `event_date` with today. A future
+  date adds a `future_date` question (`Dùng ngày hôm nay` / `Giữ ngày và sửa
+  tay`, values `today` / `keep`, `apply.action = fix_future_date`) and a
+  warning, so the UI can fix the date before daily-preview rejects it with 422.
+  It does not change or silently clamp the parsed date.
+- Parse text is Vietnamese only: `STATUS_LABELS` maps `COMPLETED` →
+  `Hoàn thành`, `IN_PROGRESS` → `Đang thi công`, `PAUSED` → `Tạm dừng`. The
+  default-status warning now says “Trạng thái mặc định là Hoàn thành …”, and
+  the earlier-completion question says “đã có Hoàn thành ngày …” instead of
+  the raw enum. Machine values (`status_guess`, question option values) stay
+  unchanged for the API.
+- Tests: future date returns the question + warning; the golden message asserts
+  the Vietnamese default-status warning and no `COMPLETED` in question text.
+
 ## 2026-11-23 — grouped progress-parse questions
 
 - `progress_parse` now returns grouped questions when kind and option list are
   identical: one question with `codes` and `target_codes` listing every target
-component, merged
+  component, merged
   `apply.codes`/`event_ids`, and per-code ids kept in the same response lines.
   Multiple-stage questions with component-specific `t` labels only group when
   the labels match; otherwise they stay separate so the displayed thickness is

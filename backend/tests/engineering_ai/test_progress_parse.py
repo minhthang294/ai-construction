@@ -1,6 +1,6 @@
 """Golden tests for the deterministic Zalo progress parser (read-only)."""
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Dict
 
 from app.core.component_models import (
@@ -214,6 +214,11 @@ def test_golden_zalo_message_parses_26_piles_3_beams_and_questions(client, sessi
 
     assert body["event_date"] == "2026-11-22"
     assert body["date_source"] == "text"
+    assert any(
+        "Trạng thái mặc định là Hoàn thành" in warning
+        for warning in body["warnings"]
+    )
+    assert not any("COMPLETED" in warning for warning in body["warnings"])
 
     pile_ids = {
         item["component_id"]
@@ -298,6 +303,8 @@ def test_golden_zalo_message_parses_26_piles_3_beams_and_questions(client, sessi
     completed = next(q for q in body["questions"] if q["kind"] == "completed_earlier")
     assert "F-66-67" in completed["message_vi"]
     assert "20/11/2026" in completed["message_vi"]
+    assert "Hoàn thành" in completed["message_vi"]
+    assert "COMPLETED" not in completed["message_vi"]
     assert completed["codes"] == ["F-66-67"]
     assert completed["apply"]["action"] == "correct_earlier_to_in_progress"
     assert len(completed["apply"]["event_ids"]) == 1
@@ -681,3 +688,21 @@ def test_missing_date_uses_default_and_warns_without_date(session_factory):
         assert no_date.event_date is None
         assert no_date.date_source is None
         assert any("Chưa xác định được ngày" in warning for warning in no_date.warnings)
+
+
+def test_future_date_returns_question_and_vietnamese_warning(client, session_factory):
+    _seed(session_factory)
+    tomorrow = date.today() + timedelta(days=1)
+    body = client.post(
+        "/api/v1/projects/p1/ai/progress-parse",
+        json={"text": f"Cọc đục ngày {tomorrow:%d/%m/%Y}\nI49"},
+    ).json()
+    question = next(q for q in body["questions"] if q["kind"] == "future_date")
+    assert [option["value"] for option in question["options"]] == ["today", "keep"]
+    assert [option["label_vi"] for option in question["options"]] == [
+        "Dùng ngày hôm nay",
+        "Giữ ngày và sửa tay",
+    ]
+    assert question["apply"]["today"] == date.today().isoformat()
+    assert any("sau ngày hôm nay" in warning for warning in body["warnings"])
+    assert "COMPLETED" not in question["message_vi"]

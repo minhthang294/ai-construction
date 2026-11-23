@@ -54,6 +54,7 @@ export type PendingAcceptanceResponse = {
   project_id: string;
   batch_id?: string | null;
   stage_definition_id?: string | null;
+  stage_name?: string | null;
   groups: PendingAcceptanceGroup[];
   total_components: number;
 };

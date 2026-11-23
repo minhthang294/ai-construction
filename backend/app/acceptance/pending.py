@@ -140,6 +140,29 @@ def _is_confirmed(
     return False
 
 
+def _filter_stage_name(
+    db: Session, project_id: str, stage_definition_id: Optional[str]
+) -> Optional[str]:
+    """Display name for the stage filter chip, with per-pile thickness."""
+
+    if not stage_definition_id:
+        return None
+    definition = db.get(StageDefinition, stage_definition_id)
+    if definition is None or definition.project_id != project_id:
+        return None
+    component_ids = list(
+        db.scalars(
+            select(ComponentStage.component_id).where(
+                ComponentStage.stage_definition_id == stage_definition_id
+            )
+        ).all()
+    )
+    t_values = load_t_values(db, component_ids)
+    return display_stage_name(
+        " ".join(str(definition.name or "").split()), list(t_values.values())
+    )
+
+
 def pending_acceptance(
     db: Session,
     project_id: str,
@@ -224,6 +247,7 @@ def pending_acceptance(
         project_id=project_id,
         batch_id=batch_id,
         stage_definition_id=stage_definition_id,
+        stage_name=_filter_stage_name(db, project_id, stage_definition_id),
         groups=groups,
         total_components=sum(len(group.components) for group in groups),
     )
