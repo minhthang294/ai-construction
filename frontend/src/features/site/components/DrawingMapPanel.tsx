@@ -44,6 +44,7 @@ type Selection = {
 
 type Props = {
   projectId: string;
+  batchId?: string | null;
   selection?: Selection;
   onRequestProgress?: (componentId: string, stageDefinitionId?: string | null) => void;
 };
@@ -130,7 +131,7 @@ type GestureState = {
   pinchStartZoom: number;
 };
 
-export default function DrawingMapPanel({ projectId, selection, onRequestProgress }: Props) {
+export default function DrawingMapPanel({ projectId, batchId, selection, onRequestProgress }: Props) {
   const [map, setMap] = useState<DrawingMap | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -181,7 +182,7 @@ export default function DrawingMapPanel({ projectId, selection, onRequestProgres
     setLoadState("loading");
     setLoadError(null);
     setMap(null);
-    fetchDrawingMap(projectId, controller.signal)
+    fetchDrawingMap(projectId, batchId, controller.signal)
       .then((data) => {
         if (controller.signal.aborted) return;
         setMap(data);
@@ -202,7 +203,7 @@ export default function DrawingMapPanel({ projectId, selection, onRequestProgres
         setLoadState("error");
       });
     return () => controller.abort();
-  }, [projectId, reloadKey]);
+  }, [projectId, batchId, reloadKey]);
 
   const filteredSheets = useMemo(
     () => (map ? filterDrawingSheets(map.sheets, filters) : []),

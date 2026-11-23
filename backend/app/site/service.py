@@ -1152,6 +1152,7 @@ def _progress_photo_usages(
             )
             .where(
                 ProgressEvent.evidence_refs.contains(photo_id),
+                ProgressEvent.voided_at.is_(None),
                 or_(
                     StructuralComponent.id.is_(None),
                     StructuralComponent.project_id == project_id,

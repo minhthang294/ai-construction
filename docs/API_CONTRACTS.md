@@ -26,6 +26,15 @@ Prefix `/api/v1`. JSON UTF-8. Auth Bearer; mọi request project-scoped kiểm m
 | `POST /projects/{p}/progress/bulk` | Ghi hàng loạt sau khi duyệt: `{reviewed: true, idempotency_key, ...bulk-preview}`; kiểm lại đúng danh sách, `stage_selections`, bước và evidence trong transaction; mơ hồ/không khớp trả `409`; ghi `ProgressEvent` và audit; trả `201` |
 | `POST /projects/{p}/progress/daily-preview` | Xem trước nhiều công tác cùng ngày. Nhận `{event_date, lines:[{stage_definition_id, component_ids, stage_selections?, status, group_quantity?, group_unit?}]}`; trả `{can_commit, lines, warnings}`. |
 | `POST /projects/{p}/progress/daily` | Ghi toàn bộ công tác trong một giao dịch. Thêm `reviewed: true` và `idempotency_key` vào payload preview. Trả `{created, lines}`. Khối lượng cấp nhóm giữ ở bản ghi nhóm, khối lượng từng cấu kiện để trống. |
+| `GET/POST /projects/{p}/construction-batches` | Danh sách đợt thi công (mặc định bỏ đợt đã lưu trữ) và tạo đợt `{name, note?}`; trả kèm `component_count`, `primary_zone`; cần quyền biên tập để tạo |
+| `GET/PATCH /projects/{p}/construction-batches/{id}` | Chi tiết đợt kèm cấu kiện (mã, khu, phân đoạn, lý do) hoặc đổi tên/ghi chú/lưu trữ; ghi audit |
+| `POST /projects/{p}/construction-batches/{id}/components/preview` | Xem trước mã trên **toàn bộ** khu/phân đoạn: `{codes:[...]}` trả `matched[]`, `ambiguous[]` (nhiều ứng viên), `missing[]`, `already_in_batch[]`; không tự chọn khi mã mơ hồ |
+| `POST /projects/{p}/construction-batches/{id}/components` | Thêm cấu kiện đã chọn tay `{component_ids:[...], reason?}`, bỏ qua mục đã có; ghi audit từng cấu kiện |
+| `DELETE /projects/{p}/construction-batches/{id}/components/{component_id}?reason=` | Bỏ cấu kiện khỏi đợt; ghi audit |
+| `POST /projects/{p}/progress/batches/{id}/undo` | Hoàn tác đợt trong cùng ngày bởi người tạo hoặc `project_manager`: `{reason}`; đánh dấu toàn bộ sự kiện `voided_at/by/reason`, ghi audit |
+| `POST /projects/{p}/progress/events/{id}/correct` | Sửa trạng thái một sự kiện kèm lý do bắt buộc `{status, reason}`: void sự kiện cũ + tạo sự kiện mới; audit cả hai |
+| `GET /projects/{p}/components/{id}/progress-events` | Lịch sử tiến độ còn hiệu lực (bỏ sự kiện đã void); mỗi sự kiện có `batch_id` |
+| `GET /projects/{p}/components?batch_id=` | Lọc danh mục theo đợt thi công; `progress`, `progress/summary`, `drawing-map`, `overview/latest-day`, `overview/segments` nhận cùng `batch_id` |
 | `GET /projects/{p}/drawing-map` | Mặt bằng theo project/zone/segment. Marker trả `design_group`, `current_work`/`current_work_definition_id` (bước mới nhất đang IN_PROGRESS), `location_review`; phản hồi có `review_count` (mã chưa đặt được) và `position_review_count` (tọa độ đang chờ duyệt). |
 | `GET /projects/{p}/drawing-map/{sheet_id}/image` | Trả ảnh riêng cho thành viên dự án. |
 | `GET /projects/{p}/progress/summary` | Tổng hợp project-scoped trên cấu kiện đã duyệt: tổng/đã duyệt/chờ duyệt, số có phạm vi phát sinh, 4 trạng thái thi công + tỷ lệ, liên kết/xác nhận nghiệm thu + tỷ lệ; hai tỷ lệ độc lập |
@@ -52,6 +61,8 @@ Mỗi giá trị trả về từ `progress/design-quantities` gồm `quantity` (
 | `GET /projects/{p}/documents/{id}/versions` | Danh sách version, is_current/is_effective, change_note |
 | `POST /projects/{p}/documents/{id}/effective` | Người quản lý hồ sơ xác nhận revision hiệu lực; lưu effective_at/by |
 | `POST /projects/{p}/ai/chat` | Trả `{answer,citations[],confidence}`; chỉ từ dữ kiện AI trích xuất và database cấu kiện; thiếu citation/nguồn dùng câu từ chối chuẩn; `scope=effective\|history` |
+| `POST /projects/{p}/ai/progress-parse` | Chỉ đọc: `{text, default_date?, batch_id?}` -> ngày thi công, dòng công tác, mã cấu kiện, công đoạn ứng viên, câu hỏi cần xác nhận và `batch_id` echo; thành viên đợt thi công không bị hỏi ngoài phạm vi; không ghi DB |
+| `GET /projects/{p}/ai/question-suggestions` | Gợi ý 1-5 câu hỏi từ cấu kiện/công đoạn/tiến độ thật của công trình |
 | `POST/GET /projects/{p}/ai/conversations` | Tạo mới/liệt kê; tìm kiếm `q` |
 | `PATCH/DELETE /projects/{p}/ai/conversations/{id}` | Đổi tên/xóa hội thoại |
 | `POST/GET /projects/{p}/documents/{id}/extractions` | Lưu/liệt kê dữ liệu AI trích xuất theo trang (đề xuất) |

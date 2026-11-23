@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .access import require_project_member
+from .batch_scope import batch_component_ids
 from .component_models import (ComponentStage, DesignGroup, ProgressEvent, RepairScope,
                                Segment, StageDefinition, StructuralComponent, StructureZone)
 from .database import get_db
@@ -63,21 +64,26 @@ def _manifest(project_id: str) -> Manifest | None:
 
 
 @router.get("/projects/{project_id}/drawing-map")
-def drawing_map(project_id: str, db: Session = Depends(get_db)):
+def drawing_map(project_id: str, db: Session = Depends(get_db), batch_id: str | None = None):
     require_project_member(project_id)
     manifest = _manifest(project_id)
     if manifest is None:
         return {"sheets": [], "review_count": 0, "position_review_count": 0}
     marker_keys = {(marker.type, marker.code, marker.zone, marker.segment)
                    for sheet in manifest.sheets for marker in sheet.markers}
-    rows = db.execute(
+    query = (
         select(StructuralComponent, DesignGroup.name, StructureZone.name, Segment.number)
         .join(Segment, Segment.id == StructuralComponent.segment_id)
         .join(StructureZone, StructureZone.id == Segment.zone_id)
         .outerjoin(DesignGroup, DesignGroup.id == StructuralComponent.design_group_id)
         .where(StructuralComponent.project_id == project_id,
                StructuralComponent.verification == "VERIFIED")
-    ).all()
+    )
+    if batch_id:
+        query = query.where(
+            StructuralComponent.id.in_(batch_component_ids(project_id, batch_id))
+        )
+    rows = db.execute(query).all()
     components: dict[tuple[str, str, str, int], list[tuple[StructuralComponent, str | None]]] = {}
     for component, group_name, zone_name, segment_number in rows:
         key = (component.type, component.canonical_code, zone_name, segment_number)
@@ -97,6 +103,7 @@ def drawing_map(project_id: str, db: Session = Depends(get_db)):
             .join(ProgressEvent, ProgressEvent.component_stage_id == ComponentStage.id)
             .join(StageDefinition, StageDefinition.id == ComponentStage.stage_definition_id)
             .where(ComponentStage.component_id.in_(list(unique_components.values())))
+            .where(ProgressEvent.voided_at.is_(None))
             .order_by(ProgressEvent.created_at, ProgressEvent.id)
         ).all()
         latest_by_stage = {}
@@ -113,6 +120,8 @@ def drawing_map(project_id: str, db: Session = Depends(get_db)):
         markers = []
         for marker in sheet.markers:
             key = (marker.type, marker.code, marker.zone, marker.segment)
+            if batch_id and not components.get(key):
+                continue
             matches = components.get(key, [])
             component_id = unique_components.get(key)
             valid_shape = len(marker.points) == 1 if marker.type == "pile" else len(marker.points) >= 2

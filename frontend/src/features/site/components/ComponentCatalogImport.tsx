@@ -3,6 +3,13 @@ import ComponentProgressPanel from "./ComponentProgressPanel";
 import DrawingMapPanel from "./DrawingMapPanel";
 import DailyProgressPanel from "./DailyProgressPanel";
 import JournalPanel from "./JournalPanel";
+import ConstructionBatchSelector from "./ConstructionBatchSelector";
+import ConstructionBatchManager from "./ConstructionBatchManager";
+import BatchZoneBadge from "./BatchZoneBadge";
+import {
+  useConstructionBatch,
+  useConstructionBatches,
+} from "../hooks/useConstructionBatch";
 import {
   ApiError,
   commitComponentImport,
@@ -144,6 +151,16 @@ export default function ComponentCatalogImport({ projectId }: Props) {
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [catalogLimit, setCatalogLimit] = useState(PAGE_SIZE);
 
+  const { batchId, setBatchId } = useConstructionBatch(projectId);
+  const {
+    batches,
+    loading: batchesLoading,
+    error: batchesError,
+    reload: reloadBatches,
+  } = useConstructionBatches(projectId);
+  const selectedBatch = batches.find((batch) => batch.id === batchId) ?? null;
+  const primaryZone = selectedBatch?.primary_zone ?? null;
+
   const [manual, setManual] = useState<ManualComponentDraft>({
     ...EMPTY_MANUAL_COMPONENT,
   });
@@ -152,7 +169,6 @@ export default function ComponentCatalogImport({ projectId }: Props) {
   const [manualMessage, setManualMessage] = useState<string | null>(null);
 
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const loadedCatalogProject = useRef<string | null>(null);
   const tabId = useId();
   const [view, setView] = useState<(typeof COMPONENT_VIEWS)[number]["id"]>(
     "daily",
@@ -169,7 +185,7 @@ export default function ComponentCatalogImport({ projectId }: Props) {
       setCatalogBusy(true);
       setCatalogLimit(PAGE_SIZE);
       try {
-        setCatalog(await listComponents(projectId, query));
+        setCatalog(await listComponents(projectId, query, batchId));
         setCatalogError(null);
       } catch (err) {
         setCatalogError(errorMessage(err));
@@ -177,7 +193,7 @@ export default function ComponentCatalogImport({ projectId }: Props) {
         setCatalogBusy(false);
       }
     },
-    [projectId],
+    [projectId, batchId],
   );
 
   const loadSegments = useCallback(async () => {
@@ -190,11 +206,10 @@ export default function ComponentCatalogImport({ projectId }: Props) {
   }, [projectId]);
 
   useEffect(() => {
-    if (view !== "catalog" || loadedCatalogProject.current === projectId) return;
-    loadedCatalogProject.current = projectId;
+    if (view !== "catalog") return;
     void loadCatalog("");
     void loadSegments();
-  }, [loadCatalog, loadSegments, projectId, view]);
+  }, [loadCatalog, loadSegments, view]);
 
   const zones = useMemo(
     () => Array.from(new Set((preview?.components ?? []).map((item) => item.zone))),
@@ -332,6 +347,20 @@ export default function ComponentCatalogImport({ projectId }: Props) {
 
   return (
     <section className="space-y-4">
+      <ConstructionBatchSelector
+        batches={batches}
+        value={batchId}
+        onChange={setBatchId}
+        loading={batchesLoading}
+        error={batchesError}
+      />
+      <ConstructionBatchManager
+        projectId={projectId}
+        batchId={batchId}
+        batches={batches}
+        onSelect={setBatchId}
+        onChanged={() => void reloadBatches()}
+      />
       <div
         className="grid grid-cols-3 gap-1 rounded-xl border border-gray-200 bg-white p-1 shadow-sm sm:grid-cols-5"
         role="tablist"
@@ -378,16 +407,22 @@ export default function ComponentCatalogImport({ projectId }: Props) {
       {view === "daily" ? (
         <DailyProgressPanel
           projectId={projectId}
+          batchId={batchId}
+          primaryZone={primaryZone}
           initialComponentId={progressRequest?.componentId}
           initialStageDefinitionId={progressRequest?.stageDefinitionId}
           onInitialComponentHandled={clearProgressRequest}
         />
       ) : view === "progress" ? (
-        <ComponentProgressPanel projectId={projectId} />
+        <ComponentProgressPanel
+          projectId={projectId}
+          batchId={batchId}
+          primaryZone={primaryZone}
+        />
       ) : view === "journal" ? (
         <JournalPanel projectId={projectId} />
       ) : view === "map" ? (
-        <DrawingMapPanel projectId={projectId} onRequestProgress={requestDailyProgress} />
+        <DrawingMapPanel projectId={projectId} batchId={batchId} onRequestProgress={requestDailyProgress} />
       ) : (
         <>
           <div className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm">
@@ -462,6 +497,13 @@ export default function ComponentCatalogImport({ projectId }: Props) {
                           : "Chờ duyệt"}
                       </span>
                     </p>
+                    <div className="mt-1">
+                      <BatchZoneBadge
+                        zone={component.zone ?? segment?.zone ?? ""}
+                        segmentNumber={component.segment_number ?? segment?.number ?? 0}
+                        primaryZone={primaryZone}
+                      />
+                    </div>
                   </div>
                 );
               })}

@@ -27,6 +27,8 @@ from .dependencies import (
     require_site_editor,
 )
 from .models import SitePhoto, SiteProgressBulkBatch
+from app.core.batch_scope import batch_component_ids
+from app.core.models import ProjectMember
 from .progress_inference import apply_inferred_progress
 from .schemas import LOCAL_TZ
 from .service import (
@@ -246,6 +248,15 @@ class DailyProgressCommitIn(DailyProgressIn):
     idempotency_key: str = Field(min_length=1, max_length=120)
 
 
+class ProgressBatchUndoIn(BaseModel):
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+class ProgressEventCorrectIn(BaseModel):
+    status: Literal["IN_PROGRESS", "COMPLETED", "BLOCKED"]
+    reason: str = Field(min_length=1, max_length=1000)
+
+
 class DesignQuantityIn(BaseModel):
     component_ids: List[str] = Field(min_length=1, max_length=500)
 
@@ -344,6 +355,7 @@ class ProgressEventOut(BaseModel):
     unit: Optional[str] = None
     note: Optional[str] = None
     evidence_refs: List[str] = Field(default_factory=list)
+    batch_id: Optional[str] = None
     created_at: datetime
 
 
@@ -527,6 +539,7 @@ def _load_rows(
     group_id: Optional[str] = None,
     scope: Optional[str] = None,
     origin: Optional[str] = None,
+    batch_id: Optional[str] = None,
 ) -> List[dict[str, Any]]:
     if StructuralComponent is None:
         return []
@@ -557,6 +570,10 @@ def _load_rows(
             StructuralComponent.id.in_(
                 select(RepairScope.component_id).where(RepairScope.kind == scope)
             )
+        )
+    if batch_id:
+        query = query.where(
+            StructuralComponent.id.in_(batch_component_ids(project_id, batch_id))
         )
     if q:
         code = q.strip().upper()
@@ -629,7 +646,10 @@ def _load_rows(
     if stage_ids:
         for event in db.scalars(
             select(ProgressEvent)
-            .where(ProgressEvent.component_stage_id.in_(stage_ids))
+            .where(
+                ProgressEvent.component_stage_id.in_(stage_ids),
+                ProgressEvent.voided_at.is_(None),
+            )
             .order_by(ProgressEvent.created_at, ProgressEvent.id)
         ):
             events_by_stage.setdefault(event.component_stage_id, []).append(event)
@@ -702,6 +722,7 @@ def list_progress(
     construction_status: Optional[str] = None,
     acceptance_status: Optional[str] = None,
     stage_definition_id: Optional[str] = None,
+    batch_id: Optional[str] = None,
 ) -> List[dict[str, Any]]:
     rows = _load_rows(
         db,
@@ -713,6 +734,7 @@ def list_progress(
         group_id=group_id,
         scope=scope,
         origin=origin,
+        batch_id=batch_id,
     )
     if construction_status:
         rows = [row for row in rows if row["construction_status"] == construction_status]
@@ -861,6 +883,7 @@ def _event_out(event: ProgressEvent, component_id: str) -> dict[str, Any]:
         "unit": event.unit,
         "note": event.note,
         "evidence_refs": json.loads(event.evidence_refs or "[]"),
+        "batch_id": event.batch_id,
         "created_at": created_at,
     }
 
@@ -1001,6 +1024,7 @@ def commit_daily(
                 ),
                 actor_id,
                 commit=False,
+                batch_id=batch.id,
             )
             for event in result["events"]:
                 stage_id = event["stage_id"]
@@ -1078,6 +1102,7 @@ def commit_bulk(
     actor_id: Optional[str],
     *,
     commit: bool = True,
+    batch_id: Optional[str] = None,
 ) -> dict[str, Any]:
     digest = _payload_hash(payload)
     previous = _previous_result(db, project_id, payload.idempotency_key, digest)
@@ -1131,6 +1156,7 @@ def commit_bulk(
                 unit=payload.unit,
                 note=payload.note,
                 evidence_refs=json.dumps(payload.evidence_refs),
+                batch_id=batch_id or batch.id,
                 created_by=actor_id,
             )
             db.add(event)
@@ -1183,6 +1209,23 @@ def _local_date(value: Optional[datetime]) -> Optional[date]:
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
     return value.astimezone(LOCAL_TZ).date()
+
+
+def _can_manage_progress(
+    db: Session, project_id: str, user: Any, owner_id: Optional[str]
+) -> bool:
+    """Creator, project_manager or global admin may void/correct."""
+    if getattr(user, "role", None) == "admin":
+        return True
+    if owner_id and getattr(user, "id", None) == owner_id:
+        return True
+    member = db.scalar(
+        select(ProjectMember).where(
+            ProjectMember.project_id == project_id,
+            ProjectMember.user_id == getattr(user, "id", None),
+        )
+    )
+    return member is not None and member.role == "project_manager"
 
 
 def _acceptance_events(
@@ -1551,6 +1594,7 @@ def journal_preview(db: Session, project_id: str, journal_date: date) -> dict[st
             .where(
                 StructuralComponent.project_id == project_id,
                 ProgressEvent.event_date == journal_date,
+                ProgressEvent.voided_at.is_(None),
                 StageDefinition.project_id == project_id,
             )
             .order_by(
@@ -1662,6 +1706,7 @@ def get_progress(
     scope: Optional[Literal["DESIGN_SCOPE", "ADDITIONAL_SCOPE"]] = None,
     origin: Optional[Literal["SEED_IMPORT", "MANUAL_ENTRY"]] = None,
     stage_definition_id: Optional[str] = None,
+    batch_id: Optional[str] = None,
     construction_status: Optional[
         Literal["NOT_STARTED", "IN_PROGRESS", "COMPLETED", "BLOCKED"]
     ] = None,
@@ -1691,6 +1736,7 @@ def get_progress(
         stage_definition_id=stage_definition_id,
         construction_status=construction_status,
         acceptance_status=acceptance_status,
+        batch_id=batch_id,
     )
 
 
@@ -1776,6 +1822,153 @@ def commit_progress_daily(
         return commit_daily(db, project_id, payload, current_user_id(user))
     except ProgressSelectionConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/projects/{project_id}/progress/batches/{batch_id}/undo")
+def undo_progress_batch(
+    project_id: str,
+    batch_id: str,
+    payload: ProgressBatchUndoIn,
+    db: Session = Depends(get_db),
+    user=Depends(require_site_editor),
+):
+    batch = db.scalar(
+        select(SiteProgressBulkBatch).where(
+            SiteProgressBulkBatch.id == batch_id,
+            SiteProgressBulkBatch.project_id == project_id,
+        )
+    )
+    if batch is None:
+        raise HTTPException(status_code=404, detail="Progress batch not found")
+    if _local_date(batch.created_at) != datetime.now(LOCAL_TZ).date():
+        raise HTTPException(
+            status_code=409,
+            detail="Chỉ hoàn tác được đợt ghi trong cùng ngày.",
+        )
+    if not _can_manage_progress(db, project_id, user, batch.created_by):
+        raise HTTPException(
+            status_code=403,
+            detail="Chỉ người tạo đợt hoặc quản lý công trình được hoàn tác.",
+        )
+    events = list(
+        db.scalars(
+            select(ProgressEvent).where(
+                ProgressEvent.batch_id == batch.id,
+                ProgressEvent.voided_at.is_(None),
+            )
+        )
+    )
+    if not events:
+        raise HTTPException(
+            status_code=409,
+            detail="Đợt này không còn sự kiện tiến độ nào để hoàn tác.",
+        )
+    voided_at = datetime.now(timezone.utc)
+    for event in events:
+        event.voided_at = voided_at
+        event.voided_by = current_user_id(user)
+        event.void_reason = payload.reason.strip()
+    _audit(
+        db,
+        project_id=project_id,
+        actor_id=current_user_id(user),
+        action="component_progress_batch_voided",
+        entity="SiteProgressBulkBatch",
+        entity_id=batch.id,
+        detail=json.dumps(
+            {
+                "voided": len(events),
+                "event_ids": [event.id for event in events],
+                "reason": payload.reason.strip(),
+            }
+        ),
+    )
+    db.commit()
+    return {"batch_id": batch.id, "voided": len(events)}
+
+
+@router.post("/projects/{project_id}/progress/events/{event_id}/correct")
+def correct_progress_event(
+    project_id: str,
+    event_id: str,
+    payload: ProgressEventCorrectIn,
+    db: Session = Depends(get_db),
+    user=Depends(require_site_editor),
+):
+    row = db.execute(
+        select(ProgressEvent, StructuralComponent)
+        .join(StructuralComponent, ProgressEvent.component_id == StructuralComponent.id)
+        .where(
+            ProgressEvent.id == event_id,
+            StructuralComponent.project_id == project_id,
+            ProgressEvent.voided_at.is_(None),
+        )
+    ).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Progress event not found")
+    event, component = row
+    if event.status == payload.status:
+        raise HTTPException(
+            status_code=409, detail="Trạng thái mới trùng trạng thái hiện tại."
+        )
+    if not _can_manage_progress(db, project_id, user, event.created_by):
+        raise HTTPException(
+            status_code=403,
+            detail="Chỉ người ghi sự kiện hoặc quản lý công trình được sửa.",
+        )
+    reason = payload.reason.strip()
+    voided_at = datetime.now(timezone.utc)
+    event.voided_at = voided_at
+    event.voided_by = current_user_id(user)
+    event.void_reason = reason
+    replacement = ProgressEvent(
+        component_id=event.component_id,
+        component_stage_id=event.component_stage_id,
+        event_date=event.event_date,
+        status=payload.status,
+        quantity=event.quantity,
+        unit=event.unit,
+        note=event.note,
+        evidence_refs=event.evidence_refs,
+        batch_id=None,
+        created_by=current_user_id(user),
+    )
+    db.add(replacement)
+    db.flush()
+    _audit(
+        db,
+        project_id=project_id,
+        actor_id=current_user_id(user),
+        action="component_progress_event_voided",
+        entity="ProgressEvent",
+        entity_id=event.id,
+        detail=json.dumps(
+            {
+                "reason": reason,
+                "from_status": event.status,
+                "replacement_event_id": replacement.id,
+            }
+        ),
+    )
+    _audit(
+        db,
+        project_id=project_id,
+        actor_id=current_user_id(user),
+        action="component_progress_event_corrected",
+        entity="ProgressEvent",
+        entity_id=replacement.id,
+        detail=json.dumps(
+            {
+                "old_event_id": event.id,
+                "component_id": component.id,
+                "from_status": event.status,
+                "to_status": replacement.status,
+                "reason": reason,
+            }
+        ),
+    )
+    db.commit()
+    return _event_out(replacement, component.id)
 
 
 @router.get("/projects/{project_id}/journals/{journal_date}/preview")

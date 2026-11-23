@@ -57,7 +57,10 @@ export type ComponentSummary = {
   canonical_code: string;
   raw_code: string;
   segment_id: string;
+  segment_number?: number;
+  zone?: string;
   design_group_id: string | null;
+  design_group?: string | null;
   verification: string;
 };
 

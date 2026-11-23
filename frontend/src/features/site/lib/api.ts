@@ -31,6 +31,12 @@ import type {
   JournalPreview,
   JournalSnapshot,
 } from "./journal";
+import type {
+  BatchPreview,
+  ConstructionBatch,
+  ConstructionBatchDetail,
+  ProgressEventRecord,
+} from "./batches";
 
 const API_BASE = (import.meta as any)?.env?.VITE_API_BASE ?? "/api/v1";
 
@@ -265,9 +271,13 @@ export async function commitComponentImport(
 export async function listComponents(
   projectId: string,
   query?: string,
+  batchId?: string | null,
 ): Promise<ComponentSummary[]> {
+  const params = new URLSearchParams();
   const search = query?.trim();
-  const suffix = search ? `?q=${encodeURIComponent(search)}` : "";
+  if (search) params.set("q", search);
+  if (batchId) params.set("batch_id", batchId);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
   const res = await apiFetch(`/projects/${projectId}/components${suffix}`);
   if (!res.ok) return fail(res);
   return res.json();
@@ -309,6 +319,7 @@ export async function listStageDefinitions(
 export async function listComponentProgress(
   projectId: string,
   filters?: Partial<ProgressFilters>,
+  batchId?: string | null,
 ): Promise<ProgressRow[]> {
   const params = new URLSearchParams();
   const query = filters?.query?.trim();
@@ -325,6 +336,7 @@ export async function listComponentProgress(
   if (filters?.acceptance_status) {
     params.set("acceptance_status", filters.acceptance_status);
   }
+  if (batchId) params.set("batch_id", batchId);
   const suffix = params.toString() ? `?${params.toString()}` : "";
   const res = await apiFetch(`/projects/${projectId}/progress${suffix}`);
   if (!res.ok) return fail(res);
@@ -617,4 +629,151 @@ export async function shareText(
 
 export function originalPhotoUrl(projectId: string, photoId: string): string {
   return `${API_BASE}/projects/${projectId}/photos/${photoId}/original`;
+}
+
+export async function listConstructionBatches(
+  projectId: string,
+  includeArchived = false,
+): Promise<ConstructionBatch[]> {
+  const suffix = includeArchived ? "?include_archived=true" : "";
+  const res = await apiFetch(`/projects/${projectId}/construction-batches${suffix}`);
+  if (!res.ok) return fail(res);
+  return res.json();
+}
+
+export async function createConstructionBatch(
+  projectId: string,
+  body: { name: string; note?: string | null },
+): Promise<ConstructionBatch> {
+  const res = await apiFetch(`/projects/${projectId}/construction-batches`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) return fail(res);
+  return res.json();
+}
+
+export async function updateConstructionBatch(
+  projectId: string,
+  batchId: string,
+  body: { name?: string; note?: string | null; archived?: boolean },
+): Promise<ConstructionBatch> {
+  const res = await apiFetch(
+    `/projects/${projectId}/construction-batches/${batchId}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
+  if (!res.ok) return fail(res);
+  return res.json();
+}
+
+export async function getConstructionBatch(
+  projectId: string,
+  batchId: string,
+): Promise<ConstructionBatchDetail> {
+  const res = await apiFetch(
+    `/projects/${projectId}/construction-batches/${batchId}`,
+  );
+  if (!res.ok) return fail(res);
+  return res.json();
+}
+
+export async function previewConstructionBatchComponents(
+  projectId: string,
+  batchId: string,
+  codes: string[],
+): Promise<BatchPreview> {
+  const res = await apiFetch(
+    `/projects/${projectId}/construction-batches/${batchId}/components/preview`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ codes }),
+    },
+  );
+  if (!res.ok) return fail(res);
+  return res.json();
+}
+
+export async function addConstructionBatchComponents(
+  projectId: string,
+  batchId: string,
+  componentIds: string[],
+  reason?: string,
+): Promise<{ batch_id: string; added: number; skipped: number }> {
+  const res = await apiFetch(
+    `/projects/${projectId}/construction-batches/${batchId}/components`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ component_ids: componentIds, reason: reason || null }),
+    },
+  );
+  if (!res.ok) return fail(res);
+  return res.json();
+}
+
+export async function removeConstructionBatchComponent(
+  projectId: string,
+  batchId: string,
+  componentId: string,
+  reason?: string,
+): Promise<{ batch_id: string; removed: string }> {
+  const query = reason ? `?reason=${encodeURIComponent(reason)}` : "";
+  const res = await apiFetch(
+    `/projects/${projectId}/construction-batches/${batchId}/components/${componentId}${query}`,
+    { method: "DELETE" },
+  );
+  if (!res.ok) return fail(res);
+  return res.json();
+}
+
+export async function listProgressEvents(
+  projectId: string,
+  componentId: string,
+): Promise<ProgressEventRecord[]> {
+  const res = await apiFetch(
+    `/projects/${projectId}/components/${componentId}/progress-events`,
+  );
+  if (!res.ok) return fail(res);
+  return res.json();
+}
+
+export async function correctProgressEvent(
+  projectId: string,
+  eventId: string,
+  status: "IN_PROGRESS" | "COMPLETED" | "BLOCKED",
+  reason: string,
+): Promise<ProgressEventRecord> {
+  const res = await apiFetch(
+    `/projects/${projectId}/progress/events/${eventId}/correct`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status, reason }),
+    },
+  );
+  if (!res.ok) return fail(res);
+  return res.json();
+}
+
+export async function undoProgressBatch(
+  projectId: string,
+  batchId: string,
+  reason: string,
+): Promise<{ batch_id: string; voided: number }> {
+  const res = await apiFetch(
+    `/projects/${projectId}/progress/batches/${batchId}/undo`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason }),
+    },
+  );
+  if (!res.ok) return fail(res);
+  return res.json();
 }

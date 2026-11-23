@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import JSON, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, JSON, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .database import Base
@@ -143,5 +143,41 @@ class ProgressEvent(Base):
     unit: Mapped[str | None] = mapped_column(String(30))
     note: Mapped[str | None] = mapped_column(Text)
     evidence_refs: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    batch_id: Mapped[str | None] = mapped_column(
+        ForeignKey("component_progress_batches.id"), index=True
+    )
     created_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    voided_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
+    void_reason: Mapped[str | None] = mapped_column(Text)
+
+
+class ConstructionBatch(Base):
+    """A named group of components executed together on site.
+
+    Design location stays on ``StructuralComponent``; a batch only records the
+    construction grouping (for example Bunke components executed from PD2).
+    """
+
+    __tablename__ = "construction_batches"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    note: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class ConstructionBatchComponent(Base):
+    __tablename__ = "construction_batch_components"
+    batch_id: Mapped[str] = mapped_column(
+        ForeignKey("construction_batches.id", ondelete="CASCADE"), primary_key=True
+    )
+    component_id: Mapped[str] = mapped_column(
+        ForeignKey("structural_components.id", ondelete="CASCADE"), primary_key=True
+    )
+    added_by: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text)

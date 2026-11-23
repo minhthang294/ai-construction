@@ -8,6 +8,7 @@ from .core.router import router as core_router
 from .core.component_router import router as component_router
 from .core.insights_router import router as insights_router
 from .core.overview_router import router as overview_router
+from .core.batch_router import router as batch_router
 from .core.drawing_map_router import router as drawing_map_router
 from .site.router import router as site_router
 from .acceptance.router import router as acceptance_router
@@ -55,6 +56,7 @@ app.include_router(core_router, prefix="/api/v1")
 app.include_router(component_router, prefix="/api/v1")
 app.include_router(insights_router, prefix="/api/v1")
 app.include_router(overview_router, prefix="/api/v1")
+app.include_router(batch_router, prefix="/api/v1")
 app.include_router(drawing_map_router, prefix="/api/v1")
 app.include_router(site_router, prefix="/api/v1")
 app.include_router(acceptance_router, prefix="/api/v1")

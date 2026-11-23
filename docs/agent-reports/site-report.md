@@ -999,3 +999,58 @@ cd frontend
 npm test        # 32 files, 200 tests passed
 npm run build   # OK, main 280,53 kB, không cảnh báo chunk >500 kB
 ```
+
+## Wave 3a — Đợt thi công, void/sửa tiến độ — 2026-11-23
+
+### Migration
+
+- Revision mới `a1b2c3d4e5f6` (sau head `639cdb146bf2`): tạo `construction_batches`, `construction_batch_components`; thêm `batch_id`, `voided_at`, `voided_by`, `void_reason` vào `component_progress_events` + index `batch_id`.
+- Đã chạy trên bản sao DB tạm ở head cũ, có sẵn 1 sự kiện/project legacy:
+  `upgrade head` → `downgrade -1` → `upgrade head`; cả 3 bước giữ nguyên dòng `component_progress_events` cũ, bảng/cột mới xuất hiện rồi biến mất đúng như mong đợi.
+
+### Đợt thi công
+
+- Model: `ConstructionBatch`, `ConstructionBatchComponent` trong `backend/app/core/component_models.py` (khóa chính đôi batch+component).
+- Router mới `backend/app/core/batch_router.py`, mount trong `main.py`:
+  - list/create/patch batch; detail kèm cấu kiện; preview mã trên **toàn bộ** zone/segment với `matched/ambiguous/missing/already_in_batch`; thêm theo `component_ids` đã chọn tay; bỏ cấu kiện.
+  - Mọi thay đổi ghi `AuditLog` (`construction_batch_created/updated/component_added/component_removed`). Member đọc, editor ghi.
+  - `primary_zone` = khu xuất hiện nhiều nhất trong đợt, dùng cho badge.
+- Bộ lọc `batch_id`: `GET /components`, `/progress`, `/progress/summary`, `/drawing-map`, `/overview/latest-day`, `/overview/segments`.
+- Frontend:
+  - `useConstructionBatch` lưu lựa chọn theo project trong `localStorage` (`construction_batch:<projectId>`, bọc try/catch) và `useConstructionBatches`.
+  - `ConstructionBatchSelector` hiện trên Tổng quan và trang Cấu kiện; truyền `batch_id` vào summary/overview/progress/drawing-map.
+  - `ConstructionBatchManager` (trong trang Cấu kiện): tạo đợt, nhập mã, xem trước, chọn tay từng ứng viên mơ hồ, thêm/bỏ cấu kiện.
+  - `BatchZoneBadge` hiện “`<Khu> PĐ<segment> · thi công cùng đợt`” cho cấu kiện khác `primary_zone` (ví dụ Bunke PD1 khi đợt chính ở Cầu chính PD2).
+  - `DailyProgressPanel` / `ComponentProgressPanel` nhận `batchId` + badge; `DrawingMapPanel` nhận `batchId`.
+
+### Void batch và sửa sự kiện
+
+- `commit_bulk`/`commit_daily` gắn `batch_id` cho mọi `ProgressEvent` (daily dùng id batch ngày, không phải batch từng dòng).
+- `POST /progress/batches/{id}/undo` `{reason}`: chỉ trong cùng ngày địa phương, người tạo hoặc `project_manager`/admin; void toàn bộ sự kiện còn hiệu lực của đợt + audit.
+- `POST /progress/events/{id}/correct` `{status, reason}`: void sự kiện cũ, tạo sự kiện mới cùng ngày/bước/khối lượng/evidence, `batch_id=null`; audit 2 bản ghi (void + corrected). Lý do bắt buộc, trạng thái trùng trả `409`.
+- UI `ProgressHistoryPanel` trong thẻ cấu kiện: xem lịch sử còn hiệu lực, “Sửa” (chọn trạng thái + lý do) và “Hoàn tác đợt” (lý do), mobile-first, nút ≥ 44px.
+- Mọi reader trong repo app đã lọc `voided_at IS NULL`: component router/detail/history, insights summary/reconciliation, overview latest-day/segments, drawing map, journal preview, photo-delete usage. `GET progress-events` và history bỏ sự kiện void.
+
+### Engineering AI readers cần tự lọc voided (không sửa theo yêu cầu)
+
+Các file sau vẫn đọc `ProgressEvent` và **phải** thêm điều kiện `voided_at IS NULL` khi agent engineering-ai tiếp tục:
+- `backend/app/engineering_ai/database_chat.py` — `_related_rows(db, ProgressEvent, ...)` (~dòng 508, 692), truy vấn `select_from(ProgressEvent)` (~dòng 633), candidate `_event_candidate` (~dòng 751).
+- `backend/app/engineering_ai/suggestions.py` — `select(ProgressEvent)` (~dòng 68) và các hàm gợi ý dựa trên danh sách event.
+- `backend/app/engineering_ai/progress_parse.py` — truy vấn `select(ProgressEvent)` (~dòng 245) phục vụ parse tiến độ.
+
+Test của hai module này cũng tạo `ProgressEvent` trực tiếp; chưa sửa. Cho tới khi cập nhật, chat/gợi ý AI có thể vẫn thấy sự kiện đã void.
+
+### Kiểm tra
+
+```bash
+cd backend
+DATABASE_URL="sqlite:///$TEMP/wave3-full.db" ... \
+  ../.venv/Scripts/python -m pytest -q
+# 350 passed, 6 skipped
+
+cd frontend
+npm test        # 32 files, 200 tests passed
+npm run build   # OK; main index 292,52 kB, ComponentCatalogImport 130,87 kB, không cảnh báo >500 kB
+```
+
+Test mới: `backend/tests/test_construction_batches.py` (scope, preview mơ hồ/không tự chọn, audit, filter components/summary/segments/latest-day/drawing-map), `backend/tests/test_progress_void.py` (quyền creator/PM, cùng ngày, void ẩn khỏi summary/overview/journal, correct void+tạo mới, audit, validation). Chưa có E2E trình duyệt cho batch manager/history.

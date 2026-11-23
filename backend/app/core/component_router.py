@@ -15,6 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .access import require_project_member, require_project_role
+from .batch_scope import batch_component_ids
 from .component_models import (ComponentAlias, ComponentImportBatch, ComponentStage, ComponentWorkLink, DesignGroup,
                                ProgressEvent, RepairScope, Segment, StageDefinition, StructuralComponent, StructureZone)
 from .component_seed import preview_seed
@@ -174,12 +175,14 @@ def event_data(event: ProgressEvent) -> dict:
             "event_date": event.event_date.isoformat(), "status": event.status,
             "quantity": event.quantity, "unit": event.unit, "note": event.note,
             "evidence_refs": json.loads(event.evidence_refs or "[]"),
+            "batch_id": event.batch_id,
             "created_by": event.created_by, "created_at": event.created_at.isoformat()}
 
 
 def progress_events_for(db: Session, component_id: str) -> list[ProgressEvent]:
     return list(db.scalars(select(ProgressEvent).where(
-        ProgressEvent.component_id == component_id).order_by(
+        ProgressEvent.component_id == component_id,
+        ProgressEvent.voided_at.is_(None)).order_by(
         ProgressEvent.event_date, ProgressEvent.created_at, ProgressEvent.id)))
 
 
@@ -561,7 +564,7 @@ def list_segments(project_id: str, zone: str | None = None, db: Session = Depend
 def list_components(project_id: str, q: str | None = None, zone: str | None = None,
                     segment_id: str | None = None, type: Literal["pile", "beam"] | None = None,
                     group_id: str | None = None, scope: Literal["DESIGN_SCOPE", "ADDITIONAL_SCOPE"] | None = None,
-                    db: Session = Depends(get_db)):
+                    batch_id: str | None = None, db: Session = Depends(get_db)):
     require_project_member(project_id)
     query = select(StructuralComponent, Segment, StructureZone, DesignGroup).join(
         Segment, StructuralComponent.segment_id == Segment.id).join(
@@ -578,6 +581,10 @@ def list_components(project_id: str, q: str | None = None, zone: str | None = No
         query = query.where(StructuralComponent.design_group_id == group_id)
     if scope:
         query = query.where(StructuralComponent.id.in_(select(RepairScope.component_id).where(RepairScope.kind == scope)))
+    if batch_id:
+        query = query.where(
+            StructuralComponent.id.in_(batch_component_ids(project_id, batch_id))
+        )
     if q:
         code = q.strip().upper()
         query = query.where((StructuralComponent.canonical_code == code) | StructuralComponent.id.in_(

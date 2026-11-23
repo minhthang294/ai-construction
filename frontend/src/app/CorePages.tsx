@@ -4,6 +4,11 @@ import ConstructionProgressChart, { type ConstructionProgressSummary } from "./C
 import LatestDayCard from "./LatestDayCard";
 import SegmentProgressBars from "./SegmentProgressBars";
 import type { LatestDay, SegmentProgress } from "./overviewFormat";
+import ConstructionBatchSelector from "../features/site/components/ConstructionBatchSelector";
+import {
+  useConstructionBatch,
+  useConstructionBatches,
+} from "../features/site/hooks/useConstructionBatch";
 import {
   AcceptanceIcon,
   ArrowRightIcon,
@@ -409,9 +414,16 @@ export function Dashboard({
   const [segmentsFailed, setSegmentsFailed] = useState(false);
   const [issueCounts, setIssueCounts] = useState<Record<string, number> | null>(null);
   const [issuesFailed, setIssuesFailed] = useState(false);
+  const { batchId, setBatchId } = useConstructionBatch(projectId);
+  const {
+    batches,
+    loading: batchLoading,
+    error: batchError,
+  } = useConstructionBatches(projectId);
+  const batchQuery = batchId ? `?batch_id=${encodeURIComponent(batchId)}` : "";
   useEffect(() => {
     const controller = new AbortController();
-    request(`/projects/${projectId}/progress/summary`, token, { signal: controller.signal }).then(
+    request(`/projects/${projectId}/progress/summary${batchQuery}`, token, { signal: controller.signal }).then(
       (data: ConstructionProgressSummary) => {
         if (!controller.signal.aborted) setSummary(data);
       },
@@ -420,12 +432,12 @@ export function Dashboard({
       },
     );
     return () => controller.abort();
-  }, [projectId, token]);
+  }, [projectId, token, batchQuery]);
   useEffect(() => {
     const controller = new AbortController();
     Promise.allSettled([
-      request(`/projects/${projectId}/overview/latest-day`, token, { signal: controller.signal }),
-      request(`/projects/${projectId}/overview/segments`, token, { signal: controller.signal }),
+      request(`/projects/${projectId}/overview/latest-day${batchQuery}`, token, { signal: controller.signal }),
+      request(`/projects/${projectId}/overview/segments${batchQuery}`, token, { signal: controller.signal }),
       request(`/projects/${projectId}/reconciliation/issues`, token, { signal: controller.signal }),
     ]).then(([latest, segment, issues]) => {
       if (controller.signal.aborted) return;
@@ -437,7 +449,7 @@ export function Dashboard({
       else setIssuesFailed(true);
     });
     return () => controller.abort();
-  }, [projectId, token]);
+  }, [projectId, token, batchQuery]);
   useEffect(() => {
     let active = true;
     Promise.allSettled([
@@ -478,6 +490,13 @@ export function Dashboard({
             </button>
           )
         }
+      />
+      <ConstructionBatchSelector
+        batches={batches}
+        value={batchId}
+        onChange={setBatchId}
+        loading={batchLoading}
+        error={batchError}
       />
       <section className="app-card app-card-pad">
         <h2 className="text-base font-semibold text-slate-950">Việc nhanh</h2>

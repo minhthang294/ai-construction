@@ -44,9 +44,15 @@ import {
   type StageDefinition,
 } from "../lib/componentProgress";
 import { formatISODate } from "../lib/datetime";
+import BatchZoneBadge from "./BatchZoneBadge";
+import ProgressHistoryPanel from "./ProgressHistoryPanel";
 import QuickCodeEntry from "./QuickCodeEntry";
 
-type Props = { projectId: string };
+type Props = {
+  projectId: string;
+  batchId?: string | null;
+  primaryZone?: string | null;
+};
 
 const PAGE_SIZE = 20;
 
@@ -132,6 +138,9 @@ function DesignQuantityList({ groups, showWork, showCodes }: {
 
 type ProgressCardProps = {
   row: ProgressRow;
+  projectId: string;
+  primaryZone?: string | null;
+  onChanged: () => void;
   selectionMode: boolean;
   selected: boolean;
   onToggle: () => void;
@@ -140,6 +149,9 @@ type ProgressCardProps = {
 
 function ProgressCard({
   row,
+  projectId,
+  primaryZone,
+  onChanged,
   selectionMode,
   selected,
   onToggle,
@@ -197,6 +209,13 @@ function ProgressCard({
         {row.type === "pile" ? "Cọc" : "Dầm"}
         {row.design_group ? ` · ${row.design_group}` : ""}
       </p>
+      <div className="mt-1">
+        <BatchZoneBadge
+          zone={row.zone}
+          segmentNumber={row.segment_number}
+          primaryZone={primaryZone}
+        />
+      </div>
 
       <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
         <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50 p-2">
@@ -266,11 +285,16 @@ function ProgressCard({
           Ghi tiến độ
         </button>
       ) : null}
+      <ProgressHistoryPanel
+        projectId={projectId}
+        componentId={row.id}
+        onChanged={onChanged}
+      />
     </article>
   );
 }
 
-export default function ComponentProgressPanel({ projectId }: Props) {
+export default function ComponentProgressPanel({ projectId, batchId, primaryZone }: Props) {
   const [rows, setRows] = useState<ProgressRow[]>([]);
   const [definitions, setDefinitions] = useState<StageDefinition[]>([]);
   const [definitionsError, setDefinitionsError] = useState(false);
@@ -308,14 +332,14 @@ export default function ComponentProgressPanel({ projectId }: Props) {
     setBusy("load");
     setError(null);
     try {
-      setRows(await listComponentProgress(projectId));
+      setRows(await listComponentProgress(projectId, undefined, batchId));
     } catch (err) {
       setRows([]);
       setError(errorMessage(err));
     } finally {
       setBusy(null);
     }
-  }, [projectId]);
+  }, [projectId, batchId]);
 
   const loadDefinitions = useCallback(async () => {
     setDefinitionsError(false);
@@ -947,6 +971,9 @@ export default function ComponentProgressPanel({ projectId }: Props) {
               <ProgressCard
                 key={row.id}
                 row={row}
+                projectId={projectId}
+                primaryZone={primaryZone}
+                onChanged={() => void load()}
                 selectionMode={selectionMode}
                 selected={selectedSet.has(row.id)}
                 onToggle={() => toggleSelected(row.id)}

@@ -16,6 +16,7 @@ import {
 } from "../lib/componentProgress";
 import type { ComponentSegment } from "../lib/componentImport";
 import DrawingMapPanel from "./DrawingMapPanel";
+import BatchZoneBadge from "./BatchZoneBadge";
 import QuickCodeEntry from "./QuickCodeEntry";
 import { formatISODate } from "../lib/datetime";
 import {
@@ -46,6 +47,8 @@ import {
 
 type Props = {
   projectId: string;
+  batchId?: string | null;
+  primaryZone?: string | null;
   initialComponentId?: string | null;
   initialStageDefinitionId?: string | null;
   onInitialComponentHandled?: () => void;
@@ -84,7 +87,7 @@ function StatusChip({ status }: { status: string }) {
   );
 }
 
-export default function DailyProgressPanel({ projectId, initialComponentId, initialStageDefinitionId, onInitialComponentHandled }: Props) {
+export default function DailyProgressPanel({ projectId, batchId, primaryZone, initialComponentId, initialStageDefinitionId, onInitialComponentHandled }: Props) {
   const [rows, setRows] = useState<ProgressRow[]>([]);
   const [rowsLoaded, setRowsLoaded] = useState(false);
   const [definitions, setDefinitions] = useState<StageDefinition[]>([]);
@@ -114,7 +117,7 @@ export default function DailyProgressPanel({ projectId, initialComponentId, init
     setError(null);
     try {
       const [progressRows, stageDefinitions, segmentRows] = await Promise.all([
-        listComponentProgress(projectId),
+        listComponentProgress(projectId, undefined, batchId),
         listStageDefinitions(projectId),
         listSegments(projectId),
       ]);
@@ -128,7 +131,7 @@ export default function DailyProgressPanel({ projectId, initialComponentId, init
     } finally {
       setBusy(null);
     }
-  }, [projectId]);
+  }, [projectId, batchId]);
 
   useEffect(() => {
     void load();
@@ -618,6 +621,7 @@ export default function DailyProgressPanel({ projectId, initialComponentId, init
                 {mapLineIndex === index ? (
                   <DrawingMapPanel
                     projectId={projectId}
+                    batchId={batchId}
                     selection={{
                       selectedIds: line.selected_ids,
                       selectableIds: eligible.map((row) => row.id),
@@ -704,6 +708,13 @@ export default function DailyProgressPanel({ projectId, initialComponentId, init
                                     {row.design_group
                                       ? ` · ${row.design_group}`
                                       : ""}
+                                  </span>
+                                  <span className="mt-1 block">
+                                    <BatchZoneBadge
+                                      zone={row.zone}
+                                      segmentNumber={row.segment_number}
+                                      primaryZone={primaryZone}
+                                    />
                                   </span>
                                   <span className="mt-1 flex flex-wrap items-center gap-1 text-xs text-slate-700">
                                     <StatusChip status={row.construction_status} />

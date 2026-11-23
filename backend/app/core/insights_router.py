@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .access import require_project_member
+from .batch_scope import batch_component_ids
 from .component_models import (ComponentAlias, ProgressEvent, RepairScope, Segment,
                                StructuralComponent, StructureZone)
 from .database import get_db
@@ -26,18 +27,23 @@ ISSUE_TYPES = ("ACCEPTANCE_WITHOUT_PROGRESS", "WORK_WITHOUT_ACCEPTANCE", "MISSIN
                "UNVERIFIED_COMPONENT", "DUPLICATE_OR_AMBIGUOUS_CODE", "ACCEPTANCE_BEFORE_PROGRESS")
 
 
-def _components(db: Session, project_id: str):
-    return db.execute(select(StructuralComponent, Segment, StructureZone).join(
+def _components(db: Session, project_id: str, batch_id: str | None = None):
+    query = select(StructuralComponent, Segment, StructureZone).join(
         Segment, StructuralComponent.segment_id == Segment.id).join(
         StructureZone, Segment.zone_id == StructureZone.id).where(
-        StructuralComponent.project_id == project_id, StructureZone.project_id == project_id)).all()
+        StructuralComponent.project_id == project_id, StructureZone.project_id == project_id)
+    if batch_id:
+        query = query.where(
+            StructuralComponent.id.in_(batch_component_ids(project_id, batch_id)))
+    return db.execute(query).all()
 
 
 def _latest_events(db: Session, project_id: str) -> dict[str, ProgressEvent]:
     latest: dict[str, ProgressEvent] = {}
     for event in db.scalars(select(ProgressEvent).join(
             StructuralComponent, ProgressEvent.component_id == StructuralComponent.id).where(
-            StructuralComponent.project_id == project_id).order_by(
+            StructuralComponent.project_id == project_id,
+            ProgressEvent.voided_at.is_(None)).order_by(
             ProgressEvent.created_at, ProgressEvent.id)):
         latest[event.component_id] = event
     return latest
@@ -48,9 +54,10 @@ def _ratio(count: int, total: int) -> float:
 
 
 @router.get("/projects/{project_id}/progress/summary")
-def progress_summary(project_id: str, db: Session = Depends(get_db)):
+def progress_summary(project_id: str, batch_id: str | None = None,
+                     db: Session = Depends(get_db)):
     require_project_member(project_id)
-    rows = _components(db, project_id)
+    rows = _components(db, project_id, batch_id)
     verified = {component.id for component, _, _ in rows if component.verification == "VERIFIED"}
     latest = _latest_events(db, project_id)
     statuses = Counter()

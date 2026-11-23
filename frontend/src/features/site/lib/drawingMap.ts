@@ -288,9 +288,11 @@ async function readError(res: Response): Promise<string> {
 
 export async function fetchDrawingMap(
   projectId: string,
+  batchId?: string | null,
   signal?: AbortSignal,
 ): Promise<DrawingMap> {
-  const res = await apiFetch(`/projects/${projectId}/drawing-map`, { signal });
+  const suffix = batchId ? `?batch_id=${encodeURIComponent(batchId)}` : "";
+  const res = await apiFetch(`/projects/${projectId}/drawing-map${suffix}`, { signal });
   if (!res.ok) throw new ApiError(await readError(res), res.status);
   return res.json();
 }

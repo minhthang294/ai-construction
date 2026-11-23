@@ -24,6 +24,9 @@ Các bảng nghiệp vụ dùng khóa UUID và phạm vi `project_id` khi áp d�
 | AcceptanceNumberSequence | project_id, kind pyc/bbnt, prefix, start/next, width, reset policy, period key; unique project+kind |
 | AcceptanceParticipantProfile | project_id, full_name, organization, position, role, active |
 | GeneratedDocument | project_id, kind, source_id, path, sha256, created_by, generated_at |
+| ConstructionBatch | project_id, name, note nullable, created_by/at, archived; nhóm cấu kiện thi công cùng đợt, **không đổi** khu/phân đoạn thiết kế |
+| ConstructionBatchComponent | batch_id + component_id (khóa chính đôi, unique), added_by/at, reason nullable |
+| ProgressEvent | component_id, component_stage_id, event_date, status, quantity/unit/note/evidence; batch_id nullable (đợt đã ghi), voided_at/by/reason nullable. Sự kiện đã void bị bỏ qua ở mọi truy vấn đọc |
 | AuditLog | project_id, actor_id, action, entity, entity_id, detail JSON, timestamp |
 
 Lưu file và khóa ngoại riêng; không sao chép nội dung ảnh/PDF vào DB. Chỉ một migration chain ở `backend/alembic` do Codex tích hợp.

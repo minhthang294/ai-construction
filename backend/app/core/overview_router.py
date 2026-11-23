@@ -16,6 +16,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .access import require_project_member
+from .batch_scope import batch_component_ids
 from .component_models import (
     ComponentStage,
     ProgressEvent,
@@ -53,8 +54,8 @@ def _ratio(count: int, total: int) -> float:
     return round(count / total, 4) if total else 0.0
 
 
-def _components(db: Session, project_id: str):
-    return db.execute(
+def _components(db: Session, project_id: str, batch_id: str | None = None):
+    query = (
         select(StructuralComponent, Segment, StructureZone)
         .join(Segment, StructuralComponent.segment_id == Segment.id)
         .join(StructureZone, Segment.zone_id == StructureZone.id)
@@ -62,7 +63,12 @@ def _components(db: Session, project_id: str):
             StructuralComponent.project_id == project_id,
             StructureZone.project_id == project_id,
         )
-    ).all()
+    )
+    if batch_id:
+        query = query.where(
+            StructuralComponent.id.in_(batch_component_ids(project_id, batch_id))
+        )
+    return db.execute(query).all()
 
 
 def _latest_events(db: Session, project_id: str) -> dict[str, ProgressEvent]:
@@ -73,7 +79,10 @@ def _latest_events(db: Session, project_id: str) -> dict[str, ProgressEvent]:
             StructuralComponent,
             ProgressEvent.component_id == StructuralComponent.id,
         )
-        .where(StructuralComponent.project_id == project_id)
+        .where(
+            StructuralComponent.project_id == project_id,
+            ProgressEvent.voided_at.is_(None),
+        )
         .order_by(ProgressEvent.created_at, ProgressEvent.id)
     ):
         latest[event.component_id] = event
@@ -184,9 +193,9 @@ def _acceptance_today(db: Session, project_id: str, day: date) -> list[dict]:
     ]
 
 
-def _works_for_day(db: Session, project_id: str, day: date) -> list[dict]:
+def _works_for_day(db: Session, project_id: str, day: date, batch_id: str | None = None) -> list[dict]:
     """Group the latest progress event per component+stage on ``day``."""
-    rows = db.execute(
+    query = (
         select(
             ProgressEvent,
             StructuralComponent,
@@ -203,9 +212,15 @@ def _works_for_day(db: Session, project_id: str, day: date) -> list[dict]:
             StructuralComponent.project_id == project_id,
             StructureZone.project_id == project_id,
             ProgressEvent.event_date == day,
+            ProgressEvent.voided_at.is_(None),
         )
         .order_by(ProgressEvent.created_at, ProgressEvent.id)
-    ).all()
+    )
+    if batch_id:
+        query = query.where(
+            StructuralComponent.id.in_(batch_component_ids(project_id, batch_id))
+        )
+    rows = db.execute(query).all()
 
     latest: dict[tuple[str, str], tuple] = {}
     for row in rows:
@@ -243,18 +258,27 @@ def _works_for_day(db: Session, project_id: str, day: date) -> list[dict]:
 
 
 @router.get("/projects/{project_id}/overview/latest-day")
-def overview_latest_day(project_id: str, db: Session = Depends(get_db)):
+def overview_latest_day(project_id: str, batch_id: str | None = None,
+                        db: Session = Depends(get_db)):
     require_project_member(project_id)
     from app.site.models import DailyReport
 
-    progress_day = db.scalar(
+    progress_query = (
         select(func.max(ProgressEvent.event_date))
         .join(
             StructuralComponent,
             ProgressEvent.component_id == StructuralComponent.id,
         )
-        .where(StructuralComponent.project_id == project_id)
+        .where(
+            StructuralComponent.project_id == project_id,
+            ProgressEvent.voided_at.is_(None),
+        )
     )
+    if batch_id:
+        progress_query = progress_query.where(
+            StructuralComponent.id.in_(batch_component_ids(project_id, batch_id))
+        )
+    progress_day = db.scalar(progress_query)
 
     report_day = db.scalar(
         select(func.max(DailyReport.report_date)).where(
@@ -274,7 +298,7 @@ def overview_latest_day(project_id: str, db: Session = Depends(get_db)):
     )
     return {
         "date": day.isoformat(),
-        "works": _works_for_day(db, project_id, day),
+        "works": _works_for_day(db, project_id, day, batch_id),
         "manpower_total": _manpower_total(db, report.id) if report else None,
         "photo_count": _photo_count(db, project_id, day),
         "daily_report_exists": report is not None,
@@ -283,10 +307,11 @@ def overview_latest_day(project_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/projects/{project_id}/overview/segments")
-def overview_segments(project_id: str, db: Session = Depends(get_db)):
+def overview_segments(project_id: str, batch_id: str | None = None,
+                      db: Session = Depends(get_db)):
     require_project_member(project_id)
 
-    rows = _components(db, project_id)
+    rows = _components(db, project_id, batch_id)
     verified = {
         component.id for component, _, _ in rows if component.verification == "VERIFIED"
     }
