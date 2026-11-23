@@ -22,6 +22,7 @@ from app.engineering_ai.dependencies import (
 from app.engineering_ai.models import Base, DocumentPage, SourceDocument
 from app.engineering_ai.providers import ExtractiveProvider, ProviderAnswer
 from app.engineering_ai.router import router
+import app.site.models  # noqa: F401 - registers component_progress_batches FK target
 
 
 class MockAnswerProvider:

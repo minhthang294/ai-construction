@@ -6,7 +6,7 @@ returned; clients receive permission-checked URLs instead.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -167,6 +167,56 @@ class QuestionSuggestionOut(BaseModel):
     prompt: str
     mode: Literal["send", "fill"] = "send"
     badge: Optional[Literal["verified", "proposed", "navigation", "caution"]] = None
+
+
+class ProgressParseRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=12000)
+    default_date: Optional[date] = None
+    batch_id: Optional[str] = None
+
+
+class StageCandidateOut(BaseModel):
+    stage_definition_id: str
+    name: str
+    component_type: str
+
+
+class ProgressParseItemOut(BaseModel):
+    raw: str
+    code: str
+    component_id: Optional[str] = None
+    zone: Optional[str] = None
+    segment: Optional[int] = None
+    status_guess: Literal["COMPLETED", "IN_PROGRESS"] = "COMPLETED"
+
+
+class ProgressParseLineOut(BaseModel):
+    work_text: str
+    stage_candidates: List[StageCandidateOut] = Field(default_factory=list)
+    component_type: str
+    items: List[ProgressParseItemOut] = Field(default_factory=list)
+
+
+class ProgressParseQuestionOptionOut(BaseModel):
+    label_vi: str
+    value: str
+
+
+class ProgressParseQuestionOut(BaseModel):
+    id: str
+    kind: str
+    message_vi: str
+    options: List[ProgressParseQuestionOptionOut] = Field(default_factory=list)
+
+
+class ProgressParseResponse(BaseModel):
+    event_date: Optional[date] = None
+    date_source: Optional[Literal["text", "default_date"]] = None
+    batch_id: Optional[str] = None
+    lines: List[ProgressParseLineOut] = Field(default_factory=list)
+    questions: List[ProgressParseQuestionOut] = Field(default_factory=list)
+    unknown_codes: List[str] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
 
 
 class ConversationMessageOut(BaseModel):

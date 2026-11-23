@@ -65,7 +65,12 @@ def _load_project(db: Session, project_id: str):
         db.scalars(select(ComponentStage).where(ComponentStage.component_id.in_(ids))).all()
     )
     events = list(
-        db.scalars(select(ProgressEvent).where(ProgressEvent.component_id.in_(ids))).all()
+        db.scalars(
+            select(ProgressEvent).where(
+                ProgressEvent.component_id.in_(ids),
+                ProgressEvent.voided_at.is_(None),
+            )
+        ).all()
     )
     return components, zones, segments, definitions, groups, stages, events
 

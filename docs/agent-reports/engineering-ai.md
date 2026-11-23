@@ -1,5 +1,135 @@
 # Engineering AI Agent Report
 
+## 2026-11-23 — follow-up: voided events, batch-aware parse, test shim removed
+
+- Voided progress events (`component_progress_events.voided_at`) are now excluded
+  from every engineering-AI read:
+  `database_chat._related_rows`/aggregate count, `suggestions._load_project`, and
+  `progress_parse` event load. Chat daily/latest/pending/stage answers,
+  suggestion chips and the parser's “earlier COMPLETED” question therefore
+  ignore corrections.
+- Tests added: a voided COMPLETED does not move chat's “latest day” or complete a
+  pending stage; a voided future event does not change suggestion dates; a voided
+  earlier COMPLETED does not generate a parse `completed_earlier` question.
+- The temporary conftest stub for `component_progress_batches` is removed. The
+  engineering test app now imports `app.site.models` so the core FK target is
+  registered; tests pass without the shim.
+- `progress-parse` accepts optional `batch_id` and echoes it. Components in that
+  construction batch (`component_progress_events` batch semantics; read from
+  `construction_batch_components`) are exempt from the outside-zone/segment
+  question, while non-batch components still raise “Thi công cùng đợt / Bỏ qua”.
+  A batch id from another project adds a warning and grants no exemption.
+  Tested by putting `A-B-153` in a Bunke batch: it is not flagged, `F-66-67` and
+  `B-D-153` still are, and `batch_id` is returned.
+
+Files: `backend/app/engineering_ai/{database_chat.py, suggestions.py,
+progress_parse.py, router.py, schemas.py}`,
+`backend/tests/engineering_ai/{conftest.py, test_database_chat.py,
+test_progress_parse.py}`, `docs/API_CONTRACTS.md`.
+
+Verification (temp DB/storage):
+```bash
+cd backend
+DATABASE_URL=sqlite:///<tmp>/app.db SITE_REPORT_STORAGE=<tmp>/site \
+ENGINEERING_AI_STORAGE=<tmp>/engineering ACCEPTANCE_STORAGE=<tmp>/acceptance \
+../.venv/Scripts/python -m pytest tests/engineering_ai -q
+# 120 passed
+
+../.venv/Scripts/python -m pytest tests -q
+# 354 passed, 6 skipped, 0 failed
+```
+
+Unresolved: batch membership is only used to waive the outside-zone question; it
+is not written into the parse items (the UI still sends the chosen batch to the
+existing daily endpoint). `voided_at` filtering assumes callers never need the
+correction history; reporting corrections would need a separate read.
+
+## 2026-11-23 — wave 3a: deterministic Zalo progress parser (read-only)
+
+New `POST /api/v1/projects/{p}/ai/progress-parse` (`progress_parse.py`) turns a
+pasted field/Zalo message into a reviewed-entry draft. It only selects rows; it
+never calls `add`/`commit` or the answer provider.
+
+Request: `{text, default_date?}`. Response: `{event_date, date_source, lines[
+{work_text, stage_candidates[{stage_definition_id,name,component_type}],
+component_type, items[{raw, code, component_id|null, zone, segment,
+status_guess}]}], questions[{id, kind, message_vi, options[{label_vi,value}]}],
+unknown_codes, warnings}`.
+
+Deterministic rules implemented:
+- Dates `22/11`, `ngày 22/11`, optional year; missing year uses the year of
+  `default_date` (or today), otherwise `default_date` and `date_source`.
+- Pile shorthand: a bare number reuses the last letter prefix per type
+  (`I49, 51,55`, `G50,65,65`, prefix also carries across consecutive lines).
+- Lines starting with `Dầm` switch to beams; beam shorthand `f66-67` ->
+  `F-66-67`, `a-b153` -> `A-B-153`, `b-d153` -> `B-D-153`; direct canonical
+  beam codes are accepted. Matching is case-insensitive against
+  `canonical_code`, `raw_code` and `component_aliases`, project-scoped.
+- Work phrase (`Cọc đục`, `đục bê tông`, `đục om vỡ`) is fuzzy-matched to stage
+  definitions of the matched component type.
+- Questions instead of guesses: duplicate code (dedupe/replace), previous
+  COMPLETED on an earlier date (add / correct previous / skip), more than one
+  candidate stage (list stage options), components outside the majority
+  zone/segment of the message (include/skip), unknown codes, and `đang`
+  status confirmation. Default status is COMPLETED for past-tense work.
+- Expected zone/segment is inferred from the majority of resolved pile items;
+  no zone/segment is guessed when no pile resolves.
+- No LLM fallback was wired (optional in the task): unreadable/unmatched input
+  produces warnings (`cần chọn tay`, `Không đọc được mã`, missing date) and no
+  invented codes.
+
+Golden test (`test_progress_parse.py`) uses the exact 9-line message with seeded
+PD2 Cầu chính piles (26 unique) and 3 Bunke beams. It asserts the date
+`2026-11-22`, unique component ids 26/3, all statuses COMPLETED, and exactly the
+four question kinds `duplicate_code` (G65), `completed_earlier` (F-66-67,
+20/11), `multiple_stage` (3 beam chipping stages) and `outside_scope` (Bunke).
+Further tests cover no DB writes, project scope + alias matching, unknown codes,
+`đang` status question, `default_date`/missing date, and bare-date chat.
+
+`database_chat.py`: a date token alone now counts as a progress question, so
+`Ngày 21/11 làm gì?` answers daily progress without requiring `PD2` or the word
+`tiến độ`. Existing date/segment, latest-day, pending-stage and current-stage
+answers are unchanged.
+
+Files: `backend/app/engineering_ai/{progress_parse.py (new),
+database_chat.py, router.py, schemas.py}`,
+`backend/tests/engineering_ai/{conftest.py, test_progress_parse.py (new),
+test_database_chat.py}`, `docs/API_CONTRACTS.md` (two engineering rows).
+
+Conftest note (resolved in the follow-up section above): the engineering test
+app imports `app.site.models` so the `component_progress_events.batch_id` FK
+target (`component_progress_batches`) is registered; there is no test-only stub
+anymore.
+
+Verification at the time:
+```bash
+cd backend
+DATABASE_URL=sqlite:///<tmp>/app.db SITE_REPORT_STORAGE=<tmp>/site \
+ENGINEERING_AI_STORAGE=<tmp>/engineering ACCEPTANCE_STORAGE=<tmp>/acceptance \
+../.venv/Scripts/python -m pytest tests/engineering_ai -q
+# 115 passed
+
+../.venv/Scripts/python -m pytest tests -q
+# 346 passed, 6 skipped, 2 failed — both outside this module and from the other
+# agent's then in-progress core/site edit (drawing-map Depends bug and a
+# progress-batches undo route without the editor guard). Both are fixed now:
+# the follow-up run is 354 passed / 0 failed.
+```
+
+Frontend: no files changed in this wave; the endpoint is ready for the typed
+client when the entry-review UI is added.
+
+Unresolved:
+- Question `options[].value` values are stable protocol strings
+  (`dedupe`, `replace_code`, `add_completed`, `previous_was_in_progress`,
+  `skip`, `include`, stage ids, status values); the UI must map labels to the
+  existing `progress/daily-preview` and `progress/daily` payloads.
+- Outside-scope detection uses design zone/segment only; the new construction
+  batches (other agent) are not consulted.
+- One date is parsed for the whole message; mixed-date messages need splitting.
+- No LLM fallback/no provider call, by design; provider-backed review of
+  unreadable lines remains future work.
+
 ## 2026-11-23 — wave 2: data-driven chat UX (suggestions, compact citations, mobile composer)
 
 Chat (Hỏi AI) is now mobile-first and suggestion-driven from the project's real

@@ -492,7 +492,11 @@ def _row_candidate(table: str, row, label: str, verified: bool) -> _Candidate:
 def _related_rows(db: Session, model, ids: List[str]):
     if not ids:
         return []
-    return list(db.scalars(select(model).where(model.component_id.in_(ids))).all())
+    query = select(model).where(model.component_id.in_(ids))
+    if model is ProgressEvent:
+        # Voided events are corrections and must never feed answers.
+        query = query.where(ProgressEvent.voided_at.is_(None))
+    return list(db.scalars(query).all())
 
 
 def _component_detail(
@@ -631,7 +635,10 @@ def _aggregate_candidates(
     progress_count = db.scalar(
         select(func.count())
         .select_from(ProgressEvent)
-        .where(ProgressEvent.component_id.in_([component.id for component in components]))
+        .where(
+            ProgressEvent.component_id.in_([component.id for component in components]),
+            ProgressEvent.voided_at.is_(None),
+        )
     ) or 0
     segments = db.scalar(
         select(func.count())
@@ -729,9 +736,7 @@ def is_progress_question(message: str) -> bool:
     folded = fold_text(message)
     if "tien do" in folded or "buoc nao" in folded or "dang o buoc" in folded:
         return True
-    if _DATE_RE.search(folded) and (
-        _SEGMENT_RE.search(folded) or "thi cong" in folded
-    ):
+    if _DATE_RE.search(folded):
         return True
     return "chua" in folded and any(hint in folded for hint in _STAGE_HINTS)
 

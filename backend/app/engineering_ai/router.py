@@ -34,9 +34,12 @@ from .schemas import (
     PageExtractionIn,
     PageExtractionOut,
     PageExtractionVerifyIn,
+    ProgressParseRequest,
+    ProgressParseResponse,
     QuestionSuggestionOut,
 )
 from .rate_limit import RateLimitExceeded, check_rate_limit
+from .progress_parse import progress_parse
 from .service import (
     DocumentValidationError,
     PageExtractionConflict,
@@ -333,6 +336,23 @@ def verify_page_extraction_route(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except DocumentValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post(
+    "/projects/{project_id}/ai/progress-parse",
+    response_model=ProgressParseResponse,
+)
+def progress_parse_route(
+    project_id: str,
+    payload: ProgressParseRequest,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+    _access=Depends(project_access),
+):
+    _guard_rate(project_id, user, "progress_parse")
+    return progress_parse(
+        db, project_id, payload.text, payload.default_date, payload.batch_id
+    )
 
 
 @router.get(

@@ -1,6 +1,6 @@
 """Database chat path: whole-token codes, no full-project dump, citations."""
 
-from datetime import date
+from datetime import date, datetime, timezone
 
 from app.core.component_models import (
     ComponentAlias,
@@ -14,6 +14,10 @@ from app.core.component_models import (
 )
 from app.engineering_ai.database_chat import _matched_components, answer_structured_question
 from app.engineering_ai.providers import ExtractiveProvider
+
+
+def _utc_now():
+    return datetime.now(timezone.utc)
 
 
 def _seed(db, count=30):
@@ -281,6 +285,97 @@ def test_chat_answers_bare_date_and_segment_question(client, session_factory):
     assert body["no_source"] is False
     assert "21/11/2026" in body["answer"]
     assert "F68" in body["answer"]
+
+
+def test_chat_answers_date_question_without_segment(client, session_factory):
+    with session_factory() as db:
+        _seed_progress(db)
+
+    body = client.post(
+        "/api/v1/projects/p1/ai/chat",
+        json={"message": "Ngày 21/11 làm gì?"},
+    ).json()
+    assert body["no_source"] is False
+    assert "21/11/2026" in body["answer"]
+    assert "F67" in body["answer"]
+
+
+def test_chat_ignores_voided_progress_events(client, session_factory):
+    with session_factory() as db:
+        _seed_progress(db)
+        from sqlalchemy import select
+
+        from app.core.component_models import ComponentStage, ProgressEvent as Event
+
+        f69 = db.scalar(
+            select(StructuralComponent).where(
+                StructuralComponent.project_id == "p1",
+                StructuralComponent.canonical_code == "F69",
+            )
+        )
+        stage = db.scalar(
+            select(ComponentStage).where(ComponentStage.component_id == f69.id)
+        )
+        db.add(
+            Event(
+                component_id=f69.id,
+                component_stage_id=stage.id,
+                event_date=date(2026, 11, 22),
+                status="COMPLETED",
+                voided_at=_utc_now(),
+                void_reason="Nhập trùng",
+            )
+        )
+        db.commit()
+
+    latest = client.post(
+        "/api/v1/projects/p1/ai/chat",
+        json={"message": "Tiến độ ngày gần nhất?"},
+    ).json()
+    assert latest["no_source"] is False
+    assert "21/11/2026" in latest["answer"]
+    assert "F69" not in latest["answer"]
+    assert "22/11/2026" not in latest["answer"]
+
+    pending = client.post(
+        "/api/v1/projects/p1/ai/chat",
+        json={"message": "PD2 còn bao nhiêu cọc chưa đục bê tông?"},
+    ).json()
+    assert "2/3 cọc" in pending["answer"]
+
+
+def test_suggestions_ignore_voided_progress_and_keep_latest_date(client, session_factory):
+    with session_factory() as db:
+        _seed_progress(db)
+        from sqlalchemy import select
+
+        from app.core.component_models import ComponentStage, ProgressEvent as Event
+
+        f68 = db.scalar(
+            select(StructuralComponent).where(
+                StructuralComponent.project_id == "p1",
+                StructuralComponent.canonical_code == "F68",
+            )
+        )
+        stage = db.scalar(
+            select(ComponentStage).where(ComponentStage.component_id == f68.id)
+        )
+        db.add(
+            Event(
+                component_id=f68.id,
+                component_stage_id=stage.id,
+                event_date=date(2026, 12, 5),
+                status="IN_PROGRESS",
+                voided_at=_utc_now(),
+            )
+        )
+        db.commit()
+
+    chips = client.get("/api/v1/projects/p1/ai/question-suggestions").json()
+    prompts = " | ".join(chip["prompt"] for chip in chips)
+    assert "21/11" in prompts
+    assert "05/12" not in prompts and "5/12" not in prompts
+
 
 
 def test_chat_answers_current_component_stage(client, session_factory):
