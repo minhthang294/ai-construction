@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import PageHeader from "./PageHeader";
 import ConstructionProgressChart, { type ConstructionProgressSummary } from "./ConstructionProgressChart";
+import LatestDayCard from "./LatestDayCard";
+import SegmentProgressBars from "./SegmentProgressBars";
+import type { LatestDay, SegmentProgress } from "./overviewFormat";
 import {
   AcceptanceIcon,
   ArrowRightIcon,
@@ -396,12 +399,16 @@ export function Dashboard({
   project?: Project;
   onNavigate?: (page: string) => void;
 }) {
-  const [items, setItems] = useState<WorkItem[]>([]);
   const [photos, setPhotos] = useState<{ id: string; upload_time: string }[]>([]);
   const [report, setReport] = useState<{ report_date: string; manpower: { count: number | null }[] } | null>(null);
-  const [error, setError] = useState("");
   const [summary, setSummary] = useState<ConstructionProgressSummary | null>(null);
   const [summaryFailed, setSummaryFailed] = useState(false);
+  const [latestDay, setLatestDay] = useState<LatestDay | null>(null);
+  const [latestFailed, setLatestFailed] = useState(false);
+  const [segments, setSegments] = useState<SegmentProgress[] | null>(null);
+  const [segmentsFailed, setSegmentsFailed] = useState(false);
+  const [issueCounts, setIssueCounts] = useState<Record<string, number> | null>(null);
+  const [issuesFailed, setIssuesFailed] = useState(false);
   useEffect(() => {
     const controller = new AbortController();
     request(`/projects/${projectId}/progress/summary`, token, { signal: controller.signal }).then(
@@ -415,35 +422,48 @@ export function Dashboard({
     return () => controller.abort();
   }, [projectId, token]);
   useEffect(() => {
+    const controller = new AbortController();
+    Promise.allSettled([
+      request(`/projects/${projectId}/overview/latest-day`, token, { signal: controller.signal }),
+      request(`/projects/${projectId}/overview/segments`, token, { signal: controller.signal }),
+      request(`/projects/${projectId}/reconciliation/issues`, token, { signal: controller.signal }),
+    ]).then(([latest, segment, issues]) => {
+      if (controller.signal.aborted) return;
+      if (latest.status === "fulfilled") setLatestDay(latest.value);
+      else setLatestFailed(true);
+      if (segment.status === "fulfilled") setSegments(segment.value.segments);
+      else setSegmentsFailed(true);
+      if (issues.status === "fulfilled") setIssueCounts(issues.value.counts);
+      else setIssuesFailed(true);
+    });
+    return () => controller.abort();
+  }, [projectId, token]);
+  useEffect(() => {
     let active = true;
     Promise.allSettled([
-      request(`/projects/${projectId}/work-items`, token),
       request(`/projects/${projectId}/photos`, token),
       request(`/projects/${projectId}/daily-reports/${date}`, token),
-    ]).then(([work, photo, daily]) => {
+    ]).then(([photo, daily]) => {
       if (!active) return;
-      if (work.status === "fulfilled") setItems(work.value);
-      else setError(work.reason.message);
       if (photo.status === "fulfilled") setPhotos(photo.value);
       if (daily.status === "fulfilled") setReport(daily.value);
       else setReport(null);
     });
     return () => { active = false; };
   }, [projectId, token, date]);
-  const count = (status: string) => items.filter((item) => item.status === status).length;
-  const total = items.length;
   const manpower = report ? report.manpower.reduce((sum, entry) => sum + (entry.count ?? 0), 0) : 0;
+  const totalIssues = issueCounts ? Object.values(issueCounts).reduce((sum, value) => sum + value, 0) : null;
   const cards = [
-    ["Tổng hạng mục", total, "Toàn bộ danh mục", "#405e9b"],
-    ["Hạng mục đang thi công", count("in_progress"), "Cần theo dõi hôm nay", "#0369a1"],
-    ["Hạng mục chờ nghiệm thu", count("pending_acceptance"), "Cần lập PYC/BBNT", "#b45309"],
-    ["Hạng mục cần khắc phục", count("rectify"), "Ưu tiên xử lý", "#b91c1c"],
+    ["Đang thi công", summary ? summary.construction.in_progress : "—", "Cấu kiện đang thi công", "#0369a1"],
+    ["Hoàn thành chưa nghiệm thu", issueCounts ? issueCounts.WORK_WITHOUT_ACCEPTANCE ?? 0 : "—", "Thi công xong, chưa có BBNT", "#b45309"],
+    ["Đã nghiệm thu", summary ? summary.acceptance?.confirmed ?? 0 : "—", "BBNT đã xác nhận", "#15803d"],
+    ["Cần xử lý", totalIssues ?? "—", "Từ đối soát dữ liệu", "#b91c1c"],
   ] as const;
   const quickActions = [
     { label: "Cập nhật tiến độ thi công", page: "components", icon: WorkIcon, description: "Ghi tiến độ theo mã cọc, dầm" },
     { label: "Báo cáo hiện trường", page: "daily-report", icon: CameraIcon, description: "Nhân lực, ảnh, nhật ký" },
     { label: "Lập phiếu nghiệm thu", page: "acceptance", icon: AcceptanceIcon, description: "PYC và BBNT" },
-    { label: "Hỏi AI hồ sơ", page: "documents", icon: DocumentsIcon, description: "Tra cứu bản vẽ, thuyết minh" },
+    { label: "Hỏi đáp AI", page: "documents", icon: DocumentsIcon, description: "Hỏi nhanh về công trình" },
   ];
   return (
     <div className="space-y-6">
@@ -459,7 +479,6 @@ export function Dashboard({
           )
         }
       />
-      {error && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</p>}
       <section className="app-card app-card-pad">
         <h2 className="text-base font-semibold text-slate-950">Việc nhanh</h2>
         <div className="mt-3 grid gap-2 min-[375px]:grid-cols-2 xl:grid-cols-4">
@@ -482,6 +501,11 @@ export function Dashboard({
           ))}
         </div>
       </section>
+      <LatestDayCard
+        day={latestDay}
+        failed={latestFailed}
+        onOpenSite={onNavigate ? () => onNavigate("daily-report") : undefined}
+      />
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(20rem,.75fr)]">
         <section className="app-card app-card-pad">
           <h2 className="text-base font-semibold text-slate-950">Tiến độ thi công</h2>
@@ -518,6 +542,21 @@ export function Dashboard({
           </section>
         </div>
       </div>
+      <section className="app-card app-card-pad">
+        <h2 className="text-base font-semibold text-slate-950">Tiến độ theo đoạn</h2>
+        {segmentsFailed ? (
+          <p role="alert" className="mt-3 text-sm text-red-800">Chưa tải được tiến độ theo đoạn.</p>
+        ) : segments ? (
+          <SegmentProgressBars segments={segments} />
+        ) : (
+          <p role="status" className="mt-3 text-sm text-slate-600">Đang tải tiến độ theo đoạn…</p>
+        )}
+      </section>
+      {issuesFailed && (
+        <p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          Chưa tải được số đối soát; hai thẻ “Hoàn thành chưa nghiệm thu” và “Cần xử lý” đang tạm trống.
+        </p>
+      )}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {cards.map(([label, value, hint, accent]) => (
           <div key={label} className="app-kpi" style={{ "--kpi-accent": accent } as CSSProperties}>

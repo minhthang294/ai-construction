@@ -7,6 +7,7 @@ export type ConstructionProgressSummary = {
     blocked: number;
     completion_ratio: number;
   };
+  acceptance?: { confirmed: number; completion_ratio: number };
 };
 
 const statusStyles = [

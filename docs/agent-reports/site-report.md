@@ -879,3 +879,69 @@ Kiểm tra thủ công sau khi Codex mount router + app shell:
 15. Lưu work log chọn theo tên (không có `work_item_id`), xuất Zalo/PDF/DOCX/ZIP: dòng công việc có dạng `Tên tại Vị trí`; báo cáo cũ có `work_item_id` vẫn hiển thị đúng tên danh mục.
 16. Chọn một ngày chưa có báo cáo (GET daily-report trả 404) khi đang online: dropdown “Công việc” trong khối “Công việc thực hiện hôm nay” phải có danh mục; form nhân lực hiện được organizations/mẫu nhân lực. Thử chặn riêng một API danh mục: hai danh mục còn lại vẫn hiển thị. Sau đó lưu báo cáo và kiểm tra hành vi lưu/queue không đổi.
 17. Ngắt mạng, mở lại đúng ngày đã có cache: work items/ảnh lấy từ cache như trước; ngày không có cache phải hiện thông báo và không giữ danh mục của ngày khác.
+
+## Cập nhật Tổng quan (Overview) — 2026-11-23
+
+Phạm vi: chỉ Dashboard Tổng quan và hai API đọc mới; không sửa `App.tsx`, điều hướng, migration, `data/` hay `backend/app/engineering_ai`.
+
+### API mới (dưới `/api/v1`)
+
+| Method | Route | Quyền |
+| --- | --- | --- |
+| GET | `/projects/{p}/overview/latest-day` | project member |
+| GET | `/projects/{p}/overview/segments` | project member |
+
+- `latest-day`: lấy ngày lớn nhất giữa `component_progress_events.event_date` và `daily_reports.report_date` của đúng project. Trả `{date, works[], manpower_total, photo_count, daily_report_exists, acceptance_today[]}`. `works[]` gom sự kiện mới nhất theo cặp cấu kiện + định nghĩa bước trong ngày, khóa nhóm gồm `stage_name, zone, segment, component_type, status`; `codes[]` là mã chuẩn đã sắp xếp. `manpower_total` giữ `null` khi chưa có báo cáo/không có số đã nhập (0 vẫn là 0). `photo_count` đếm ảnh có `upload_time` rơi vào ngày địa phương. `acceptance_today` chỉ lấy `AcceptanceRecord.status = confirmed` có `confirmed_at` đúng ngày; không suy ra từ tiến độ. Khi project chưa có cả hai loại dữ liệu: `date=null`, `works=[]`, `manpower_total=null`, `photo_count=0`, `daily_report_exists=false`, `acceptance_today=[]`.
+- `segments`: mỗi zone + segment trả `component_count`, `verified_components`, `construction.{not_started,in_progress,completed,blocked,completion_ratio}`, `acceptance.{confirmed,completion_ratio}`. Hai tỷ lệ dùng chung mẫu số là cấu kiện `VERIFIED`; nghiệm thu vẫn lấy từ BBNT đã xác nhận.
+
+### Backend
+
+- `backend/app/core/overview_router.py` (mới): hai endpoint trên, dùng `require_project_member`, model core + site + acceptance; không ghi DB.
+- `backend/app/main.py`: import và mount `overview_router`.
+- `backend/tests/test_overview.py` (mới): 7 test cho chọn ngày lớn nhất (kể cả khi báo cáo ngày muộn hơn tiến độ), gom `works`, chỉ nghiệm thu thật, project scope/member read, project rỗng và segment summary với hai tỷ lệ độc lập (kể cả cấu kiện chưa xác minh bị loại khỏi tử/mẫu).
+
+### Frontend
+
+- `frontend/src/app/overviewFormat.ts` + `overviewFormat.test.ts` (mới): định dạng ngày `DD/MM`, phần trăm vi-VN, đơn vị cọc/dầm/cấu kiện, nhãn trạng thái, nhãn đoạn, gộp mã duy nhất và dòng “21/11 · Đục bê tông om vỡ · PD2 Cầu chính · 14 cọc hoàn thành”.
+- `frontend/src/app/LatestDayCard.tsx` (mới): card “Báo cáo ngày gần nhất”, chip nhân lực/ảnh/báo cáo/nghiệm thu, danh sách mã trong `<details>` native, nút “Mở Hiện trường”; có trạng thái tải/lỗi/rỗng.
+- `frontend/src/app/SegmentProgressBars.tsx` (mới): hai thanh độc lập “Thi công” và “Nghiệm thu” cho từng đoạn, sắp theo zone/segment, `role="progressbar"` + `aria-label`; ẩn đoạn chưa có cấu kiện xác minh và có empty state.
+- `frontend/src/app/CorePages.tsx` (chỉ `Dashboard`): bỏ 4 card KPI theo work item cũ; thay bằng “Đang thi công”, “Hoàn thành chưa nghiệm thu”, “Đã nghiệm thu”, “Cần xử lý” (hai số giữa lấy từ `progress/summary`, hai số còn lại từ `reconciliation/issues.counts`); thêm card ngày gần nhất và khối tiến độ theo đoạn; đổi mục nhanh thành “Hỏi đáp AI” / “Hỏi nhanh về công trình”.
+- `frontend/src/app/ConstructionProgressChart.tsx`: chỉ bổ sung `acceptance?` vào type (không đổi hành vi biểu đồ).
+
+### Kiểm tra đã chạy (DB/storage tạm, không dùng `data/app.db`)
+
+Backend:
+```bash
+cd backend
+DATABASE_URL="sqlite:///$TEMP/overview-test.db" \
+  ../.venv/Scripts/python -m pytest tests/test_overview.py tests/test_component_insights.py -q
+# 9 passed
+```
+Full suite trừ module engineering_ai (do agent khác đang sửa):
+```bash
+DATABASE_URL="sqlite:///$TEMP/full-test-overview.db" \
+SITE_REPORT_STORAGE="$TEMP/site-storage-overview" \
+ENGINEERING_AI_STORAGE="$TEMP/ai-storage-overview" \
+ACCEPTANCE_STORAGE="$TEMP/acceptance-storage-overview" \
+  ../.venv/Scripts/python -m pytest -q --ignore=tests/engineering_ai
+# 225 passed, 6 skipped, 2 failed, 2 errors — tất cả do engineering_ai
+```
+Lỗi transient của agent khác, không sửa: thiếu `app.engineering_ai.vision`, `app.engineering_ai.retrieval`, `HashingEmbeddingProvider`, `numeric_cross_check`, `make_scanned_pdf`, và `_shared_session_factory`; collection `tests/engineering_ai` cũng lỗi vì các symbol này.
+
+Frontend:
+```bash
+cd frontend
+npm test        # 32 files, 199 tests passed
+npm run build   # OK (chỉ còn cảnh báo chunk >500 kB có sẵn)
+```
+
+Kiểm tra đọc trên DB demo thật (`data/storage/demo-live/app.db`, chỉ SELECT):
+- `latest-day` → `date=2026-11-21`, một nhóm `Đục bê tông om vỡ dày trung bình t`, Cầu chính/đoạn 2, `COMPLETED`, `count=14`, 14 mã; `manpower_total=null`, `photo_count=0`, `daily_report_exists=false`, `acceptance_today=[]`.
+- `segments` Cầu chính: đoạn 1 `completed=44/130`, đoạn 2 `completed=14/86`, đoạn 3 `0/71`; nghiệm thu `confirmed=0` ở cả ba. Hai tỷ lệ tách biệt đúng.
+
+### Ghi chú
+
+- `photo_count` đếm theo ngày upload địa phương; ảnh của báo cáo cũ không bị tính sang ngày mới.
+- Tên bước lấy nguyên văn từ `component_stage_definitions.name` (dữ liệu DAP đang có hậu tố “dày trung bình t” do lần nhập trước); API không tự sửa tên.
+- Card “Cần xử lý” cộng toàn bộ `counts` đối soát; nếu muốn loại trừ một loại cụ thể cần chỉnh ở frontend.
+- Chưa có test render/E2E cho Dashboard mới; mới kiểm tra bằng helper Vitest, typecheck/build và gọi service trên DB demo.
