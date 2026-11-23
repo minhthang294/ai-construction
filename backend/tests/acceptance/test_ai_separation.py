@@ -86,13 +86,9 @@ def test_deepseek_page_extraction_poc_is_not_imported_or_invoked(client, monkeyp
 
 
 def test_create_and_export_do_not_call_ai_providers(client, monkeypatch, tmp_path):
-    import app.engineering_ai.embeddings as embeddings
     import app.engineering_ai.providers as providers
-    import app.engineering_ai.vision as vision
 
     monkeypatch.setattr(providers, "provider_from_env", _raise)
-    monkeypatch.setattr(vision, "vision_from_env", _raise)
-    monkeypatch.setattr(embeddings, "embeddings_from_env", _raise)
 
     request = create_request(client, number=None)
     assert request["number"]

@@ -26,7 +26,7 @@ from .pile_group_lookup import (
 )
 from .component_search import ComponentFactMatch
 from .constants import NO_SOURCE_ANSWER
-from .embeddings import fold_text, tokenize
+from .embeddings import fold_text
 from .models import DocumentPage, SourceDocument
 from .providers import ProviderAnswer
 from .quantity_calc import (

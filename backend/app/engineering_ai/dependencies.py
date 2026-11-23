@@ -16,7 +16,6 @@ from typing import Any, Callable, Iterator, Optional
 
 try:  # shared core
     from app.core.database import get_db as _shared_get_db  # type: ignore
-    from app.core.database import SessionLocal as _shared_session_factory  # type: ignore
     from app.core.auth import get_current_user as _shared_get_current_user  # type: ignore
     from app.core.access import require_project_member as _shared_require_project_member  # type: ignore
     from app.core.access import require_project_role as _shared_require_project_role  # type: ignore
@@ -25,7 +24,6 @@ try:  # shared core
 except Exception:  # pragma: no cover - fallback for isolated/test runs
     _HAS_SHARED_DB = False
     _shared_get_db = None
-    _shared_session_factory = None
 
     from types import SimpleNamespace
 
@@ -81,22 +79,6 @@ def get_db() -> Iterator[Any]:
         db.close()
 
 
-def get_session_factory() -> Callable[[], Any]:
-    """Session factory used by background ingest jobs.
-
-    Request-scoped ``get_db`` sessions are closed when the response ends, so the
-    async job must open its own session.  Tests override this dependency with
-    their in-memory factory.
-    """
-
-    global _FALLBACK_FACTORY
-    if _HAS_SHARED_DB and _shared_session_factory is not None:
-        return _shared_session_factory
-    if _FALLBACK_FACTORY is None:
-        _FALLBACK_FACTORY = _fallback_session_factory()
-    return _FALLBACK_FACTORY
-
-
 def get_current_user() -> Any:
     return _shared_get_current_user()
 
@@ -123,36 +105,6 @@ def get_answer_provider():
     from .providers import provider_from_env
 
     return provider_from_env()
-
-
-def get_embedding_provider():
-    from .embeddings import embeddings_from_env
-
-    return embeddings_from_env()
-
-
-def get_vision_provider():
-    from .vision import vision_from_env
-
-    return vision_from_env()
-
-
-def get_ocr_engine():
-    from .ocr import ocr_engine_from_env
-
-    return ocr_engine_from_env()
-
-
-def get_ocr_languages() -> str:
-    from .ocr import ocr_languages_from_env
-
-    return ocr_languages_from_env()
-
-
-def get_max_pages() -> int:
-    from .storage import max_pages
-
-    return max_pages()
 
 
 def storage_dir() -> Path:

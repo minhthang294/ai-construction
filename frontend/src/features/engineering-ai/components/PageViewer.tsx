@@ -16,7 +16,7 @@ import {
   SECTION_TEXT,
   SECTION_TITLE,
 } from "../lib/ui";
-import { AlertIcon, MinusIcon, PlusIcon, XIcon } from "./icons";
+import { MinusIcon, PlusIcon, XIcon } from "./icons";
 import PageExtractionPanel from "./PageExtractionPanel";
 
 type Props = {
@@ -94,12 +94,8 @@ export default function PageViewer({
             <h2 className={SECTION_TITLE}>Trang {pageNumber}</h2>
             {page && (
               <p className={cx(META_TEXT, "mt-1 [overflow-wrap:anywhere]")}>
-                Phương thức: {page.extraction_method}
-                {page.ocr_confidence != null &&
-                  ` · OCR ${(page.ocr_confidence * 100).toFixed(1)}%`}
-                {page.drawing_number && ` · Bản vẽ ${page.drawing_number}`}
+                {page.drawing_number && `Bản vẽ ${page.drawing_number}`}
                 {page.revision && ` · Rev ${page.revision}`}
-                {page.tables.length > 0 && ` · ${page.tables.length} bảng`}
               </p>
             )}
           </div>
@@ -157,20 +153,6 @@ export default function PageViewer({
 
         {page && (
           <>
-            {page.needs_review && (
-              <div className="flex gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm leading-6 text-amber-950">
-                <AlertIcon className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" />
-                Trang này cần kiểm tra trực tiếp bản vẽ gốc (OCR thiếu hoặc độ tin cậy thấp).
-              </div>
-            )}
-            {page.warnings.length > 0 && (
-              <ul className="list-disc space-y-1 rounded-lg border border-amber-200 bg-amber-50 p-3 pl-8 text-sm leading-6 text-amber-950">
-                {page.warnings.map((warning, index) => (
-                  <li key={`${index}-${warning}`}>{warning}</li>
-                ))}
-              </ul>
-            )}
-
             {renderUrl ? (
               <>
                 <div
@@ -228,25 +210,9 @@ export default function PageViewer({
               </>
             ) : (
               <p className={cx(SECTION_TEXT, "rounded-lg bg-slate-50 p-3")}>
-                Không có ảnh render cho trang này; chỉ hiển thị text trích xuất.
+                Chưa có ảnh trang cho bản vẽ này.
               </p>
             )}
-
-            <div>
-              <h3 className="text-sm font-semibold text-slate-800">
-                {page.extraction_method === "ocr" ? "Text OCR" : "Text trích xuất"}
-              </h3>
-              <div
-                role="region"
-                aria-label="Text trích xuất của trang"
-                tabIndex={0}
-                className="mt-2 max-h-80 overflow-auto rounded-lg bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#405e9b]"
-              >
-                <pre className="whitespace-pre-wrap p-3 text-xs leading-5 text-slate-800 [overflow-wrap:anywhere]">
-                  {page.text || "(trang không có text trích xuất được)"}
-                </pre>
-              </div>
-            </div>
 
             <PageExtractionPanel
               key={`${documentId}:${pageNumber}`}

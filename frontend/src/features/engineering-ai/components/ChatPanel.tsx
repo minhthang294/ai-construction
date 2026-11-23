@@ -8,7 +8,6 @@ import {
   renameConversation,
 } from "../lib/api";
 import {
-  BADGE,
   BUTTON_DANGER_OUTLINE,
   BUTTON_PRIMARY,
   BUTTON_SECONDARY,
@@ -44,7 +43,6 @@ export default function ChatPanel({ projectId, onOpenCitation }: Props) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [search, setSearch] = useState("");
   const [scope, setScope] = useState<"effective" | "history">("effective");
-  const useVision = false;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -75,8 +73,6 @@ export default function ChatPanel({ projectId, onOpenCitation }: Props) {
           content: message.content,
           citations: message.citations ?? [],
           warnings: message.warnings ?? [],
-          vision_used: message.vision_used,
-          vision_note: message.vision_note,
         })),
       );
     } catch (err) {
@@ -164,7 +160,6 @@ export default function ChatPanel({ projectId, onOpenCitation }: Props) {
         conversationId,
         6,
         scope,
-        useVision,
       );
       setConversationId(response.conversation_id);
       setMessages((previous) => [
@@ -176,8 +171,6 @@ export default function ChatPanel({ projectId, onOpenCitation }: Props) {
           warnings: response.warnings,
           confidence: response.confidence,
           no_source: response.no_source,
-          vision_used: response.vision_used,
-          vision_note: response.vision_note,
         },
       ]);
       await loadConversations();
@@ -370,16 +363,6 @@ export default function ChatPanel({ projectId, onOpenCitation }: Props) {
                       )}
                     >
                       <span>{isUser ? "Bạn" : "AI"}</span>
-                      {message.vision_used && (
-                        <span
-                          className={cx(
-                            BADGE,
-                            "border border-violet-200 bg-violet-100 font-normal text-violet-900",
-                          )}
-                        >
-                          Vision 1 trang
-                        </span>
-                      )}
                     </div>
                     <p
                       className={cx(
@@ -392,14 +375,8 @@ export default function ChatPanel({ projectId, onOpenCitation }: Props) {
 
                     {message.no_source && (
                       <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-950">
-                        Không có trang nguồn phù hợp trong hồ sơ công trình hiện có. Không
+                        Không có dữ kiện trích xuất hoặc bản ghi database phù hợp. Không
                         có kết luận kỹ thuật nào được tạo.
-                      </p>
-                    )}
-
-                    {message.vision_note && (
-                      <p className="mt-3 rounded-lg border border-violet-200 bg-violet-50 p-3 text-xs leading-5 text-violet-950">
-                        {message.vision_note}
                       </p>
                     )}
 

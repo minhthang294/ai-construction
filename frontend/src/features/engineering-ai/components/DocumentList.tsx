@@ -2,8 +2,6 @@ import type { SourceDocument } from "../types";
 import {
   BADGE,
   BUTTON_SECONDARY,
-  BUTTON_SUCCESS,
-  BUTTON_WARNING,
   CARD,
   CARD_PAD,
   cx,
@@ -12,7 +10,7 @@ import {
   SECTION_TEXT,
   SECTION_TITLE,
 } from "../lib/ui";
-import { AlertIcon, CheckIcon, DocumentIcon, ExternalIcon, RefreshIcon } from "./icons";
+import { AlertIcon, DocumentIcon, ExternalIcon, RefreshIcon } from "./icons";
 
 type Props = {
   documents: SourceDocument[];
@@ -20,8 +18,6 @@ type Props = {
   onSelect: (document: SourceDocument) => void;
   onRefresh: () => void;
   onOpenOriginal: (document: SourceDocument) => void;
-  onReingest?: (document: SourceDocument) => void;
-  onConfirmEffective?: (document: SourceDocument) => void;
   loading?: boolean;
 };
 
@@ -67,8 +63,6 @@ export default function DocumentList({
   onSelect,
   onRefresh,
   onOpenOriginal,
-  onReingest,
-  onConfirmEffective,
   loading,
 }: Props) {
   return (
@@ -189,32 +183,12 @@ export default function DocumentList({
                   {document.warnings.length > 0 && (
                     <span className="mt-1 flex items-start gap-1.5 text-xs leading-5 text-amber-800">
                       <AlertIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                      {document.warnings.length} cảnh báo trích xuất/OCR
+                      {document.warnings.length} cảnh báo hồ sơ nguồn
                     </span>
                   )}
                 </button>
 
                 <div className="flex flex-col-reverse gap-2 border-t border-slate-100 px-3 py-2.5 sm:flex-row sm:flex-wrap sm:justify-end">
-                  {!document.is_effective && onConfirmEffective && (
-                    <button
-                      type="button"
-                      className={cx(BUTTON_SUCCESS, "w-full sm:w-auto")}
-                      onClick={() => onConfirmEffective(document)}
-                    >
-                      <CheckIcon className="h-4 w-4" />
-                      Xác nhận hiệu lực
-                    </button>
-                  )}
-                  {document.status === "failed" && onReingest && (
-                    <button
-                      type="button"
-                      className={cx(BUTTON_WARNING, "w-full sm:w-auto")}
-                      onClick={() => onReingest(document)}
-                    >
-                      <RefreshIcon className="h-4 w-4" />
-                      Xử lý lại
-                    </button>
-                  )}
                   <button
                     type="button"
                     className={cx(BUTTON_SECONDARY, "w-full sm:w-auto")}

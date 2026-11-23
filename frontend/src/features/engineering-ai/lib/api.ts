@@ -1,16 +1,9 @@
 import type {
   ChatResponse,
   Conversation,
-  CrossReferenceResponse,
-  DailyReportDraftResponse,
   DocumentPage,
-  InspectionChecklistResponse,
   PageExtractionRecord,
-  PhotoSuggestion,
-  SearchResponse,
   SourceDocument,
-  VersionCompareResponse,
-  WorkItemSummary,
 } from "../types";
 
 const API_BASE = (import.meta as any)?.env?.VITE_API_BASE ?? "/api/v1";
@@ -42,35 +35,6 @@ export async function listDocuments(projectId: string, includeHistory = true): P
   return jsonOrThrow<SourceDocument[]>(response);
 }
 
-export async function uploadDocument(
-  projectId: string,
-  file: File,
-  type?: string,
-  changeNote?: string,
-): Promise<SourceDocument> {
-  const form = new FormData();
-  form.append("file", file);
-  if (type) form.append("type", type);
-  if (changeNote?.trim()) form.append("change_note", changeNote.trim());
-  const response = await apiFetch(`/projects/${projectId}/documents`, {
-    method: "POST",
-    body: form,
-  });
-  return jsonOrThrow<SourceDocument>(response);
-}
-
-export async function getDocument(projectId: string, documentId: string): Promise<SourceDocument> {
-  const response = await apiFetch(`/projects/${projectId}/documents/${documentId}`);
-  return jsonOrThrow<SourceDocument>(response);
-}
-
-export async function reingestDocument(projectId: string, documentId: string): Promise<SourceDocument> {
-  const response = await apiFetch(`/projects/${projectId}/documents/${documentId}/reingest`, {
-    method: "POST",
-  });
-  return jsonOrThrow<SourceDocument>(response);
-}
-
 export async function getDocumentPage(
   projectId: string,
   documentId: string,
@@ -94,26 +58,12 @@ export async function fetchResourceBlob(apiUrl: string): Promise<Blob> {
   return fetchAuthenticatedBlob(path);
 }
 
-export async function searchDocuments(
-  projectId: string,
-  query: string,
-  topK = 6,
-): Promise<SearchResponse> {
-  const response = await apiFetch(`/projects/${projectId}/ai/search`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query, top_k: topK }),
-  });
-  return jsonOrThrow<SearchResponse>(response);
-}
-
 export async function askEngineeringAI(
   projectId: string,
   message: string,
   conversationId?: string | null,
   topK = 6,
   scope: "effective" | "history" = "effective",
-  vision = false,
 ): Promise<ChatResponse> {
   const response = await apiFetch(`/projects/${projectId}/ai/chat`, {
     method: "POST",
@@ -123,72 +73,9 @@ export async function askEngineeringAI(
       conversation_id: conversationId ?? null,
       top_k: topK,
       scope,
-      vision,
     }),
   });
   return jsonOrThrow<ChatResponse>(response);
-}
-
-export type CrossReferencePage = {
-  document_id: string;
-  page_number: number;
-};
-
-export async function crossReference(
-  projectId: string,
-  first: CrossReferencePage,
-  second: CrossReferencePage,
-  topic?: string,
-): Promise<CrossReferenceResponse> {
-  const response = await apiFetch(`/projects/${projectId}/ai/cross-references`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ first, second, topic: topic?.trim() || null }),
-  });
-  return jsonOrThrow<CrossReferenceResponse>(response);
-}
-
-export async function listWorkItems(projectId: string): Promise<WorkItemSummary[]> {
-  const response = await apiFetch(`/projects/${projectId}/work-items`);
-  return jsonOrThrow<WorkItemSummary[]>(response);
-}
-
-export async function draftDailyReport(
-  projectId: string,
-  payload: {
-    report_id?: string;
-    report_date?: string;
-    report?: Record<string, unknown>;
-  },
-): Promise<DailyReportDraftResponse> {
-  const response = await apiFetch(`/projects/${projectId}/ai/daily-report-drafts`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  return jsonOrThrow<DailyReportDraftResponse>(response);
-}
-
-export async function suggestInspectionChecklist(
-  projectId: string,
-  payload: {
-    work_item_id?: string;
-    work_item?: {
-      code?: string;
-      name?: string;
-      location?: string;
-      component?: string;
-    };
-    focus?: string;
-    top_k?: number;
-  },
-): Promise<InspectionChecklistResponse> {
-  const response = await apiFetch(`/projects/${projectId}/ai/inspection-checklists`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  return jsonOrThrow<InspectionChecklistResponse>(response);
 }
 
 export async function listConversations(
@@ -239,43 +126,6 @@ export async function deleteConversation(
   if (!response.ok) throw new Error(`Không xóa được hội thoại (${response.status}).`);
 }
 
-export async function confirmEffective(
-  projectId: string,
-  documentId: string,
-  changeNote: string,
-): Promise<SourceDocument> {
-  const response = await apiFetch(
-    `/projects/${projectId}/documents/${documentId}/effective`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ change_note: changeNote }),
-    },
-  );
-  return jsonOrThrow<SourceDocument>(response);
-}
-
-export async function listVersions(
-  projectId: string,
-  documentId: string,
-): Promise<SourceDocument[]> {
-  const response = await apiFetch(
-    `/projects/${projectId}/documents/${documentId}/versions`,
-  );
-  return jsonOrThrow<SourceDocument[]>(response);
-}
-
-export async function compareVersions(
-  projectId: string,
-  leftId: string,
-  rightId: string,
-): Promise<VersionCompareResponse> {
-  const response = await apiFetch(
-    `/projects/${projectId}/documents/${leftId}/compare/${rightId}`,
-  );
-  return jsonOrThrow<VersionCompareResponse>(response);
-}
-
 export async function listPageExtractions(
   projectId: string,
   documentId: string,
@@ -317,17 +167,4 @@ export async function getConversation(
     `/projects/${projectId}/ai/conversations/${conversationId}`,
   );
   return jsonOrThrow<Conversation>(response);
-}
-
-export async function suggestPhoto(
-  projectId: string,
-  file: File,
-): Promise<PhotoSuggestion> {
-  const form = new FormData();
-  form.append("file", file);
-  const response = await apiFetch(`/projects/${projectId}/ai/photo-suggestions`, {
-    method: "POST",
-    body: form,
-  });
-  return jsonOrThrow<PhotoSuggestion>(response);
 }

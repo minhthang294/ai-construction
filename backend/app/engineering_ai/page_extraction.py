@@ -32,7 +32,6 @@ MAX_TABLE_COLUMNS = 50
 MAX_WARNINGS = 100
 MAX_TEXT = 4000
 MIN_TILE_SIDE = 4
-MAX_NUMERIC_WARNINGS = 20
 
 _COMPONENT_FACT_FIELDS = (
     "component_type",
@@ -67,12 +66,6 @@ _TILE_NOISE_MARKERS = (
     "khong xac dinh duoc revision",
 )
 
-_NUMBER_RE = re.compile(r"(?<![\w.])(\d{1,8}(?:[.,]\d+)?)", re.UNICODE)
-_NUMBER_UNIT_RE = re.compile(
-    r"(?<![\w.])(\d{1,8}(?:[.,]\d+)?)\s*"
-    r"(mm|cm|m2|m²|m3|m³|kg|mpa|kn|%|độ|do|°|m|tấn|tan|t)(?=\W|$)",
-    re.IGNORECASE | re.UNICODE,
-)
 @dataclass(frozen=True)
 class Tile:
     label: str
@@ -604,92 +597,3 @@ def validate_extraction(value: Any) -> List[str]:
     return errors
 
 
-def _normalise_number(value: str) -> str:
-    text = value.strip()
-    if "," in text and "." in text:
-        text = text.replace(".", "").replace(",", ".")
-    elif "," in text:
-        text = text.replace(",", ".")
-    elif "." in text:
-        left, right = text.split(".", 1)
-        if left.isdigit() and left != "0" and len(right) == 3:
-            text = left + right
-    if "." in text:
-        text = text.rstrip("0").rstrip(".")
-    return text or "0"
-
-
-def _normalise_unit(value: Optional[str]) -> str:
-    if not value:
-        return ""
-    return value.strip().lower().replace("m²", "m2").replace("m³", "m3")
-
-
-def _ocr_occurrences(ocr_text: str) -> Tuple[Set[str], Dict[str, Set[str]]]:
-    numbers: Set[str] = set()
-    units: Dict[str, Set[str]] = {}
-    for match in _NUMBER_RE.finditer(ocr_text or ""):
-        numbers.add(_normalise_number(match.group(1)))
-    for match in _NUMBER_UNIT_RE.finditer(ocr_text or ""):
-        number = _normalise_number(match.group(1))
-        unit = _normalise_unit(match.group(2))
-        numbers.add(number)
-        units.setdefault(number, set()).add(unit)
-    return numbers, units
-
-
-def _dedupe_numeric_warnings(warnings: Sequence[str]) -> List[str]:
-    unique: List[str] = []
-    seen: Set[str] = set()
-    for warning in warnings:
-        key = _norm(warning)
-        if not key or key in seen:
-            continue
-        seen.add(key)
-        unique.append(warning)
-    if len(unique) <= MAX_NUMERIC_WARNINGS:
-        return unique
-    remaining = len(unique) - MAX_NUMERIC_WARNINGS
-    return [
-        *unique[:MAX_NUMERIC_WARNINGS],
-        f"Còn {remaining} cảnh báo số/đơn vị khác",
-    ]
-
-
-def numeric_cross_check(value: Mapping[str, Any], ocr_text: str) -> List[str]:
-    """Warn when model key-value numbers/units are absent or conflict with OCR.
-
-    This function never changes the model value.  OCR is a baseline, not truth.
-    Warnings are de-duplicated and capped at 20 plus one aggregate warning.
-    """
-
-    ocr_numbers, ocr_units = _ocr_occurrences(ocr_text)
-    warnings: List[str] = []
-    key_values = value.get("key_values")
-    if not isinstance(key_values, list):
-        return warnings
-    for item in key_values:
-        if not isinstance(item, dict):
-            continue
-        raw_value = str(item.get("value") or "")
-        raw_unit = _normalise_unit(item.get("unit") if isinstance(item.get("unit"), str) else None)
-        numbers = [
-            _normalise_number(match.group(1)) for match in _NUMBER_RE.finditer(raw_value)
-        ]
-        value_unit_match = _NUMBER_UNIT_RE.search(raw_value)
-        if not raw_unit and value_unit_match:
-            raw_unit = _normalise_unit(value_unit_match.group(2))
-        for number in numbers:
-            if number not in ocr_numbers:
-                warnings.append(
-                    f"Số {number} của model không xuất hiện trong OCR trang."
-                )
-                continue
-            if raw_unit:
-                seen_units = ocr_units.get(number, set())
-                if seen_units and raw_unit not in seen_units:
-                    warnings.append(
-                        f"Đơn vị {raw_unit} của model mâu thuẫn với "
-                        f"{', '.join(sorted(seen_units))} trong OCR trang cho số {number}."
-                    )
-    return _dedupe_numeric_warnings(warnings)

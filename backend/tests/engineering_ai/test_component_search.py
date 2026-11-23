@@ -2,7 +2,6 @@ import json
 
 from app.engineering_ai.component_search import find_component_facts
 from app.engineering_ai.models import DocumentPage, PageExtraction, SourceDocument
-from app.engineering_ai.retrieval import _page_extraction_boosts
 
 
 def _source(db, project, suffix, *, effective=True):
@@ -63,18 +62,3 @@ def test_component_lookup_filters_project_status_effective_and_group(session_fac
         assert find_component_facts(db, "p1") == []
 
 
-def test_unverified_extraction_cannot_boost_retrieval(session_factory):
-    with session_factory() as db:
-        for status in ("proposed", "verified"):
-            db.add(PageExtraction(
-                id=f"boost-{status}", project_id="p1", document_id="doc",
-                page_id=f"page-{status}", page_number=1, model="test",
-                prompt_version=status, mode="direct", status=status,
-                extraction_json=json.dumps({"key_values": [
-                    {"name": "cọc", "value": "H77", "unit": "cm"}
-                ]}),
-            ))
-        db.commit()
-        boosts = _page_extraction_boosts(db, "p1", ["coc", "h77"])
-        assert "page-verified" in boosts
-        assert "page-proposed" not in boosts

@@ -29,6 +29,8 @@ Prefix `/api/v1`. JSON UTF-8. Auth Bearer; mọi request project-scoped kiểm m
 | `GET /projects/{p}/drawing-map` | Mặt bằng theo project/zone/segment. Marker trả `design_group`, `current_work`/`current_work_definition_id` (bước mới nhất đang IN_PROGRESS), `location_review`; phản hồi có `review_count` (mã chưa đặt được) và `position_review_count` (tọa độ đang chờ duyệt). |
 | `GET /projects/{p}/drawing-map/{sheet_id}/image` | Trả ảnh riêng cho thành viên dự án. |
 | `GET /projects/{p}/progress/summary` | Tổng hợp project-scoped trên cấu kiện đã duyệt: tổng/đã duyệt/chờ duyệt, số có phạm vi phát sinh, 4 trạng thái thi công + tỷ lệ, liên kết/xác nhận nghiệm thu + tỷ lệ; hai tỷ lệ độc lập |
+| `GET /projects/{p}/overview/latest-day` | Ngày gần nhất có sự kiện tiến độ hoặc báo cáo ngày: trả `{date, works:[{stage_name, zone, segment, component_type, status, count, codes[]}], manpower_total|null, photo_count, daily_report_exists, acceptance_today[]}`; chỉ đọc bản ghi thật, nghiệm thu không suy ra từ tiến độ, `null`/rỗng khi chưa có dữ liệu |
+| `GET /projects/{p}/overview/segments` | Tiến độ theo zone + segment: số cấu kiện và đã xác minh, đếm thi công hoàn thành/đang thi công/chưa bắt đầu và nghiệm thu đã xác nhận; hai tỷ lệ độc lập trên cùng mẫu số đã xác minh |
 
 Mỗi giá trị trả về từ `progress/design-quantities` gồm `quantity` (số hoặc `null`), `unit`, `scope` (`COMPONENT`, `SHARED` hoặc `SUBGROUP`), `scope_label`, `drawing`, `page` và `note`. Khối lượng dùng chung cho cụm hoặc phân nhóm được tra theo phạm vi đã ghi. API yêu cầu quyền thành viên công trình và chỉ đọc số liệu thiết kế.
 | `GET /projects/{p}/reconciliation/issues` | Đối soát chỉ đọc: nghiệm thu không có thi công, thi công xong chưa nghiệm thu, thiếu nguồn, cấu kiện chưa duyệt, mã trùng/mơ hồ, BBNT xác nhận trước ngày thi công; trả `issues[]` và `counts` theo loại |
@@ -45,19 +47,15 @@ Mỗi giá trị trả về từ `progress/design-quantities` gồm `quantity` (
 | `GET /projects/{p}/photos/{id}/original` | Stream file sau kiểm quyền |
 | `DELETE /projects/{p}/photos/{id}` | Xóa ảnh cùng công trình với quyền biên tập, trả `204`. Ảnh đang làm bằng chứng trả `409`. |
 | `POST /projects/{p}/daily-reports/{date}/exports` | `format=zalo|pdf|docx|zip`, bản chụp nội dung và history |
-| `POST/GET /projects/{p}/documents` | Upload PDF, version theo hash; liệt kê trạng thái ingest |
-| `GET /projects/{p}/documents/{id}/pages/{n}` | Trang gốc/render và OCR, yêu cầu quyền |
+| `GET /projects/{p}/documents` | Liệt kê hồ sơ nguồn đã có, chỉ đọc (không còn upload/ingest) |
+| `GET /projects/{p}/documents/{id}/pages/{n}` | Metadata trang và URL ảnh render, yêu cầu quyền; không trả text OCR |
 | `GET /projects/{p}/documents/{id}/versions` | Danh sách version, is_current/is_effective, change_note |
 | `POST /projects/{p}/documents/{id}/effective` | Người quản lý hồ sơ xác nhận revision hiệu lực; lưu effective_at/by |
-| `GET /projects/{p}/documents/{id}/compare/{other_id}` | So sánh metadata/trang/chunk hai version, không kết luận thiết kế |
-| `POST /projects/{p}/ai/search` | Query và citation từ page/chunk; rỗng nếu không có nguồn; `scope=effective|history` |
-| `POST /projects/{p}/ai/chat` | Trả `{answer,citations[],confidence}`; thiếu nguồn dùng câu từ chối chuẩn; `scope`, tùy chọn vision một trang |
+| `POST /projects/{p}/ai/chat` | Trả `{answer,citations[],confidence}`; chỉ từ dữ kiện AI trích xuất và database cấu kiện; thiếu citation/nguồn dùng câu từ chối chuẩn; `scope=effective\|history` |
 | `POST/GET /projects/{p}/ai/conversations` | Tạo mới/liệt kê; tìm kiếm `q` |
 | `PATCH/DELETE /projects/{p}/ai/conversations/{id}` | Đổi tên/xóa hội thoại |
-| `POST /projects/{p}/ai/cross-references` | Đối chiếu hai trang tài liệu; nhận xét chỉ để kỹ sư rà soát, kèm citation cả hai trang |
-| `POST /projects/{p}/ai/photo-suggestions` | Gợi ý phân loại/chú thích ảnh chưa xác nhận; không ghi đè ảnh gốc |
-| `POST /projects/{p}/ai/daily-report-drafts` | Soạn bản nháp từ dữ liệu báo cáo đã ghi, chỉ ra trường còn thiếu; không tạo số liệu |
-| `POST /projects/{p}/ai/inspection-checklists` | Gợi ý checklist có citation tài liệu; không điền trạng thái nghiệm thu |
+| `POST/GET /projects/{p}/documents/{id}/extractions` | Lưu/liệt kê dữ liệu AI trích xuất theo trang (đề xuất) |
+| `GET/PATCH /projects/{p}/page-extractions/{id}` | Đọc hoặc xác nhận/từ chối một extraction; không ghi đè bản đã xác nhận |
 | `POST/GET /projects/{p}/acceptance-requests` | PYC nháp và lịch sử, liên kết work item/daily report cùng công trình |
 | `DELETE /projects/{p}/acceptance-requests/{id}` | Xoá PYC; PYC có BBNT yêu cầu `?force=true` và xoá kèm BBNT/lịch sử export |
 | `GET/PUT /projects/{p}/acceptance-numbering` | Cấu hình prefix/start/width/reset policy cho PYC/BBNT |

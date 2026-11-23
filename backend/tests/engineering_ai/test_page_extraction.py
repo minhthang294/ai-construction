@@ -1,7 +1,6 @@
 from app.engineering_ai.page_extraction import (
     Tile,
     merge_extractions,
-    numeric_cross_check,
     plan_page_tiles,
     validate_extraction,
 )
@@ -307,67 +306,9 @@ def test_validate_extraction_rejects_component_fact_without_code():
     assert any("component_code" in error for error in errors)
 
 
-def test_numeric_cross_check_flags_missing_and_mismatched_units():
-    value = {
-        "key_values": [
-            {
-                "name": "Tổng chiều dài",
-                "value": "87140",
-                "unit": "mm",
-                "quote": "Tổng chiều dài 87140",
-            },
-            {
-                "name": "Bề rộng",
-                "value": "87440",
-                "unit": "mm",
-                "quote": "Bề rộng 87440",
-            },
-        ]
-    }
-    warnings = numeric_cross_check(value, "Tổng chiều dài 87440 cm; bề rộng 87440 cm")
-    assert any("87140" in warning and "không xuất hiện" in warning for warning in warnings)
-    assert any("mm" in warning and "cm" in warning for warning in warnings)
 
 
-def test_numeric_cross_check_accepts_matching_number_and_unit():
-    value = {
-        "key_values": [
-            {
-                "name": "Tổng chiều dài",
-                "value": "87440",
-                "unit": "mm",
-                "quote": "Tổng chiều dài 87440 mm",
-            }
-        ]
-    }
-    assert numeric_cross_check(value, "Tổng chiều dài 87440 mm") == []
 
 
-def test_numeric_cross_check_dedupes_and_caps_warnings():
-    duplicate_values = {
-        "key_values": [
-            {"name": "A", "value": "1001", "unit": "mm", "quote": "1001"},
-            {"name": "B", "value": "1001", "unit": "mm", "quote": "1001"},
-        ]
-    }
-    assert numeric_cross_check(duplicate_values, "") == [
-        "Số 1001 của model không xuất hiện trong OCR trang."
-    ]
-
-    many_values = {
-        "key_values": [
-            {
-                "name": f"V{i}",
-                "value": str(1000 + i),
-                "unit": "mm",
-                "quote": str(1000 + i),
-            }
-            for i in range(25)
-        ]
-    }
-    warnings = numeric_cross_check(many_values, "")
-    assert len(warnings) == 21
-    assert len(set(warnings[:20])) == 20
-    assert warnings[-1] == "Còn 5 cảnh báo số/đơn vị khác"
 
 

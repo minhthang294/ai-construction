@@ -1,5 +1,93 @@
 # Engineering AI Agent Report
 
+## 2026-11-23 — chat-only module; OCR and non-chat AI removed
+
+Owner decision applied: the module now keeps only AI chat (Hỏi đáp), page
+navigation, component lookup and read-only source metadata/renders. No new PDFs
+are ingested and no OCR/chunk/embedding pipeline runs.
+
+Removed API routes:
+- `POST /projects/{p}/documents` (upload), `POST .../documents/{id}/reingest`,
+  `GET .../documents/{id}/compare/{other_id}`
+- `POST /ai/search`, `/ai/cross-references`, `/ai/inspection-checklists`,
+  `/ai/daily-report-drafts`, `/ai/photo-suggestions`
+
+Kept routes: document list/get (read-only), effective confirmation, versions,
+original PDF, page metadata, page render image, page-extraction save/list/get/
+verify, chat and conversation CRUD.
+
+Removed backend files (no callers remain):
+`ocr.py`, `extraction.py`, `chunking.py`, `fts.py`, `retrieval.py`,
+`vector_store.py`, `crossref.py`, `inspection.py`, `vision.py`, `dap_design.py`.
+`storage.py` now only resolves existing original/render paths; `embeddings.py`
+keeps only `fold_text`/`tokenize`; `constants.py`, `schemas.py`, `router.py`,
+`service.py` and `dependencies.py` were trimmed accordingly (no model columns,
+tables or existing data were changed; there are no migrations).
+
+Behaviour changes:
+- `page_navigation.py` no longer reads `page.text`/`page.ocr_text`; it matches
+  extraction title/summary/component facts plus page/document metadata
+  (drawing number, revision, document name/type).
+- `page_extraction.numeric_cross_check` and its OCR comparison helpers were
+  removed; human extraction review is the only verification path.
+- Chat no longer accepts/uses `vision` and returns no `vision_used/vision_note`.
+- Page API still exposes legacy page fields for old rows, but the UI no longer
+  displays text/OCR confidence; the viewer shows only the render image plus the
+  page-extraction review panel.
+
+Frontend:
+- `EngineeringAIPage` is chat-first, mobile-first: chat is the main view, the
+  read-only document list is a collapsed section, and clicking an extraction/
+  database citation opens the image-only `PageViewer` in place.
+- Deleted `CrossReferencePanel`, `DailyReportDraftPanel`, `InspectionChecklistPanel`,
+  `PhotoSuggestionPanel`, `VersionComparePanel`, `DocumentUploadPanel`,
+  `lib/tabNavigation*`; `DocumentList` no longer offers reingest/effective
+  actions; `types.ts`/`api.ts` only expose retained endpoints.
+
+Tests (deleted/rewritten because the feature under test was removed):
+- Deleted: `test_assistive_apis.py`, `test_cross_reference.py`,
+  `test_dap_design.py`, `test_embeddings.py`, `test_ocr_vision.py`.
+- `conftest.py`: no upload/OCR/vision/embedding fixtures; added
+  `add_source_document`/`add_page_extraction` for existing-data seeding.
+- `test_retrieval_chat.py`: chat-only; removed search/OCR/vision tests; added a
+  guard that removed routes return 404.
+- `test_documents.py`: read-only list/get/page/render/effective/versions plus
+  removed upload/reingest/compare route guards.
+- `test_page_extraction_api.py`: extraction save/list/verify/scope only;
+  removed render-hash/reingest/search tests.
+- `test_component_search.py`, `test_page_extraction.py`: removed tests for the
+  deleted retrieval-boost and numeric OCR cross-check helpers.
+- `test_addendum_dod.py` (coordinator-owned): System A now seeds a verified
+  extraction and chats/cites it; System B only guards the answer provider.
+- `tests/test_integrated_workflow.py` and `tests/acceptance/test_ai_separation.py`:
+  engineering-AI assertions only — removed upload/search/vision/embedding calls,
+  seeded an existing document/page for acceptance evidence refs.
+
+Dependencies now unused by this module (left in shared requirements/package.json
+for the orchestrator): Tesseract binary + `vie` trained data, and the
+`ENGINEERING_AI_OCR_*`, `ENGINEERING_AI_EMBEDDING_*`, `ENGINEERING_AI_VISION_*`
+environment variables. PyMuPDF/Pillow/sqlite-vec remain used by site/acceptance/
+core, so their shared requirements lines cannot be removed by this module.
+
+Verification:
+```bash
+cd backend
+DATABASE_URL=sqlite:///<tmp>/app.db SITE_REPORT_STORAGE=<tmp>/site \
+ENGINEERING_AI_STORAGE=<tmp>/engineering ACCEPTANCE_STORAGE=<tmp>/acceptance \
+../.venv/Scripts/python -m pytest tests -q
+# 331 passed, 6 skipped, 0 failed
+
+cd frontend && npm test   # 195 passed (31 files)
+cd frontend && npm run build  # tsc -b + vite build OK
+```
+
+Unresolved:
+- Existing page/chunk/embedding rows and their columns remain in the DB but are
+  no longer read; a future migration may drop them.
+- Existing pages need a render image to be viewable; if a page has no render the
+  viewer shows only the extraction panel.
+- Page-extraction review still requires an editor role; no auto-verification.
+
 ## 2026-11-23 — chat answers from AI extractions and the component database
 
 Owner decision applied: chat answers from AI-extracted structured data and the

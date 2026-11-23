@@ -230,8 +230,21 @@ def _load_pages(
             )
             for fact in facts
         )
-        page_text = str(page.text or page.ocr_text or "")[:4000]
-        all_text = " ".join([*titles, *summaries, fact_text, page_text])
+        page_text = fold_text(
+            " ".join(
+                part
+                for part in (
+                    str(page.drawing_number or ""),
+                    str(page.revision or ""),
+                    str(document.drawing_number or ""),
+                    str(document.revision or ""),
+                    document.original_name,
+                    document.type,
+                )
+                if part
+            )
+        )
+        all_text = " ".join([page_text, *titles, *summaries, fact_text])
         records.append(
             _PageRecord(
                 document=document,
@@ -407,13 +420,7 @@ def _citation(record: _PageRecord, project_id: str) -> CitationOut:
             f"/api/v1/projects/{project_id}/documents/"
             f"{record.document.id}/pages/{record.page.page_number}"
         ),
-        ocr_confidence=(
-            record.page.ocr_confidence
-            if record.page.extraction_method == "ocr"
-            else None
-        ),
         page_id=record.page.id,
-        extraction_method=record.page.extraction_method,
         section=_section(record),
     )
 

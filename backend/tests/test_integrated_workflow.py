@@ -5,7 +5,6 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 from PIL import Image
-import fitz
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -14,7 +13,6 @@ from app.core.auth import password_hash
 from app.core.models import User
 from app.main import app
 from app.site import service as site_service
-from app.engineering_ai import dependencies as ai_dependencies
 
 
 def test_project_report_photo_ai_and_acceptance(tmp_path, monkeypatch):
@@ -24,7 +22,6 @@ def test_project_report_photo_ai_and_acceptance(tmp_path, monkeypatch):
     for module in (database, auth, access):
         monkeypatch.setattr(module, "SessionLocal", factory)
     monkeypatch.setattr(site_service, "STORAGE_ROOT", tmp_path / "photos")
-    monkeypatch.setattr(ai_dependencies, "_shared_session_factory", factory)
     monkeypatch.setenv("ENGINEERING_AI_STORAGE", str(tmp_path / "documents"))
     monkeypatch.setenv("ACCEPTANCE_STORAGE", str(tmp_path / "acceptance"))
     monkeypatch.setenv(
@@ -75,28 +72,15 @@ def test_project_report_photo_ai_and_acceptance(tmp_path, monkeypatch):
     assert missing.json()["citations"] == []
     assert "Không tìm thấy" in missing.json()["answer"]
 
-    pdf_bytes = fitz.open()
-    page = pdf_bytes.new_page()
-    page.insert_text((72, 72), "Synthetic drawing BV-TEST. Anchor length is 50 mm.")
-    source = client.post(f"{base}/documents", headers=headers,
-        files={"file": ("synthetic-drawing.pdf", pdf_bytes.tobytes(), "application/pdf")})
-    pdf_bytes.close()
-    assert source.status_code == 201, source.text
-    search = client.post(f"{base}/ai/search", headers=headers, json={"query": "Anchor length"})
-    assert search.status_code == 200, search.text
-    assert search.json()["citations"][0]["page_number"] == 1
-    assert search.json()["citations"][0]["document_id"] == source.json()["id"]
-    page_id = client.get(f"{base}/documents/{source.json()['id']}", headers=headers).json()["pages"][0]["id"]
-    draft = client.post(f"{base}/ai/daily-report-drafts", headers=headers, json={"report_id": report.json()["id"]})
-    assert draft.status_code == 200, draft.text
-    assert draft.json()["no_invented_quantities"] is True
-    assert draft.json()["draft"]["work_logs"][0]["quantity"] is None
-    suggestions = client.post(f"{base}/ai/inspection-checklists", headers=headers,
-        json={"work_item_id": work_id, "focus": "Anchor length"})
-    assert suggestions.status_code == 200, suggestions.text
-    assert suggestions.json()["suggestions"]
-    assert all(item["status"] == "unconfirmed" and item["citation"]["page_number"] == 1
-               for item in suggestions.json()["suggestions"])
+    # OCR upload/search and the assistive AI endpoints were removed; only chat remains.
+    assert client.post(
+        f"{base}/ai/search", headers=headers, json={"query": "Anchor length"}
+    ).status_code == 404
+    assert client.post(
+        f"{base}/documents",
+        headers=headers,
+        files={"file": ("synthetic-drawing.pdf", b"%PDF-", "application/pdf")},
+    ).status_code in {404, 405}
 
     request = client.post(f"{base}/acceptance-requests", headers=headers, json={
         "number": "PYC-TEST-1", "work_item_id": work_id, "daily_report_id": report.json()["id"],
@@ -116,7 +100,22 @@ def test_project_report_photo_ai_and_acceptance(tmp_path, monkeypatch):
     record = client.post(f"{base}/acceptance-records", headers=headers, json={"request_id": request.json()["id"]})
     assert record.status_code == 201, record.text
     record_id = record.json()["id"]
-    evidence = [[photo_id], [f"document:{source.json()['id']}"], [f"page:{page_id}"]]
+    # Source documents now exist read-only; seed one for acceptance evidence refs.
+    with factory() as db:
+        from app.engineering_ai.models import DocumentPage, SourceDocument
+
+        db.add(SourceDocument(
+            id="doc-evidence", project_id=project.json()["id"], type="drawing",
+            original_name="evidence.pdf", document_key="evidence",
+            original_path=str(tmp_path / "evidence.pdf"), sha256="e" * 64,
+            status="ready", page_count=1,
+        ))
+        db.add(DocumentPage(
+            id="page-evidence-1", project_id=project.json()["id"],
+            document_id="doc-evidence", page_number=1,
+        ))
+        db.commit()
+    evidence = [[photo_id], ["document:doc-evidence"], ["page:page-evidence-1"]]
     checklist = [{"item": item["item"], "state": "yes", "evidence_refs": evidence[index] if index < len(evidence) else []}
                  for index, item in enumerate(record.json()["checklist"])]
     updated = client.patch(f"{base}/acceptance-records/{record_id}", headers=headers,

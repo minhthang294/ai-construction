@@ -1,4 +1,3 @@
-import os
 import sys
 from pathlib import Path
 
@@ -17,33 +16,12 @@ from app.engineering_ai.dependencies import (
     get_answer_provider,
     get_current_user,
     get_db,
-    get_embedding_provider,
-    get_max_pages,
-    get_ocr_engine,
-    get_ocr_languages,
-    get_session_factory,
-    get_vision_provider,
     project_access,
     project_editor_access,
 )
-from app.engineering_ai.embeddings import HashingEmbeddingProvider
-from app.engineering_ai.models import Base
-from app.engineering_ai.ocr import NullOcrEngine, OcrResult
+from app.engineering_ai.models import Base, DocumentPage, SourceDocument
 from app.engineering_ai.providers import ExtractiveProvider, ProviderAnswer
 from app.engineering_ai.router import router
-from app.engineering_ai.vision import NoopVisionProvider
-
-
-class MockOcrEngine:
-    name = "mock-ocr"
-
-    def __init__(self) -> None:
-        self.result = OcrResult(text="", confidence=None, engine=self.name)
-        self.calls = 0
-
-    def extract_text(self, image_bytes: bytes, languages: str) -> OcrResult:
-        self.calls += 1
-        return self.result
 
 
 class MockAnswerProvider:
@@ -59,24 +37,6 @@ class MockAnswerProvider:
         if self.response is not None:
             return ProviderAnswer(text=self.response)
         return self._fallback.answer(question, contexts)
-
-
-class MockVisionProvider:
-    name = "mock-vision"
-
-    def __init__(self) -> None:
-        self.calls = 0
-        self.suggestion = None
-
-    def suggest(self, image_bytes, mime_type):
-        from app.engineering_ai.vision import VisionSuggestion
-
-        self.calls += 1
-        return self.suggestion or VisionSuggestion(
-            suggested_category="progress",
-            suggested_caption="Khu vực thi công",
-            confidence=0.8,
-        )
 
 
 @pytest.fixture(autouse=True)
@@ -106,27 +66,12 @@ def session_factory(db_engine):
 
 
 @pytest.fixture()
-def ocr_engine():
-    return MockOcrEngine()
-
-
-@pytest.fixture()
 def answer_provider():
     return MockAnswerProvider()
 
 
 @pytest.fixture()
-def vision_provider():
-    return MockVisionProvider()
-
-
-@pytest.fixture()
-def embedding_provider():
-    return HashingEmbeddingProvider(64)
-
-
-@pytest.fixture()
-def client(session_factory, ocr_engine, answer_provider, vision_provider, embedding_provider):
+def client(session_factory, answer_provider):
     def override_get_db():
         db = session_factory()
         try:
@@ -137,50 +82,88 @@ def client(session_factory, ocr_engine, answer_provider, vision_provider, embedd
     app = FastAPI()
     app.include_router(router, prefix="/api/v1")
     app.dependency_overrides[get_db] = override_get_db
-    app.dependency_overrides[get_session_factory] = lambda: session_factory
     app.dependency_overrides[get_current_user] = lambda: type("U", (), {"id": "test-user"})()
     app.dependency_overrides[project_access] = lambda project_id: None
     app.dependency_overrides[project_editor_access] = lambda project_id: None
-    app.dependency_overrides[get_ocr_engine] = lambda: ocr_engine
     app.dependency_overrides[get_answer_provider] = lambda: answer_provider
-    app.dependency_overrides[get_embedding_provider] = lambda: embedding_provider
-    app.dependency_overrides[get_vision_provider] = lambda: vision_provider
-    app.dependency_overrides[get_max_pages] = lambda: 100
-    app.dependency_overrides[get_ocr_languages] = lambda: "vie+eng"
     with TestClient(app) as test_client:
         yield test_client
 
 
-def make_text_pdf(pages: list[str]) -> bytes:
-    import pymupdf
+def add_source_document(
+    session_factory,
+    *,
+    project_id="p1",
+    suffix="a",
+    document_id=None,
+    page_numbers=(1, 2),
+    effective=True,
+    current=True,
+    status="ready",
+    document_type="drawing",
+    original_name=None,
+    drawing_number="BV-01",
+    revision="A",
+    page_rendered=False,
+    version=1,
+    document_key=None,
+    sha256=None,
+    original_path=None,
+):
+    """Seed an existing source document/page set (owner no longer uploads PDFs)."""
 
-    document = pymupdf.open()
-    for text in pages:
-        page = document.new_page()
-        page.insert_text((72, 72), text, fontsize=11)
-    data = document.tobytes()
-    document.close()
-    return data
-
-
-def make_scanned_pdf() -> bytes:
-    import pymupdf
-
-    document = pymupdf.open()
-    page = document.new_page()
-    page.draw_rect(pymupdf.Rect(60, 60, 500, 700), color=(0, 0, 0), width=2)
-    page.draw_line((70, 120), (480, 120), color=(0, 0, 0), width=1)
-    data = document.tobytes()
-    document.close()
-    return data
-
-
-def upload_pdf(client, project_id="p1", filename="drawing.pdf", data=None):
-    payload = data if data is not None else make_text_pdf(["placeholder"])
-    return client.post(
-        f"/api/v1/projects/{project_id}/documents",
-        files=[("file", (filename, payload, "application/pdf"))],
+    document_id = document_id or f"doc-{suffix}"
+    document = SourceDocument(
+        id=document_id,
+        project_id=project_id,
+        type=document_type,
+        original_name=original_name or f"drawing-{suffix}.pdf",
+        document_key=document_key or f"drawing-{suffix}",
+        original_path=original_path or f"/tmp/drawing-{suffix}.pdf",
+        sha256=sha256 or (suffix * 64)[:64],
+        status=status,
+        is_current=current,
+        is_effective=effective,
+        version=version,
+        page_count=len(page_numbers),
+        drawing_number=drawing_number,
+        revision=revision,
     )
+    pages = []
+    for number in page_numbers:
+        page = DocumentPage(
+            id=f"{document_id}-page-{number}",
+            project_id=project_id,
+            document_id=document_id,
+            page_number=number,
+            drawing_number=drawing_number,
+            revision=revision,
+        )
+        if page_rendered:
+            from app.engineering_ai import storage
+
+            path = storage.page_render_path(project_id, document_id, number)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(
+                b"\x89PNG\r\n\x1a\n"
+                + b"\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00"
+                + b"\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01"
+                + b"\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+            )
+            page.rendered_path = str(path)
+        pages.append(page)
+    with session_factory() as db:
+        db.add_all([document, *pages])
+        page_rows = [
+            {"id": page.id, "page_number": page.page_number} for page in pages
+        ]
+        db.commit()
+    return {
+        "id": document_id,
+        "status": status,
+        "page_count": len(page_numbers),
+        "pages": page_rows,
+    }
 
 
 def add_page_extraction(
@@ -239,15 +222,13 @@ def cover_extraction(value="50"):
 
 
 @pytest.fixture()
-def digital_document(client):
-    pdf = make_text_pdf(
-        [
-            "Drawing No: BV-01 Rev A. Bridge abutment concrete grade C30. "
-            "All dimensions in millimetres. Approved by site engineer.",
-            "Specification section: concrete cover for abutment is 50 mm. "
-            "Reinforcement shall comply with the project specification.",
-        ]
+def digital_document(client, session_factory):
+    document = add_source_document(
+        session_factory,
+        suffix="bv01",
+        page_numbers=(1, 2),
+        document_type="specification",
+        original_name="BV-01.pdf",
     )
-    response = upload_pdf(client, filename="BV-01.pdf", data=pdf)
-    assert response.status_code == 201, response.text
-    return response.json()
+    assert document["status"] == "ready"
+    return document
