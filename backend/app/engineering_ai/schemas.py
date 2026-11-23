@@ -181,6 +181,12 @@ class StageCandidateOut(BaseModel):
     component_type: str
 
 
+class EarlierEventOut(BaseModel):
+    event_id: str
+    event_date: date
+    status: str
+
+
 class ProgressParseItemOut(BaseModel):
     raw: str
     code: str
@@ -188,6 +194,10 @@ class ProgressParseItemOut(BaseModel):
     zone: Optional[str] = None
     segment: Optional[int] = None
     status_guess: Literal["COMPLETED", "IN_PROGRESS"] = "COMPLETED"
+    stage_definition_id: Optional[str] = None
+    stage_candidates: List[StageCandidateOut] = Field(default_factory=list)
+    earlier_events: List[EarlierEventOut] = Field(default_factory=list)
+    in_batch: bool = False
 
 
 class ProgressParseLineOut(BaseModel):
@@ -207,6 +217,8 @@ class ProgressParseQuestionOut(BaseModel):
     kind: str
     message_vi: str
     options: List[ProgressParseQuestionOptionOut] = Field(default_factory=list)
+    codes: List[str] = Field(default_factory=list)
+    apply: dict[str, Any] = Field(default_factory=dict)
 
 
 class ProgressParseResponse(BaseModel):

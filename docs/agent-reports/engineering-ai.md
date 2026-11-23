@@ -1,5 +1,122 @@
 # Engineering AI Agent Report
 
+## 2026-11-23 — fix: per-component stages, action-verb matching, recent-usage suggestion
+
+Real-data bug fixed without changing the API shape (additive only):
+
+- Candidates now come only from each component's own `component_stages` joined
+  to `component_stage_definitions`. Project-wide definitions that are not
+  attached can never appear (covered by a seeded unattached `999 mm` definition).
+- Work is matched against the START of the stage name (action verb), not a
+  substring. `đục` matches `Đục ...`; `Tẩy gỉ ... vùng đục` and
+  `Vệ sinh ... sau khi đục` no longer match.
+- Refinement: phrases with extra verbs (`đục om vỡ`, `đục hà bám`, `đục lỗ`)
+  keep only own stages containing those tokens; bare `đục`/`đục bê tông` prefer
+  the om-vỡ variant.
+- Suggested default stage = the stage name most recently used in non-voided
+  events: the component's own latest event first, else the project-wide latest
+  for the same component type + verb, mapped back to an own stage by name.
+  A suggestion is pre-selected (`stage_definition_id` on the item and in
+  `apply.stage_definition_id`) and listed first. A `multiple_stage` question is
+  produced only when the component's own refined candidates are still >1.
+- `completed_earlier` is evaluated only for the selected/suggested stage, and
+  its options/event ids refer to that stage.
+- Duplicate option labels are disambiguated with the stage code when two own
+  definitions share a name.
+- Fixture rebuilt to mirror real structure: each pile owns the four stages
+  (`Đục hà bám 10 mm`, `Đục bê tông om vỡ`, `Tẩy gỉ ... vùng đục`,
+  `Vệ sinh ... sau khi đục`); each beam owns 20/50/70/100 mm om-vỡ stages; plus
+  unattached definitions for other groups. Recent events drive 50 mm for
+  F-66-67 and 70 mm for A-B-153.
+
+Real-copy check (read-only copy, project `DAP - PD1 da duyet`, message
+`Cọc đục ngày 23/11 / I69,70, H67 / Dầm f66-67, a-b153`):
+- I69, I70 → `1d07eccd-…` "Đục bê tông om vỡ dày trung bình t", one candidate,
+  no `multiple_stage` question.
+- H67 → unknown code question + `unknown_codes=["H67"]`.
+- F-66-67 → selected `2d0769f3-…` "…50 mm"; own candidates 50 + 70 → compact
+  `multiple_stage` with 50 first; `completed_earlier` for the 22/11 50 mm event.
+- A-B-153 → selected `fdd0ba71-…` "…70 mm"; own candidate only → no
+  `multiple_stage`; `outside_scope` (Bunke – PD1 vs Cầu chính – PD2);
+  `completed_earlier` for its 22/11 70 mm event.
+- No writes were made; the copy was opened with SQLite `mode=ro`.
+
+Tests: golden now asserts own-stage candidates, unattached definitions excluded,
+F-66-67 50 / A-B-153 70 preselect, 4 mm options with suggestion first,
+per-item earlier events. Added duplicate-name label uniqueness test. Contract
+JSON example regenerated from the new golden fixture.
+
+Verification (temp DB/storage):
+```bash
+cd backend
+DATABASE_URL=sqlite:///<tmp>/app.db SITE_REPORT_STORAGE=<tmp>/site \
+ENGINEERING_AI_STORAGE=<tmp>/engineering ACCEPTANCE_STORAGE=<tmp>/acceptance \
+../.venv/Scripts/python -m pytest tests/engineering_ai -q   # 121 passed
+../.venv/Scripts/python -m pytest tests -q                  # 355 passed, 6 skipped, 0 failed
+
+cd frontend && npm test          # 207 passed (33 files)
+cd frontend && npm run build     # OK
+```
+
+Frontend: no change required — `frontend/src/features/site/lib/progressPaste.ts`
+already reads item `stage_definition_id`, `stage_candidates`, `apply.event_ids`
+and question `codes`.
+
+Unresolved: if no own stage starts with the verb, no candidate is returned and
+the line warns for manual choice; the suggestion cannot use a definition that is
+not attached to the component. When several own definitions share the same name,
+labels include the stage code but the UI still shows a long list.
+
+## 2026-11-23 — wave 3b: progress-parse output ready for the paste UI
+
+`POST /ai/progress-parse` now returns everything the paste-message UI needs
+without a second lookup; it stays read-only.
+
+Per item (`ProgressParseItemOut`):
+- `stage_definition_id`: set when the line has exactly one candidate stage.
+- `stage_candidates`: the candidate list when there is more than one (empty
+  otherwise).
+- `earlier_events`: `[{event_id, event_date, status}]` from the earlier-COMPLETED
+  check (newest first); same events feed the question.
+- `in_batch`: `true` when the component belongs to the requested
+  `construction_batch_components` batch.
+- Existing `raw/code/component_id/zone/segment/status_guess` unchanged.
+
+Every question now has `codes` (target canonical codes) and `apply`:
+- duplicate: `{"action":"dedupe","codes":[...]}`
+- completed earlier:
+  `{"action":"correct_earlier_to_in_progress","event_ids":[...],"codes":[...]}`
+- multiple stages:
+  `{"action":"set_stage","stage_definition_id":null,"codes":[...]}`; the UI
+  substitutes the chosen option value (a stage-definition id)
+- outside: `{"action":"skip_codes","codes":[...]}`
+- unknown code: `{"action":"skip_codes","codes":[...]}`
+- `đang` status: `{"action":"set_status","codes":[...]}`
+
+Tests updated: golden message asserts per-item stage fields, the F-66-67 item's
+`earlier_events`, all `in_batch=false`, every question carries `codes` + the four
+`apply.action` values, plus the option values. Batch test asserts `A-B-153`
+`in_batch=true` and is absent from the outside question while the two other
+beams remain. Work text now drops the date word (`Cọc đục`, `Dầm đục`).
+
+`docs/API_CONTRACTS.md` has the full request/response JSON example generated from
+the seeded golden 22/11 message (29 items, 6 questions, stage ids, earlier event,
+apply hints). It is validated as JSON.
+
+Verification (temp DB/storage):
+```bash
+cd backend
+DATABASE_URL=sqlite:///<tmp>/app.db SITE_REPORT_STORAGE=<tmp>/site \
+ENGINEERING_AI_STORAGE=<tmp>/engineering ACCEPTANCE_STORAGE=<tmp>/acceptance \
+../.venv/Scripts/python -m pytest tests/engineering_ai -q   # 120 passed
+../.venv/Scripts/python -m pytest tests -q                  # 354 passed, 6 skipped, 0 failed
+```
+
+Unresolved: for multiple-stage questions `apply.stage_definition_id` is null on
+purpose; the client must copy the selected option `value` into it before calling
+the existing daily endpoint. `earlier_events` lists all earlier COMPLETED events
+for the component/stage candidates, so the UI can offer per-event correction.
+
 ## 2026-11-23 — follow-up: voided events, batch-aware parse, test shim removed
 
 - Voided progress events (`component_progress_events.voided_at`) are now excluded

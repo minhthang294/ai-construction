@@ -30,6 +30,7 @@ from ..core.component_models import (
 )
 from .embeddings import fold_text, tokenize
 from .schemas import (
+    EarlierEventOut,
     ProgressParseItemOut,
     ProgressParseLineOut,
     ProgressParseQuestionOptionOut,
@@ -70,6 +71,14 @@ class _ParsedLine:
     items: List[_Item] = field(default_factory=list)
 
 
+@dataclass
+class _ItemStageChoice:
+    candidates: List[StageDefinition] = field(default_factory=list)
+    selected: Optional[StageDefinition] = None
+    labels: Dict[str, str] = field(default_factory=dict)
+    earlier: List[ProgressEvent] = field(default_factory=list)
+
+
 def _parse_date(text: str, default_date: Optional[date]) -> Tuple[Optional[date], Optional[str]]:
     match = _DATE_RE.search(text)
     if match:
@@ -89,7 +98,9 @@ def _parse_date(text: str, default_date: Optional[date]) -> Tuple[Optional[date]
 
 
 def _clean_line(line: str) -> str:
-    return _DATE_RE.sub(" ", line).strip()
+    cleaned = _DATE_RE.sub(" ", line)
+    cleaned = re.sub(r"\b(?:ngày|ngay)\b", " ", cleaned, flags=re.IGNORECASE)
+    return cleaned.strip()
 
 
 def _line_type(line: str) -> Optional[str]:
@@ -159,26 +170,139 @@ def _verb_tokens(work_text: str) -> List[str]:
     ]
 
 
-def _stage_candidates(
-    definitions: List[StageDefinition], component_type: str, work_text: str
-) -> List[StageCandidateOut]:
+def _stage_name_key(definition: StageDefinition) -> str:
+    return " ".join(fold_text(definition.name).split())
+
+
+def _starts_with_verb(definition: StageDefinition, verb: str) -> bool:
+    """Match the action verb at the start of the stage name, not anywhere."""
+
+    return _stage_name_key(definition).startswith(verb)
+
+
+def _matching_stages(
+    own_definitions: List[StageDefinition], work_text: str
+) -> List[StageDefinition]:
     tokens = _verb_tokens(work_text)
-    if not tokens:
+    if not tokens or not own_definitions:
         return []
-    candidates = []
+    verb = tokens[0]
+    starts = [
+        definition
+        for definition in own_definitions
+        if _starts_with_verb(definition, verb)
+    ]
+    if not starts:
+        return []
+    extras = tokens[1:]
+    if extras:
+        subset = [
+            definition
+            for definition in starts
+            if all(token in _stage_name_key(definition) for token in extras)
+        ]
+        if subset:
+            return subset
+    # Bare "đục"/"đục bê tông": prefer the om-vỡ variant used by the project.
+    om_vo = [definition for definition in starts if "om vo" in _stage_name_key(definition)]
+    if om_vo:
+        return om_vo
+    be_tong = [
+        definition for definition in starts if "be tong" in _stage_name_key(definition)
+    ]
+    if be_tong:
+        return be_tong
+    return starts
+
+
+def _event_sort_key(event: ProgressEvent):
+    return (event.event_date, str(event.created_at or ""))
+
+
+def _suggested_stage(
+    component: StructuralComponent,
+    candidates: List[StageDefinition],
+    own_definitions: List[StageDefinition],
+    component_type: str,
+    verb: str,
+    events: List[ProgressEvent],
+    stage_by_id: Dict[str, ComponentStage],
+    definitions_by_id: Dict[str, StageDefinition],
+) -> Optional[StageDefinition]:
+    """Most recently used own stage, else project-wide for type + verb."""
+
+    own_ids = {definition.id for definition in own_definitions}
+    own_events = [
+        event
+        for event in events
+        if event.component_id == component.id
+        and (stage := stage_by_id.get(event.component_stage_id)) is not None
+        and stage.stage_definition_id in own_ids
+        and (definition := definitions_by_id.get(stage.stage_definition_id)) is not None
+        and _starts_with_verb(definition, verb)
+    ]
+    suggested_name: Optional[str] = None
+    if own_events:
+        latest = max(own_events, key=_event_sort_key)
+        stage = stage_by_id[latest.component_stage_id]
+        definition = definitions_by_id.get(stage.stage_definition_id)
+        suggested_name = _stage_name_key(definition) if definition else None
+    else:
+        project_events = [
+            event
+            for event in events
+            if (stage := stage_by_id.get(event.component_stage_id)) is not None
+            and (definition := definitions_by_id.get(stage.stage_definition_id)) is not None
+            and definition.component_type == component_type
+            and _starts_with_verb(definition, verb)
+        ]
+        if project_events:
+            latest = max(project_events, key=_event_sort_key)
+            stage = stage_by_id[latest.component_stage_id]
+            definition = definitions_by_id.get(stage.stage_definition_id)
+            suggested_name = _stage_name_key(definition) if definition else None
+    if not suggested_name:
+        return None
+    return next(
+        (
+            definition
+            for definition in candidates
+            if _stage_name_key(definition) == suggested_name
+        ),
+        None,
+    )
+
+
+def _ordered_candidates(
+    candidates: List[StageDefinition], selected: Optional[StageDefinition]
+) -> List[StageDefinition]:
+    if selected is None or len(candidates) < 2:
+        return candidates
+    return [selected] + [
+        definition for definition in candidates if definition.id != selected.id
+    ]
+
+
+def _option_labels(
+    definitions: List[StageDefinition],
+) -> Dict[str, str]:
+    names = Counter(_stage_name_key(definition) for definition in definitions)
+    labels: Dict[str, str] = {}
     for definition in definitions:
-        if definition.component_type != component_type:
-            continue
-        folded = fold_text(f"{definition.code} {definition.name}")
-        if any(token in folded for token in tokens):
-            candidates.append(
-                StageCandidateOut(
-                    stage_definition_id=definition.id,
-                    name=" ".join(str(definition.name).split()),
-                    component_type=component_type,
-                )
-            )
-    return candidates
+        name = " ".join(str(definition.name or "").split()) or definition.code
+        if names[_stage_name_key(definition)] > 1:
+            labels[definition.id] = f"{name} · {definition.code}"
+        else:
+            labels[definition.id] = name
+    return labels
+
+
+def _candidate_out(definition: StageDefinition, label: Optional[str] = None) -> StageCandidateOut:
+    return StageCandidateOut(
+        stage_definition_id=definition.id,
+        name=label or " ".join(str(definition.name or "").split()) or definition.code,
+        component_type=definition.component_type,
+    )
 
 
 def _question_option(label: str, value: str) -> ProgressParseQuestionOptionOut:
@@ -375,6 +499,8 @@ def progress_parse(
                         _question_option("Bỏ trùng", "dedupe"),
                         _question_option("Mã khác", "replace_code"),
                     ],
+                    codes=[item.code],
+                    apply={"action": "dedupe", "codes": [item.code]},
                 )
             )
 
@@ -390,43 +516,81 @@ def progress_parse(
                     _question_option("Bỏ qua", "skip"),
                     _question_option("Mã khác", "replace_code"),
                 ],
+                codes=[code],
+                apply={"action": "skip_codes", "codes": [code]},
             )
         )
 
-    # Candidate stages per line (work phrase + component type).
-    line_candidates: Dict[int, List[StageCandidateOut]] = {}
-    for index, line in enumerate(lines):
-        candidates = _stage_candidates(definitions, line.component_type, line.work_text)
-        line_candidates[index] = candidates
-        if not candidates:
-            warnings.append(
-                f"Chưa khớp được công đoạn cho nhóm '{line.work_text}'; cần chọn tay."
-            )
-
-    stage_by_component: Dict[str, List[ComponentStage]] = {}
+    # Candidate stages come only from each component's OWN component_stages.
+    definitions_by_id = {definition.id: definition for definition in definitions}
+    stage_by_id = {stage.id: stage for stage in stages}
+    own_defs_by_component: Dict[str, Dict[str, StageDefinition]] = {}
     for stage in stages:
-        stage_by_component.setdefault(stage.component_id, []).append(stage)
+        definition = definitions_by_id.get(stage.stage_definition_id)
+        if definition is not None:
+            own_defs_by_component.setdefault(stage.component_id, {})[
+                definition.id
+            ] = definition
     completed_events = [
         event for event in events if event.status == "COMPLETED" and event_date is not None
     ]
     seen_completed: set[str] = set()
 
-    for index, line in enumerate(lines):
-        candidates = line_candidates[index]
-        candidate_ids = {candidate.stage_definition_id for candidate in candidates}
-        stage_ids = {
-            stage.id
-            for stage in stages
-            if stage.component_id in {item.component.id for item in line.items if item.component}
-            and stage.stage_definition_id in candidate_ids
-        }
+    line_candidates: List[List[StageCandidateOut]] = []
+    line_item_choices: List[List[_ItemStageChoice]] = []
+    for line in lines:
+        tokens = _verb_tokens(line.work_text)
+        verb = tokens[0] if tokens else ""
+        line_choices: List[_ItemStageChoice] = []
+        union: List[StageCandidateOut] = []
         for item in line.items:
+            component = item.component
+            if component is None or not verb:
+                line_choices.append(_ItemStageChoice())
+                continue
+            own_defs = list(own_defs_by_component.get(component.id, {}).values())
+            candidates = _matching_stages(own_defs, line.work_text)
+            selected = _suggested_stage(
+                component,
+                candidates,
+                own_defs,
+                line.component_type,
+                verb,
+                events,
+                stage_by_id,
+                definitions_by_id,
+            )
+            if selected is None and len(candidates) == 1:
+                selected = candidates[0]
+            ordered = _ordered_candidates(candidates, selected)
+            labels = _option_labels(ordered)
+            line_choices.append(
+                _ItemStageChoice(
+                    candidates=ordered, selected=selected, labels=labels
+                )
+            )
+            seen_ids = {candidate.stage_definition_id for candidate in union}
+            for definition in ordered:
+                if definition.id not in seen_ids:
+                    union.append(_candidate_out(definition, labels.get(definition.id)))
+                    seen_ids.add(definition.id)
+        line_candidates.append(union)
+        line_item_choices.append(line_choices)
+        if line.items and not union:
+            warnings.append(
+                f"Chưa khớp được công đoạn trong component_stages cho nhóm "
+                f"'{line.work_text}'; cần chọn tay."
+            )
+
+    for index, line in enumerate(lines):
+        for position, item in enumerate(line.items):
             component = item.component
             if component is None:
                 continue
+            choice = line_item_choices[index][position]
 
-            # Multiple plausible stages for the work phrase.
-            if len(candidates) > 1 and item.component.id not in {
+            # Multiple plausible own stages for the work phrase (suggestion first).
+            if len(choice.candidates) > 1 and component.id not in {
                 q.id.split("stage:", 1)[1] for q in questions if q.kind == "multiple_stage"
             }:
                 questions.append(
@@ -434,48 +598,79 @@ def progress_parse(
                         id=f"stage:{component.id}",
                         kind="multiple_stage",
                         message_vi=(
-                            f"Cấu kiện {component.canonical_code} có {len(candidates)} công "
-                            f"đoạn khớp '{line.work_text}'. Chọn công đoạn đúng:"
+                            f"Cấu kiện {component.canonical_code} có "
+                            f"{len(choice.candidates)} công đoạn riêng khớp "
+                            f"'{line.work_text}'. Chọn công đoạn đúng:"
                         ),
                         options=[
-                            _question_option(candidate.name, candidate.stage_definition_id)
-                            for candidate in candidates
+                            _question_option(
+                                choice.labels.get(candidate.id, candidate.name),
+                                candidate.id,
+                            )
+                            for candidate in choice.candidates
                         ],
+                        codes=[component.canonical_code],
+                        apply={
+                            "action": "set_stage",
+                            "stage_definition_id": (
+                                choice.selected.id if choice.selected else None
+                            ),
+                            "codes": [component.canonical_code],
+                        },
                     )
                 )
 
+            selected = choice.selected
+            if selected is None or event_date is None:
+                continue
+            stage_ids = {
+                stage.id
+                for stage in stages
+                if stage.component_id == component.id
+                and stage.stage_definition_id == selected.id
+            }
             earlier = [
                 event
                 for event in completed_events
-                if event_date is not None
-                and event.component_id == component.id
+                if event.component_id == component.id
                 and event.component_stage_id in stage_ids
                 and event.event_date < event_date
             ]
-            if earlier:
-                latest = max(earlier, key=lambda event: event.event_date)
-                if latest.id in seen_completed:
-                    continue
-                seen_completed.add(latest.id)
-                questions.append(
-                    ProgressParseQuestionOut(
-                        id=f"completed:{component.id}:{latest.id}",
-                        kind="completed_earlier",
-                        message_vi=(
-                            f"{component.canonical_code} đã có COMPLETED ngày "
-                            f"{latest.event_date:%d/%m/%Y}, trước ngày {event_date:%d/%m/%Y}. "
-                            "Bạn muốn ghi thế nào?"
+            if not earlier:
+                continue
+            choice.earlier = sorted(
+                earlier, key=lambda event: event.event_date, reverse=True
+            )
+            latest = choice.earlier[0]
+            if latest.id in seen_completed:
+                continue
+            seen_completed.add(latest.id)
+            questions.append(
+                ProgressParseQuestionOut(
+                    id=f"completed:{component.id}:{latest.id}",
+                    kind="completed_earlier",
+                    message_vi=(
+                        f"{component.canonical_code} đã có COMPLETED ngày "
+                        f"{latest.event_date:%d/%m/%Y}, trước ngày {event_date:%d/%m/%Y} "
+                        f"cho công đoạn '{choice.labels.get(selected.id, selected.name)}'. "
+                        "Bạn muốn ghi thế nào?"
+                    ),
+                    options=[
+                        _question_option("Ghi thêm hoàn thành", "add_completed"),
+                        _question_option(
+                            "Ngày trước là đang làm, hôm nay xong",
+                            "previous_was_in_progress",
                         ),
-                        options=[
-                            _question_option("Ghi thêm hoàn thành", "add_completed"),
-                            _question_option(
-                                "Ngày trước là đang làm, hôm nay xong",
-                                "previous_was_in_progress",
-                            ),
-                            _question_option("Bỏ qua", "skip"),
-                        ],
-                    )
+                        _question_option("Bỏ qua", "skip"),
+                    ],
+                    codes=[component.canonical_code],
+                    apply={
+                        "action": "correct_earlier_to_in_progress",
+                        "event_ids": [event.id for event in choice.earlier],
+                        "codes": [component.canonical_code],
+                    },
                 )
+            )
 
     # Components explicitly included in a construction batch are executed with
     # this message even when their design zone/segment differs.
@@ -537,10 +732,23 @@ def progress_parse(
                     _question_option("Thi công cùng đợt", "include"),
                     _question_option("Bỏ qua", "skip"),
                 ],
+                codes=[component.canonical_code for component in components_outside],
+                apply={
+                    "action": "skip_codes",
+                    "codes": [component.canonical_code for component in components_outside],
+                },
             )
         )
 
     if in_progress:
+        resolved_codes = list(
+            dict.fromkeys(
+                item.code
+                for line in lines
+                for item in line.items
+                if item.component is not None
+            )
+        )
         questions.append(
             ProgressParseQuestionOut(
                 id="status:in_progress",
@@ -553,6 +761,8 @@ def progress_parse(
                     _question_option("Hoàn thành", "COMPLETED"),
                     _question_option("Đang thi công", "IN_PROGRESS"),
                 ],
+                codes=resolved_codes,
+                apply={"action": "set_status", "codes": resolved_codes},
             )
         )
 
@@ -564,12 +774,17 @@ def progress_parse(
     out_lines: List[ProgressParseLineOut] = []
     for index, line in enumerate(lines):
         items_out = []
-        for item in line.items:
+        for position, item in enumerate(line.items):
             component = item.component
             segment = (
                 segments.get(component.segment_id) if component and component.segment_id in segments else None
             )
             zone = zones.get(segment.zone_id) if segment and segment.zone_id in zones else None
+            choice = (
+                line_item_choices[index][position]
+                if index < len(line_item_choices) and position < len(line_item_choices[index])
+                else _ItemStageChoice()
+            )
             items_out.append(
                 ProgressParseItemOut(
                     raw=item.raw,
@@ -578,6 +793,28 @@ def progress_parse(
                     zone=zone.name if zone else None,
                     segment=segment.number if segment else None,
                     status_guess=item.status_guess,
+                    stage_definition_id=(
+                        choice.selected.id
+                        if component and choice.selected is not None
+                        else None
+                    ),
+                    stage_candidates=(
+                        [
+                            _candidate_out(candidate, choice.labels.get(candidate.id))
+                            for candidate in choice.candidates
+                        ]
+                        if component and len(choice.candidates) > 1
+                        else []
+                    ),
+                    earlier_events=[
+                        EarlierEventOut(
+                            event_id=event.id,
+                            event_date=event.event_date,
+                            status=event.status,
+                        )
+                        for event in choice.earlier
+                    ] if component else [],
+                    in_batch=bool(component and component.id in batch_component_ids),
                 )
             )
         out_lines.append(

@@ -1,6 +1,7 @@
 """Golden tests for the deterministic Zalo progress parser (read-only)."""
 
 from datetime import date
+from typing import Dict
 
 from app.core.component_models import (
     ComponentAlias,
@@ -48,23 +49,32 @@ def _seed(session_factory):
         db.add_all([pd2, bunke_segment])
         db.flush()
 
-        pile_stage = StageDefinition(
-            project_id="p1", component_type="pile", code="DUC-BT",
-            name="Đục bê tông", position=0,
-        )
-        beam_stages = [
-            StageDefinition(
-                project_id="p1", component_type="beam", code=code, name=name, position=index
-            )
-            for index, (code, name) in enumerate(
-                [
-                    ("DUC-SUON", "Đục sườn"),
-                    ("DUC-DAY", "Đục đáy"),
-                    ("DUC-OM", "Đục om vỡ"),
-                ]
-            )
+        # Every component owns its stage list; project-wide definitions that are
+        # not attached must never become candidates.
+        pile_stage_names = [
+            "Đục hà bám chiều dày trung bình 10 mm",
+            "Đục bê tông om vỡ dày trung bình t",
+            "Tẩy gỉ cốt thép theo tỷ lệ vùng đục",
+            "Vệ sinh bề mặt cọc sau khi đục",
         ]
-        db.add_all([pile_stage, *beam_stages])
+        beam_stage_names = {
+            mm: f"Đục bê tông om vỡ dày trung bình {mm} mm"
+            for mm in (20, 50, 70, 100)
+        }
+        db.add_all(
+            [
+                StageDefinition(
+                    project_id="p1", component_type="pile",
+                    code="OTHER-PILE", name="Đục bê tông om vỡ dày trung bình 999 mm",
+                    position=0,
+                ),
+                StageDefinition(
+                    project_id="p1", component_type="beam",
+                    code="OTHER-BEAM", name="Đục bê tông om vỡ dày trung bình 999 mm",
+                    position=0,
+                ),
+            ]
+        )
         db.flush()
 
         piles = []
@@ -87,38 +97,91 @@ def _seed(session_factory):
             beams.append(component)
         db.flush()
 
-        pile_stage_rows = []
+        om_vo_by_code: Dict[str, StageDefinition] = {}
+        component_stage_rows: Dict[tuple[str, str], ComponentStage] = {}
         for component in piles:
-            row = ComponentStage(
-                component_id=component.id, stage_definition_id=pile_stage.id,
-                repair_scope_id="scope-1", created_by="u1",
-            )
-            db.add(row)
-            pile_stage_rows.append(row)
-        beam_stage_rows = []
-        for component in beams:
-            rows = []
-            for definition in beam_stages:
+            for index, name in enumerate(pile_stage_names):
+                definition = StageDefinition(
+                    project_id="p1", component_type="pile",
+                    code=f"{component.canonical_code}-P{index}", name=name, position=index,
+                )
+                db.add(definition)
+                db.flush()
                 row = ComponentStage(
                     component_id=component.id, stage_definition_id=definition.id,
                     repair_scope_id="scope-1", created_by="u1",
                 )
                 db.add(row)
-                rows.append(row)
-            beam_stage_rows.append(rows)
+                component_stage_rows[(component.id, definition.id)] = row
+                if "om vỡ" in name:
+                    om_vo_by_code[component.canonical_code] = definition
+
+        beam_om_vo_by_code: Dict[str, Dict[int, StageDefinition]] = {}
+        for component in beams:
+            beam_om_vo_by_code[component.canonical_code] = {}
+            for index, (mm, name) in enumerate(beam_stage_names.items()):
+                definition = StageDefinition(
+                    project_id="p1", component_type="beam",
+                    code=f"{component.canonical_code}-{mm}", name=name, position=index,
+                )
+                db.add(definition)
+                db.flush()
+                row = ComponentStage(
+                    component_id=component.id, stage_definition_id=definition.id,
+                    repair_scope_id="scope-1", created_by="u1",
+                )
+                db.add(row)
+                component_stage_rows[(component.id, definition.id)] = row
+                beam_om_vo_by_code[component.canonical_code][mm] = definition
         db.flush()
 
-        # A previous COMPLETED for F-66-67 must raise the "already completed" question.
+        # Recent real-world usage drives the suggested stage.
+        i49 = next(component for component in piles if component.canonical_code == "I49")
         db.add(
             ProgressEvent(
-                component_id=beams[0].id,
-                component_stage_id=beam_stage_rows[0][0].id,
-                event_date=date(2026, 11, 20),
-                status="COMPLETED",
-                quantity=0.1,
-                unit="m3",
+                component_id=i49.id,
+                component_stage_id=component_stage_rows[
+                    (i49.id, om_vo_by_code["I49"].id)
+                ].id,
+                event_date=date(2026, 11, 21),
+                status="IN_PROGRESS",
             )
         )
+        f66 = next(component for component in beams if component.canonical_code == "F-66-67")
+        f66_50 = beam_om_vo_by_code["F-66-67"][50]
+        db.add_all(
+            [
+                ProgressEvent(
+                    component_id=f66.id,
+                    component_stage_id=component_stage_rows[(f66.id, f66_50.id)].id,
+                    event_date=date(2026, 11, 20),
+                    status="COMPLETED",
+                    quantity=0.1,
+                    unit="m3",
+                ),
+                ProgressEvent(
+                    component_id=f66.id,
+                    component_stage_id=component_stage_rows[(f66.id, f66_50.id)].id,
+                    event_date=date(2026, 11, 22),
+                    status="COMPLETED",
+                    quantity=0.1,
+                    unit="m3",
+                ),
+            ]
+        )
+        for code, mm in (("A-B-153", 70), ("B-D-153", 70)):
+            component = next(item for item in beams if item.canonical_code == code)
+            definition = beam_om_vo_by_code[code][mm]
+            db.add(
+                ProgressEvent(
+                    component_id=component.id,
+                    component_stage_id=component_stage_rows[(component.id, definition.id)].id,
+                    event_date=date(2026, 11, 22),
+                    status="COMPLETED",
+                    quantity=0.1,
+                    unit="m3",
+                )
+            )
         db.commit()
         return {
             "zone": chinh.id,
@@ -127,9 +190,15 @@ def _seed(session_factory):
             "beam_ids": {component.id for component in beams},
             "by_code": {component.canonical_code: component.id for component in piles},
             "beams": beams,
-            "pile_stage": pile_stage.id,
-            "beam_stages": [definition.id for definition in beam_stages],
-            "f66": beams[0].id,
+            "om_vo_by_code": {
+                code: definition.id for code, definition in om_vo_by_code.items()
+            },
+            "pile_stage_name": "Đục bê tông om vỡ dày trung bình t",
+            "beam_om_vo_by_code": {
+                code: {mm: definition.id for mm, definition in mapping.items()}
+                for code, mapping in beam_om_vo_by_code.items()
+            },
+            "f66": f66.id,
         }
 
 
@@ -162,6 +231,43 @@ def test_golden_zalo_message_parses_26_piles_3_beams_and_questions(client, sessi
     assert {item["status_guess"] for line in body["lines"] for item in line["items"]} == {
         "COMPLETED"
     }
+    assert {line["work_text"] for line in body["lines"] if line["component_type"] == "pile"} == {
+        "Cọc đục"
+    }
+    assert all(
+        line["work_text"] == "Dầm đục"
+        for line in body["lines"] if line["component_type"] == "beam"
+    )
+
+    pile_items = [
+        item for line in body["lines"] if line["component_type"] == "pile"
+        for item in line["items"] if item["component_id"]
+    ]
+    beam_items = [
+        item for line in body["lines"] if line["component_type"] == "beam"
+        for item in line["items"] if item["component_id"]
+    ]
+    assert pile_items and beam_items
+    assert all(
+        item["stage_definition_id"] == seeded["om_vo_by_code"][item["code"]]
+        for item in pile_items
+    )
+    assert all(item["stage_candidates"] == [] for item in pile_items)
+    assert all(item["stage_definition_id"] is not None for item in beam_items)
+    assert all(len(item["stage_candidates"]) == 4 for item in beam_items)
+    assert all(item["in_batch"] is False for item in pile_items + beam_items)
+    assert all(
+        "999 mm" not in option["name"]
+        for item in pile_items + beam_items
+        for option in item["stage_candidates"]
+    )
+    f66_item = next(item for item in beam_items if item["code"] == "F-66-67")
+    ab_item = next(item for item in beam_items if item["code"] == "A-B-153")
+    assert f66_item["stage_definition_id"] == seeded["beam_om_vo_by_code"]["F-66-67"][50]
+    assert ab_item["stage_definition_id"] == seeded["beam_om_vo_by_code"]["A-B-153"][70]
+    assert len(f66_item["earlier_events"]) == 1
+    assert f66_item["earlier_events"][0]["status"] == "COMPLETED"
+    assert f66_item["earlier_events"][0]["event_date"] == "2026-11-20"
 
     kinds = {question["kind"] for question in body["questions"]}
     assert kinds == {
@@ -170,8 +276,19 @@ def test_golden_zalo_message_parses_26_piles_3_beams_and_questions(client, sessi
         "multiple_stage",
         "outside_scope",
     }
+    assert all(question["codes"] for question in body["questions"])
+    assert {
+        question["apply"]["action"] for question in body["questions"]
+    } == {
+        "dedupe",
+        "correct_earlier_to_in_progress",
+        "set_stage",
+        "skip_codes",
+    }
     duplicate = next(q for q in body["questions"] if q["kind"] == "duplicate_code")
     assert "G65" in duplicate["message_vi"]
+    assert duplicate["codes"] == ["G65"]
+    assert duplicate["apply"] == {"action": "dedupe", "codes": ["G65"]}
     assert {option["value"] for option in duplicate["options"]} == {
         "dedupe",
         "replace_code",
@@ -180,6 +297,9 @@ def test_golden_zalo_message_parses_26_piles_3_beams_and_questions(client, sessi
     completed = next(q for q in body["questions"] if q["kind"] == "completed_earlier")
     assert "F-66-67" in completed["message_vi"]
     assert "20/11/2026" in completed["message_vi"]
+    assert completed["codes"] == ["F-66-67"]
+    assert completed["apply"]["action"] == "correct_earlier_to_in_progress"
+    assert len(completed["apply"]["event_ids"]) == 1
     assert {option["value"] for option in completed["options"]} == {
         "add_completed",
         "previous_was_in_progress",
@@ -190,13 +310,25 @@ def test_golden_zalo_message_parses_26_piles_3_beams_and_questions(client, sessi
         q for q in body["questions"]
         if q["kind"] == "multiple_stage" and "F-66-67" in q["message_vi"]
     )
-    assert len(stage_question["options"]) == 3
+    assert len(stage_question["options"]) == 4
+    assert stage_question["apply"]["action"] == "set_stage"
+    assert stage_question["apply"]["stage_definition_id"] == seeded[
+        "beam_om_vo_by_code"
+    ]["F-66-67"][50]
+    assert stage_question["options"][0]["value"] == seeded["beam_om_vo_by_code"][
+        "F-66-67"
+    ][50]
+    assert stage_question["codes"] == ["F-66-67"]
     assert {option["label_vi"] for option in stage_question["options"]} == {
-        "Đục sườn", "Đục đáy", "Đục om vỡ",
+        "Đục bê tông om vỡ dày trung bình 20 mm",
+        "Đục bê tông om vỡ dày trung bình 50 mm",
+        "Đục bê tông om vỡ dày trung bình 70 mm",
+        "Đục bê tông om vỡ dày trung bình 100 mm",
     }
 
     outside = next(q for q in body["questions"] if q["kind"] == "outside_scope")
     assert "Bunke" in outside["message_vi"]
+    assert outside["apply"]["action"] == "skip_codes"
     assert {option["value"] for option in outside["options"]} == {"include", "skip"}
 
 
@@ -351,7 +483,55 @@ def test_batch_member_beam_is_not_flagged_but_others_are(client, session_factory
     assert "A-B-153" not in outside["message_vi"]
     assert "F-66-67" in outside["message_vi"]
     assert "B-D-153" in outside["message_vi"]
+    items = [item for line in body["lines"] for item in line["items"]]
+    batched = next(item for item in items if item["code"] == "A-B-153")
+    others = [item for item in items if item["code"] in {"F-66-67", "B-D-153"}]
+    assert batched["in_batch"] is True
+    assert all(item["in_batch"] is False for item in others)
     assert seeded["beam_ids"]
+
+
+def test_duplicate_stage_names_get_unique_option_labels(client, session_factory):
+    with session_factory() as db:
+        zone = StructureZone(project_id="p1", name="Cầu chính", name_key="cau chinh")
+        db.add(zone)
+        db.flush()
+        segment = Segment(zone_id=zone.id, number=2, source_code="PD2")
+        db.add(segment)
+        db.flush()
+        component = StructuralComponent(
+            project_id="p1", segment_id=segment.id, type="pile",
+            raw_code="I69", canonical_code="I69", verification="verified",
+            created_by="u1",
+        )
+        db.add(component)
+        db.flush()
+        for index in range(2):
+            definition = StageDefinition(
+                project_id="p1", component_type="pile",
+                code=f"DUP-{index}", name="Đục bê tông om vỡ dày trung bình t",
+                position=index,
+            )
+            db.add(definition)
+            db.flush()
+            db.add(
+                ComponentStage(
+                    component_id=component.id,
+                    stage_definition_id=definition.id,
+                    repair_scope_id=f"scope-{index}",
+                    created_by="u1",
+                )
+            )
+        db.commit()
+
+    body = client.post(
+        "/api/v1/projects/p1/ai/progress-parse",
+        json={"text": "Cọc đục ngày 22/11\nI69"},
+    ).json()
+    item = next(line for line in body["lines"] for item in line["items"])
+    assert item["stage_candidates"]
+    labels = [candidate["name"] for candidate in item["stage_candidates"]]
+    assert len(labels) == len(set(labels))
 
 
 def test_unknown_code_and_missing_status_questions(client, session_factory):
