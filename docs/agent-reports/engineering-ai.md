@@ -1,5 +1,133 @@
 # Engineering AI Agent Report
 
+## 2026-11-24 — approved drawing maps, Bunke correction and segment batches
+
+### 1. Live drawing maps — `scripts/promote_map_candidates.py`
+
+Converted the owner-approved `data/storage/dap-maps/expansion/` candidate sets into
+live folders. Preview is read-only; `--commit` copies the plan crop (never the
+`*-candidates` overlay) and writes `manifest.json` in the same schema as `pd2`
+(`project_id`, `sheets[]` with `id/title/drawing/page/image/zone/segment/markers[]`,
+`review[]`). Coordinates stay normalized `[0,1]`. `pd2` is never touched.
+
+| Map key | Sheets | Candidate markers | Promoted | Dropped |
+|---|---:|---:|---:|---:|
+| `cau-chinh-pd1` | 1 | 69 | 69 | 0 |
+| `cau-chinh-pd3` | 1 | 61 | 61 | 0 |
+| `bunke` | 1 | 12 | 12 | 0 |
+| `cau-dan-pd01` | 1 | 0 | 0 | 0 |
+| `cau-dan-pd02` | 2 | 8 | 8 | 0 |
+| `cau-dan-pd03` | 1 | 14 | 14 | 0 |
+| `cau-dan-pd04` | 1 | 13 | 13 | 0 |
+| `cau-dan-pd05` | 1 | 0 | 0 | 0 |
+| `cau-dan-pd06` | 1 | 0 | 0 | 0 |
+| `cau-dan-pd07` | 1 | 3 | 0 | 3 |
+| `cau-dan-pd08` | 1 | 5 | 1 | 4 |
+| `cau-dan-pd09` | 1 | 0 | 0 | 0 |
+| `cau-dan-pd10` | 1 | 6 | 0 | 6 |
+| `cau-dan-pd11` | 1 | 8 | 2 | 6 |
+| `cau-dan-pd12` | 1 | 8 | 2 | 6 |
+| `cau-dan-pd13` | 1 | 9 | 3 | 6 |
+| `cau-dan-pd14` | 1 | 1 | 0 | 1 |
+| `cau-dan-pd15` | 1 | 2 | 0 | 2 |
+| `cau-dan-pd16` | 1 | 0 | 0 | 0 |
+| `cau-dan-pd17` | 1 | 2 | 0 | 2 |
+| `cau-dan-pd18` | 1 | 0 | 0 | 0 |
+| **Total** | **22** | **221** | **185** | **36** |
+
+- 36 dropped markers are all Cầu dẫn `corner_beam` codes that do not exist in
+  `structural_components`: PD7 Q-234/235/240; PD8 Q-251/252/256/257; PD10
+  Q-270/271/275/276/280/281; PD11 Q-282/283/287/288/292/293; PD12
+  Q-294/295/299/300/304/305; PD13 Q-306/307/311/312/316/317; PD14 Q-319; PD15
+  Q-330/331; PD17 Q-354/358.
+- `O-Q-186` exists in the DB only at Cầu dẫn segment 3, so its separate
+  `o-q-186.jpg` sheet was promoted with zone/segment 3 (candidate metadata said
+  PD2). The sheet is still keyed under `cau-dan-pd02`; the conflict is recorded
+  in that manifest's `review`.
+- `bunke` is a separate inset sheet (`bunke-inset.jpg`, TK-32). Its 10 placed
+  pile markers use the existing Cầu chính PD2 components (`Cầu chính`, segment
+  2); the 2 beam markers stay `Bunke` 1. The full TK-32 `pd2` manifest already
+  shows the same 10 piles + 2 beams on the full sheet; the inset is a separate
+  sheet, so both views are intentional. The 7 unresolved piles (A152, B152,
+  D152, D156, D157, E152, E156) have no candidate point and are recorded in
+  `review`, not drawn.
+- `tam-tua-tau` was skipped: its candidate schema requires the `fender_panel`
+  type, while the drawing-map API supports only `pile`/`beam`.
+- The Cầu dẫn candidate JSONs still carry the old `data/app.db` project id
+  `d0e4be54-...`; the live manifests use `be9701c9-...` (the same project as
+  `pd2`) and were resolved against that project's catalog. Existing `pd2` files
+  were not modified.
+- Validation on the fresh `acc2` copy: all 21 new live manifests (22 sheets)
+  parse with `app.core.drawing_map_router.Manifest`; all 185 new markers resolve
+  to a `(type, code, zone, segment)` in `structural_components`. Including
+  `pd2`, the 23 live sheets contain 266 markers with **0 unresolved**. The
+  project has **517 components and 0 duplicate `(type, canonical_code)` rows**.
+- Per-sheet marker resolution: `bunke` 12/12; `cau-chinh-pd1` 69/69;
+  `cau-chinh-pd3` 61/61; `cau-dan-pd02` 8/8 (7 plan + 1 inset); `cau-dan-pd03`
+  14/14; `cau-dan-pd04` 13/13; `cau-dan-pd08` 1/1; `cau-dan-pd11` 2/2;
+  `cau-dan-pd12` 2/2; `cau-dan-pd13` 3/3; the remaining Cầu dẫn sheets have 0
+  markers (corner repairs are review-only); `pd2` 81/81.
+
+### 2. Bunke correction — no duplicate components
+
+- The 17 Bunke pile codes were already present as **Cầu chính PD2** piles with
+  their design groups, and real progress was already recorded on some of them.
+  No duplicate components were added.
+- Deleted `scripts/add_bunke_piles.py` and
+  `backend/tests/engineering_ai/test_bunke_piles.py`.
+- The live `bunke` manifest now maps those 10 placed pile markers to the existing
+  Cầu chính 2 rows; the 2 Bunke beams remain Bunke 1. The 7 unresolved piles
+  remain review-only. `pd2` batch membership is unchanged.
+- Project components stay **517**; **0 duplicate `(type, canonical_code)`**.
+
+### 3. Segment batches — `scripts/create_segment_batches.py`
+
+Live Cầu chính segments found from the live manifests: **PD1, PD2, PD3**.
+
+| Batch | State | Components | Detail |
+|---|---|---:|---|
+| `PD1 Cầu chính` | created | 130 | 110 piles + 20 beams |
+| `PD2 Cầu chính` | reused | 88 | 77 PD2 piles + 9 beams + 2 Bunke beams; unchanged |
+| `PD3 Cầu chính` | created | 71 | 52 piles + 19 beams |
+
+- The script only adds Cầu chính segment rows. It never adds, moves or copies
+  Bunke components.
+- Bunke check: **17/17** pile codes are already in the PD2 batch via their
+  Cầu chính 2 rows; **2/2** Bunke beams are already in the PD2 batch. Added or
+  moved: **0**.
+- Commit on the fresh `acc2` copy: 2 batches created, **201** components added
+  (130 + 71); audit `construction_batch_created` ×2 and
+  `construction_batch_component_added` ×201. Rerun: **0 created, 0 added**.
+
+### 4. Tests and verification
+
+New synthetic tests (no private workbook, no live DB):
+
+- `backend/tests/engineering_ai/test_dap_map_promotion.py` (7): catalog-only
+  filtering, alias → canonical, unique-segment correction, exact-segment drop,
+  mixed Bunke inset (PD2 piles + Bunke beams), invalid shape drop, stable sheet
+  ids.
+- `backend/tests/engineering_ai/test_segment_batches.py` (5): live segment
+  discovery, Cầu chính-only component selection, Bunke membership check
+  (including a negative test for Bunke copies), batch names.
+
+Commands (fresh `acc2` copy only):
+
+- Copy: sqlite backup API from `data/storage/demo-live/app.db` to
+  `.../tmp/acc2/app.db`; then `alembic upgrade head` (`f8b9c0d1e2f3`).
+- `scripts/promote_map_candidates.py --commit` (local data files).
+- `scripts/create_segment_batches.py --commit` (acc2 only).
+
+```powershell
+python scripts/promote_map_candidates.py --database <acc2-url> --project <name> --commit
+python scripts/create_segment_batches.py --database <acc2-url> --project <name> --commit
+```
+
+Full backend suite with temporary `DATABASE_URL`/storage:
+**396 passed, 6 skipped** (the previous count was 384 passed; +12 tests).
+No new migration (the copy was upgraded to head), no frontend edit, no
+commit/push.
+
 ## 2026-11-24 — docs and dependency cleanup
 
 - Rewrote docs for the current product: no PDF upload/OCR; AI answers from
