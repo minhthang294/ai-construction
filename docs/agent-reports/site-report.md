@@ -1310,4 +1310,37 @@ npm test        # 35 files, 216 tests
 npm run build   # OK; main 310,06 kB
 ```
 
-Screenshots: **bỏ qua** — không có app local chạy ở cổng 5173/8765 tại thời điểm kiểm tra.
+Screenshots: **đã chạy** khi app local hoạt động ở 5173/8765 — `node shoot.js` → `phone errors: []`, `desktop errors: []`.
+
+## Mặt bằng trên Tổng quan - 2026-11-24
+
+Phạm vi: `frontend/src/app/*`, `frontend/src/features/site/*`, `backend/app/core/drawing_map_router.py` (chỉ đọc), test, báo cáo. Không migration, không sửa engineering-ai/acceptance.
+
+### Giao diện
+
+- Thẻ **Mặt bằng** nằm ngay dưới khối “Hôm nay”, tái dùng `DrawingMapPanel` ở `variant="compact"` (không copy code render): ẩn bộ lọc/danh sách chi tiết, giữ switcher trang khi có nhiều sheet có marker, khung bản vẽ ~55vh trên điện thoại, nút **Mở toàn màn hình** mở Cấu kiện → tab Mặt bằng.
+- Trang chính chọn theo `primary_zone` của đợt (`pickPrimarySheet`); sheet Bunke chỉ xuất hiện trong switcher khi đợt có marker Bunke.
+- Marker tô theo trạng thái thi công bằng token hiện có (`--app-construction-*`), viền `--app-acceptance` khi đã nghiệm thu; legend tiếng Việt. Vẫn kéo/chụm zoom, nút +/− và **Vừa khung**.
+- Chạm marker mở bottom sheet trong thẻ: mã, công đoạn hiện tại (display name có `t`), ngày cập nhật cuối, trạng thái thi công, nghiệm thu; nút **Mở chi tiết** (mở đúng component) và **Ghi tiến độ** (mở luồng dán tin nhắn).
+- Ảnh bản vẽ chỉ tải khi thẻ vào viewport (`IntersectionObserver`), có placeholder nhẹ; đợt không có marker đúng vị trí hiện thông báo rõ. Ảnh full-res vẫn chỉ tải cho sheet đang xem.
+
+### Backend (read-only)
+
+- `drawing_map_router` trả thêm `current_stage_name` (có `t`), `current_stage_definition_id`, `last_event_date`, `accepted` để bottom sheet không cần gọi thêm API. `accepted` lấy từ acceptance link + record `confirmed`, project-scoped.
+
+### Kiểm tra
+
+```bash
+cd frontend
+npm test        # 35 files, 218 tests
+npm run build   # OK; main 310,90 kB; DrawingMapPanel chunk 33,22 kB (lazy)
+cd ../backend
+..\.venv\Scripts\python.exe -m pytest tests -q
+# 379 passed, 6 skipped
+cd C:/Users/Thang Minh Pham/.claude/jobs/0f99d406/tmp/shots
+node shoot.js   # phone/desktop errors: []
+```
+
+Lazy image đã kiểm bằng Playwright: trước khi cuộn `0` request ảnh bản vẽ; cuộn tới thẻ → `1` request, không tải thêm sheet khác. Thẻ compact cao ~60vh trên phone, danh sách 81 mã không còn render trong card.
+
+**Chưa kiểm**: thao tác chạm marker/zoom thật trên thiết bị; bottom sheet mới xem qua code, chưa có E2E tương tác.

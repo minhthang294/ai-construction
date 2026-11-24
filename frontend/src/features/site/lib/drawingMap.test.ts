@@ -4,9 +4,11 @@ import {
   apiRelativePath,
   clampPan,
   clampZoom,
+  constructionStatusColor,
   containBox,
   countMarkers,
   filterDrawingSheets,
+  pickPrimarySheet,
   pinchZoom,
   sanitizePoints,
   type DrawingSheet,
@@ -171,4 +173,35 @@ it("accepts image paths with or without the API prefix", () => {
   expect(apiRelativePath("/projects/p/drawing-map/s/image")).toBe(
     "/projects/p/drawing-map/s/image",
   );
+});
+
+describe("compact overview map helpers", () => {
+  it("maps construction status to the existing colour tokens", () => {
+    expect(constructionStatusColor("NOT_STARTED")).toBe("#64748b");
+    expect(constructionStatusColor("IN_PROGRESS")).toBe("#b45309");
+    expect(constructionStatusColor("COMPLETED")).toBe("#15803d");
+    expect(constructionStatusColor("BLOCKED")).toBe("#b91c1c");
+    expect(constructionStatusColor("UNKNOWN")).toBe("#64748b");
+  });
+
+  it("picks the main-zone sheet and leaves Bunke for the switcher", () => {
+    const main = sheet({
+      id: "main",
+      markers: [{
+        component_id: "c1", code: "F1", type: "pile", zone: "Cầu chính",
+        points: [[0.1, 0.1]], origin: "DESIGN_SCOPE", construction_status: "COMPLETED",
+      }],
+    });
+    const bunke = sheet({
+      id: "bunke",
+      markers: [{
+        component_id: "c2", code: "B1", type: "pile", zone: "Bunke",
+        points: [[0.2, 0.2]], origin: "DESIGN_SCOPE", construction_status: "IN_PROGRESS",
+      }],
+    });
+    expect(pickPrimarySheet([bunke, main], "Cầu chính")?.id).toBe("main");
+    expect(pickPrimarySheet([bunke, main], "Bunke")?.id).toBe("bunke");
+    expect(pickPrimarySheet([bunke, main], null)?.id).toBe("bunke");
+    expect(pickPrimarySheet([], "Cầu chính")).toBeNull();
+  });
 });

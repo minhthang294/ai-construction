@@ -107,6 +107,7 @@ export default function App() {
   const [acceptanceDirty, setAcceptanceDirty] = useState(false);
   const [reportPrefill, setReportPrefill] = useState<{ date: string; text: string } | null>(null);
   const [journalRequest, setJournalRequest] = useState<{ date: string } | null>(null);
+  const [mapViewRequest, setMapViewRequest] = useState(false);
   const [photoPreselect, setPhotoPreselect] = useState<string[] | null>(null);
   const [componentFocus, setComponentFocus] = useState<{ projectId: string; componentId: string } | null>(null);
   const [acceptanceNavigation, setAcceptanceNavigation] = useState<{
@@ -258,6 +259,11 @@ export default function App() {
     setPageHistory((current) => [...current, page]);
     setPage("components");
     setComponentFocus({ projectId: targetProjectId, componentId });
+  }
+
+  function openFullMap() {
+    setMapViewRequest(true);
+    navigate("components");
   }
 
   function goBack() {
@@ -599,6 +605,7 @@ export default function App() {
               onNavigate={(next) => navigate(next as PageId)}
               onOpenComponent={openDashboardComponent}
               onOpenAcceptanceDraft={openAcceptanceDraft}
+              onOpenMap={openFullMap}
             />
           ) : page === "work-items" ? (
             <WorkItemList token={token} projectId={projectId} />
@@ -627,9 +634,13 @@ export default function App() {
               key={projectId}
               projectId={projectId}
               onOpenPaste={() => navigate("progress-paste")}
-              initialView={journalRequest ? "journal" : undefined}
+              initialView={journalRequest ? "journal" : mapViewRequest ? "map" : undefined}
               initialJournalDate={journalRequest?.date}
               onJournalOpened={() => setJournalRequest(null)}
+              onViewOpened={() => {
+                setJournalRequest(null);
+                setMapViewRequest(false);
+              }}
               focusComponentId={componentFocus?.componentId}
               onFocusHandled={() => setComponentFocus(null)}
             />

@@ -6,10 +6,16 @@ export type DrawingMarker = {
   component_id: string;
   code: string;
   type: "pile" | "beam";
+  zone?: string;
+  segment?: number;
   design_group?: string | null;
   location_review?: boolean;
   current_work?: string | null;
   current_work_definition_id?: string | null;
+  current_stage_name?: string | null;
+  current_stage_definition_id?: string | null;
+  last_event_date?: string | null;
+  accepted?: boolean;
   points: Array<[number, number]>;
   origin: string;
   construction_status: string;
@@ -122,6 +128,50 @@ export function originLabel(origin: string): string {
 
 export function isAdditionalScope(marker: DrawingMarker): boolean {
   return marker.origin === "ADDITIONAL_SCOPE";
+}
+
+const STATUS_COLORS: Record<string, string> = {
+  NOT_STARTED: "#64748b",
+  IN_PROGRESS: "#b45309",
+  COMPLETED: "#15803d",
+  BLOCKED: "#b91c1c",
+};
+
+/** Existing construction status tokens, usable as SVG stroke colours. */
+export function constructionStatusColor(status: string): string {
+  return STATUS_COLORS[status] ?? STATUS_COLORS.NOT_STARTED;
+}
+
+export const ACCEPTANCE_OUTLINE_COLOR = "#405e9b";
+
+function normalizedZone(value: string | null | undefined): string {
+  return (value ?? "")
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .trim()
+    .toLowerCase();
+}
+
+/** Prefer the sheet that actually contains the batch's primary zone. */
+export function pickPrimarySheet(
+  sheets: ReadonlyArray<DrawingSheet>,
+  primaryZone: string | null | undefined,
+): DrawingSheet | null {
+  if (!sheets.length) return null;
+  const zone = normalizedZone(primaryZone);
+  if (!zone) return sheets[0];
+  let best = sheets[0];
+  let bestCount = -1;
+  for (const sheet of sheets) {
+    const count = sheet.markers.filter(
+      (marker) => normalizedZone(marker.zone) === zone,
+    ).length;
+    if (count > bestCount) {
+      best = sheet;
+      bestCount = count;
+    }
+  }
+  return bestCount > 0 ? best : sheets[0];
 }
 
 export function designGroupColor(group: string | null | undefined): string | null {

@@ -15,6 +15,8 @@ import {
   clampZoom,
   componentTypeLabel,
   constructionStatusLabel,
+  constructionStatusColor,
+  ACCEPTANCE_OUTLINE_COLOR,
   containBox,
   countMarkers,
   designGroupColor,
@@ -24,6 +26,7 @@ import {
   filterDrawingSheets,
   isAdditionalScope,
   originLabel,
+  pickPrimarySheet,
   pinchZoom,
   sanitizePoints,
   type ComponentDetail,
@@ -47,6 +50,13 @@ type Props = {
   batchId?: string | null;
   selection?: Selection;
   onRequestProgress?: (componentId: string, stageDefinitionId?: string | null) => void;
+  /** "compact" is the overview card; it hides filters/list and lazily loads the image. */
+  variant?: "full" | "compact";
+  primaryZone?: string | null;
+  onOpenComponent?: (componentId: string) => void;
+  onOpenFullScreen?: () => void;
+  /** Compact card waits for surrounding async layout before it loads the image. */
+  lazyReady?: boolean;
 };
 
 type LoadState = "loading" | "ready" | "pending" | "error";
@@ -83,6 +93,11 @@ function isPending(error: unknown): boolean {
     error instanceof ApiError &&
     (error.status === 404 || error.status === 405 || error.status === 501)
   );
+}
+
+function formatShortMapDate(value: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  return match ? `${match[3]}/${match[2]}/${match[1]}` : value;
 }
 
 function StatusChip({ status }: { status: string }) {
@@ -127,7 +142,20 @@ type GestureState = {
   pinchStartZoom: number;
 };
 
-export default function DrawingMapPanel({ projectId, batchId, selection, onRequestProgress }: Props) {
+export default function DrawingMapPanel({
+  projectId,
+  batchId,
+  selection,
+  onRequestProgress,
+  variant = "full",
+  primaryZone,
+  onOpenComponent,
+  onOpenFullScreen,
+  lazyReady = true,
+}: Props) {
+  const compact = variant === "compact";
+  const rootRef = useRef<HTMLElement>(null);
+  const [imageInView, setImageInView] = useState(!compact);
   const [map, setMap] = useState<DrawingMap | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -183,11 +211,13 @@ export default function DrawingMapPanel({ projectId, batchId, selection, onReque
         if (controller.signal.aborted) return;
         setMap(data);
         setLoadState("ready");
-        setActiveSheetId((current) =>
-          data.sheets.some((sheet) => sheet.id === current)
-            ? current
-            : data.sheets[0]?.id ?? "",
-        );
+        setActiveSheetId((current) => {
+          if (data.sheets.some((sheet) => sheet.id === current)) return current;
+          const preferred = compact
+            ? pickPrimarySheet(data.sheets, primaryZone)
+            : data.sheets[0];
+          return preferred?.id ?? "";
+        });
       })
       .catch((error) => {
         if (controller.signal.aborted) return;
@@ -199,12 +229,56 @@ export default function DrawingMapPanel({ projectId, batchId, selection, onReque
         setLoadState("error");
       });
     return () => controller.abort();
-  }, [projectId, batchId, reloadKey]);
+  }, [projectId, batchId, reloadKey, compact, primaryZone]);
 
-  const filteredSheets = useMemo(
-    () => (map ? filterDrawingSheets(map.sheets, filters) : []),
-    [map, filters],
-  );
+  useEffect(() => {
+    if (!compact || !map) return;
+    const preferred = pickPrimarySheet(map.sheets, primaryZone);
+    if (preferred) setActiveSheetId(preferred.id);
+  }, [compact, map, primaryZone]);
+
+  useEffect(() => {
+    if (!compact) {
+      setImageInView(true);
+      return;
+    }
+    if (!lazyReady) return;
+    const element = rootRef.current;
+    if (!element || typeof IntersectionObserver === "undefined") {
+      setImageInView(true);
+      return;
+    }
+    let observer: IntersectionObserver | null = null;
+    // Wait for async dashboard sections above to settle before deciding.
+    const timer = window.setTimeout(() => {
+      if (!element) return;
+      const rect = element.getBoundingClientRect();
+      if (rect.top < window.innerHeight + 160 && rect.bottom > -160) {
+        setImageInView(true);
+        return;
+      }
+      observer = new IntersectionObserver(
+        (entries) => {
+          if (entries.some((entry) => entry.isIntersecting)) {
+            setImageInView(true);
+            observer?.disconnect();
+          }
+        },
+        { rootMargin: "160px" },
+      );
+      observer.observe(element);
+    }, 200);
+    return () => {
+      window.clearTimeout(timer);
+      observer?.disconnect();
+    };
+  }, [compact, lazyReady]);
+
+  const filteredSheets = useMemo(() => {
+    if (!map) return [];
+    const sheets = filterDrawingSheets(map.sheets, filters);
+    return compact ? sheets.filter((sheet) => sheet.markers.length > 0) : sheets;
+  }, [map, filters, compact]);
   const activeSheet = useMemo(
     () =>
       filteredSheets.find((sheet) => sheet.id === activeSheetId) ??
@@ -216,7 +290,7 @@ export default function DrawingMapPanel({ projectId, batchId, selection, onReque
     () => countMarkers(filteredSheets),
     [filteredSheets],
   );
-  const activeImageUrl = activeSheet?.image_url ?? "";
+  const activeImageUrl = imageInView ? activeSheet?.image_url ?? "" : "";
   const activeSheetKey = activeSheet?.id ?? "";
   const mapTargets = useMemo(() => (activeSheet?.markers ?? []).flatMap((marker) => {
     const points = sanitizePoints(marker.points);
@@ -378,6 +452,11 @@ export default function DrawingMapPanel({ projectId, batchId, selection, onReque
     const requestId = ++detailRequest.current;
     setDetailMarker(marker);
     setDetail(null);
+    setDetailError(null);
+    if (compact) {
+      setDetailState("idle");
+      return;
+    }
     setDetailState("loading");
     setDetailError(null);
     try {
@@ -495,42 +574,67 @@ export default function DrawingMapPanel({ projectId, batchId, selection, onReque
   const reviewCount = map?.review_count ?? 0;
 
   return (
-    <section className="mx-auto w-full max-w-4xl space-y-3">
-      <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-        <h3 className="text-base font-semibold text-slate-900 sm:text-lg">
-          Mặt bằng cấu kiện trên bản vẽ
-        </h3>
-        <p className="mt-1 text-xs leading-5 text-slate-600">
-          Bản đồ thử nghiệm cho các vị trí đã đối chiếu. Ảnh bản vẽ được tải
-          riêng theo quyền công trình và không được lưu vào mã nguồn.
-        </p>
-        {loadState === "ready" && map ? (
-          <p className="mt-2 text-xs text-slate-600">
-            {map.sheets.length} trang bản vẽ · {allMarkerCount} vị trí đã gắn
+    <section
+      ref={rootRef}
+      className={compact ? "relative space-y-2" : "mx-auto w-full max-w-4xl space-y-3"}
+    >
+      {compact ? (
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div className="min-w-0">
+            <h3 className="text-base font-semibold text-slate-950">Mặt bằng</h3>
+            <p className="mt-0.5 text-xs leading-5 text-slate-600">
+              {activeSheet
+                ? `${activeSheet.title} · ${activeSheet.markers.length} vị trí`
+                : "Vị trí cấu kiện trong đợt đang chọn."}
+            </p>
+          </div>
+          {onOpenFullScreen ? (
+            <button
+              type="button"
+              className={`${BUTTON} shrink-0 ${FOCUS_RING}`}
+              onClick={onOpenFullScreen}
+            >
+              Mở toàn màn hình
+            </button>
+          ) : null}
+        </div>
+      ) : (
+        <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+          <h3 className="text-base font-semibold text-slate-900 sm:text-lg">
+            Mặt bằng cấu kiện trên bản vẽ
+          </h3>
+          <p className="mt-1 text-xs leading-5 text-slate-600">
+            Bản đồ thử nghiệm cho các vị trí đã đối chiếu. Ảnh bản vẽ được tải
+            riêng theo quyền công trình và không được lưu vào mã nguồn.
           </p>
-        ) : null}
-        {selection ? (
-          <p className="mt-2 rounded-lg border border-blue-200 bg-blue-50 p-2 text-xs text-blue-950" role="status">
-            Đã chọn {selection.selectedIds.length} cấu kiện. Chạm vòng trên sơ đồ để chọn hoặc bỏ chọn; cấu kiện mờ không thuộc công việc này.
-          </p>
-        ) : null}
-        {reviewCount > 0 ? (
-          <p
-            role="status"
-            className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs leading-5 text-amber-950"
-          >
-            {reviewCount} mục cần rà soát và không hiển thị trên bản đồ.
-          </p>
-        ) : null}
-        {(map?.position_review_count ?? 0) > 0 ? (
-          <p
-            role="status"
-            className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs leading-5 text-amber-950"
-          >
-            {map?.position_review_count} vị trí Bunke đang hiển thị dạng nét đứt để chờ rà soát theo bản vẽ.
-          </p>
-        ) : null}
-      </div>
+          {loadState === "ready" && map ? (
+            <p className="mt-2 text-xs text-slate-600">
+              {map.sheets.length} trang bản vẽ · {allMarkerCount} vị trí đã gắn
+            </p>
+          ) : null}
+          {selection ? (
+            <p className="mt-2 rounded-lg border border-blue-200 bg-blue-50 p-2 text-xs text-blue-950" role="status">
+              Đã chọn {selection.selectedIds.length} cấu kiện. Chạm vòng trên sơ đồ để chọn hoặc bỏ chọn; cấu kiện mờ không thuộc công việc này.
+            </p>
+          ) : null}
+          {reviewCount > 0 ? (
+            <p
+              role="status"
+              className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs leading-5 text-amber-950"
+            >
+              {reviewCount} mục cần rà soát và không hiển thị trên bản đồ.
+            </p>
+          ) : null}
+          {(map?.position_review_count ?? 0) > 0 ? (
+            <p
+              role="status"
+              className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs leading-5 text-amber-950"
+            >
+              {map?.position_review_count} vị trí Bunke đang hiển thị dạng nét đứt để chờ rà soát theo bản vẽ.
+            </p>
+          ) : null}
+        </div>
+      )}
 
       {loadState === "loading" ? (
         <p className="rounded-xl border border-slate-200 bg-white p-3 text-sm text-slate-600">
@@ -573,19 +677,22 @@ export default function DrawingMapPanel({ projectId, batchId, selection, onReque
         </div>
       ) : null}
 
-      {loadState === "ready" && map && map.sheets.length === 0 ? (
+      {loadState === "ready" && map && (map.sheets.length === 0 || (compact && allMarkerCount === 0)) ? (
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
           <h4 className="text-base font-semibold text-slate-900">
-            Chưa có bản đồ bản vẽ
+            {compact ? "Đợt này chưa có vị trí trên bản vẽ" : "Chưa có bản đồ bản vẽ"}
           </h4>
           <p className="mt-1 text-sm leading-6 text-slate-600">
-            Công trình chưa có trang bản vẽ nào được gắn vị trí cấu kiện.
+            {compact
+              ? "Chưa có cấu kiện nào của đợt được gắn đúng vị trí trên trang bản vẽ đã đối chiếu."
+              : "Công trình chưa có trang bản vẽ nào được gắn vị trí cấu kiện."}
           </p>
         </div>
       ) : null}
 
-      {loadState === "ready" && map && map.sheets.length > 0 ? (
+      {loadState === "ready" && map && map.sheets.length > 0 && !(compact && allMarkerCount === 0) ? (
         <>
+          {!compact ? (
           <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <label className="min-w-0 text-xs font-medium text-slate-700 sm:col-span-2">
@@ -661,6 +768,7 @@ export default function DrawingMapPanel({ projectId, batchId, selection, onReque
               </div>
             </div>
           </div>
+          ) : null}
 
           {filteredSheets.length === 0 ? (
             <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600 shadow-sm">
@@ -668,6 +776,7 @@ export default function DrawingMapPanel({ projectId, batchId, selection, onReque
             </div>
           ) : (
             <>
+              {!compact || filteredSheets.length > 1 ? (
               <div
                 role="group"
                 aria-label="Chọn trang bản vẽ"
@@ -701,9 +810,11 @@ export default function DrawingMapPanel({ projectId, batchId, selection, onReque
                   );
                 })}
               </div>
+              ) : null}
 
               {activeSheet ? (
-                <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                <div className="relative overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                  {!compact ? (
                   <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-slate-200 p-3">
                     <div className="min-w-0">
                       <h4 className="break-words text-sm font-semibold text-slate-900">
@@ -715,10 +826,15 @@ export default function DrawingMapPanel({ projectId, batchId, selection, onReque
                       </p>
                     </div>
                   </div>
+                  ) : null}
 
                   <div
                     ref={viewportRef}
-                    className="relative h-[62vh] min-h-64 max-h-[38rem] touch-none select-none overflow-hidden bg-slate-100"
+                    className={`relative touch-none select-none overflow-hidden bg-slate-100 ${
+                      compact
+                        ? "h-[34vh] min-h-56 max-h-[24rem] sm:h-[20rem]"
+                        : "h-[62vh] min-h-64 max-h-[38rem]"
+                    }`}
                     role="group"
                     aria-label="Bản đồ bản vẽ tương tác"
                     onPointerDown={handlePointerDown}
@@ -760,6 +876,12 @@ export default function DrawingMapPanel({ projectId, batchId, selection, onReque
                         Vừa khung
                       </button>
                     </div>
+
+                    {compact && !imageInView ? (
+                      <p className="absolute inset-0 grid place-items-center p-4 text-center text-sm text-slate-600">
+                        Cuộn tới để tải bản vẽ…
+                      </p>
+                    ) : null}
 
                     {imageState === "loading" ? (
                       <p className="absolute inset-0 grid place-items-center p-4 text-center text-sm text-slate-600">
@@ -835,14 +957,24 @@ export default function DrawingMapPanel({ projectId, batchId, selection, onReque
                                   : detailMarker?.component_id === marker.component_id;
                                 const selectable = !selection || selection.selectableIds.includes(marker.component_id);
                                 const opacity = selection && !selectable ? 0.2 : 1;
-                                const color =
-                                  designGroupColor(marker.design_group) ??
-                                  (marker.type === "beam" ? "#0f766e" : "#0369a1");
+                                const color = compact
+                                  ? constructionStatusColor(marker.construction_status)
+                                  : designGroupColor(marker.design_group) ??
+                                    (marker.type === "beam" ? "#0f766e" : "#0369a1");
+                                const accepted = Boolean(marker.accepted);
                                 const path = points.map(([px, py]) => `${px},${py}`).join(" ");
                                 return (
                                   <g key={`${marker.component_id}-${marker.code}`}>
                                     {points.length > 1 ? (
                                       <>
+                                        {accepted ? (
+                                          <polyline points={path} fill="none"
+                                            stroke={ACCEPTANCE_OUTLINE_COLOR}
+                                            strokeWidth={selected ? 4.5 : 3.25}
+                                            strokeLinecap="round" strokeLinejoin="round"
+                                            opacity={opacity}
+                                            vectorEffect="non-scaling-stroke" />
+                                        ) : null}
                                         <polyline points={path} fill="none" stroke="white"
                                           strokeWidth={selected ? 3.5 : 2.25}
                                           strokeLinecap="round" strokeLinejoin="round"
@@ -857,18 +989,33 @@ export default function DrawingMapPanel({ projectId, batchId, selection, onReque
                                           vectorEffect="non-scaling-stroke" />
                                       </>
                                     ) : (
-                                      <ellipse
-                                        cx={x}
-                                        cy={y}
-                                        rx={0.004}
-                                        ry={0.004 * imageBox.width / imageBox.height}
-                                        fill="none"
-                                        stroke={selected ? "#111827" : color}
-                                        strokeWidth={selected ? 2 : 1.25}
-                                        strokeDasharray={marker.location_review ? "1.5 2" : isAdditionalScope(marker) ? "2 2" : undefined}
-                                        opacity={opacity}
-                                        vectorEffect="non-scaling-stroke"
-                                      />
+                                      <>
+                                        {accepted ? (
+                                          <ellipse
+                                            cx={x}
+                                            cy={y}
+                                            rx={0.006}
+                                            ry={0.006 * imageBox.width / imageBox.height}
+                                            fill="none"
+                                            stroke={ACCEPTANCE_OUTLINE_COLOR}
+                                            strokeWidth={selected ? 3 : 2}
+                                            opacity={opacity}
+                                            vectorEffect="non-scaling-stroke"
+                                          />
+                                        ) : null}
+                                        <ellipse
+                                          cx={x}
+                                          cy={y}
+                                          rx={0.004}
+                                          ry={0.004 * imageBox.width / imageBox.height}
+                                          fill="none"
+                                          stroke={selected ? "#111827" : color}
+                                          strokeWidth={selected ? 2 : 1.25}
+                                          strokeDasharray={marker.location_review ? "1.5 2" : isAdditionalScope(marker) ? "2 2" : undefined}
+                                          opacity={opacity}
+                                          vectorEffect="non-scaling-stroke"
+                                        />
+                                      </>
                                     )}
                                   </g>
                                 );
@@ -935,22 +1082,119 @@ export default function DrawingMapPanel({ projectId, batchId, selection, onReque
                   </div>
 
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-slate-200 p-3 text-xs text-slate-600">
-                    <span>Kéo để di chuyển.</span>
-                    <span>Chụm hai ngón hoặc dùng nút +/− để thu phóng.</span>
-                    <span className="inline-flex items-center gap-1"><span className="h-0.5 w-3 bg-teal-700" /> Dầm · nét mảnh</span>
-                    <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full border border-teal-700" /> Nhóm 1</span>
-                    <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full border border-amber-700" /> Nhóm 2</span>
-                    <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full border border-purple-700" /> Nhóm 3</span>
-                    <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full border border-dashed border-slate-600" /> Vị trí chờ rà soát</span>
-                    <span className="inline-flex items-center gap-1">
-                      <span className="h-2.5 w-2.5 rounded-full border border-dashed border-sky-600" />
-                      Nét đứt: phạm vi phát sinh.
-                    </span>
+                    {compact ? (
+                      <>
+                        <span>Kéo để di chuyển, chụm hai ngón hoặc dùng +/−.</span>
+                        {[
+                          ["NOT_STARTED", "Chưa bắt đầu"],
+                          ["IN_PROGRESS", "Đang thi công"],
+                          ["COMPLETED", "Hoàn thành"],
+                          ["BLOCKED", "Tạm dừng"],
+                        ].map(([status, label]) => (
+                          <span key={status} className="inline-flex items-center gap-1">
+                            <span
+                              aria-hidden="true"
+                              className="h-2.5 w-2.5 rounded-full"
+                              style={{ backgroundColor: constructionStatusColor(status) }}
+                            />
+                            {label}
+                          </span>
+                        ))}
+                        <span className="inline-flex items-center gap-1">
+                          <span
+                            aria-hidden="true"
+                            className="h-3 w-3 rounded-full border-2"
+                            style={{ borderColor: ACCEPTANCE_OUTLINE_COLOR }}
+                          />
+                          Đã nghiệm thu
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Kéo để di chuyển.</span>
+                        <span>Chụm hai ngón hoặc dùng nút +/− để thu phóng.</span>
+                        <span className="inline-flex items-center gap-1"><span className="h-0.5 w-3 bg-teal-700" /> Dầm · nét mảnh</span>
+                        <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full border border-teal-700" /> Nhóm 1</span>
+                        <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full border border-amber-700" /> Nhóm 2</span>
+                        <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full border border-purple-700" /> Nhóm 3</span>
+                        <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full border border-dashed border-slate-600" /> Vị trí chờ rà soát</span>
+                        <span className="inline-flex items-center gap-1">
+                          <span className="h-2.5 w-2.5 rounded-full border border-dashed border-sky-600" />
+                          Nét đứt: phạm vi phát sinh.
+                        </span>
+                      </>
+                    )}
                   </div>
+
+                  {compact && detailMarker ? (
+                    <div className="absolute inset-x-0 bottom-0 z-30 max-h-[75%] overflow-y-auto rounded-t-2xl border-t border-slate-300 bg-white p-3 shadow-[0_-8px_24px_rgba(15,23,42,0.18)]">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-xs font-medium text-slate-500">Chi tiết cấu kiện</p>
+                          <h4 className="break-words font-mono text-base font-semibold text-slate-900">
+                            {detailMarker.code}
+                          </h4>
+                        </div>
+                        <button
+                          type="button"
+                          className={`${BUTTON} shrink-0 ${FOCUS_RING}`}
+                          onClick={closeDetail}
+                        >
+                          Đóng
+                        </button>
+                      </div>
+                      <dl className="mt-2 grid grid-cols-[7rem_minmax(0,1fr)] gap-x-2 gap-y-1 text-sm">
+                        <dt className="text-slate-600">Công đoạn</dt>
+                        <dd className="break-words text-slate-900">
+                          {detailMarker.current_stage_name ||
+                            detailMarker.current_work ||
+                            "Chưa có công đoạn"}
+                        </dd>
+                        <dt className="text-slate-600">Cập nhật cuối</dt>
+                        <dd className="text-slate-900">
+                          {detailMarker.last_event_date
+                            ? formatShortMapDate(detailMarker.last_event_date)
+                            : "Chưa có sự kiện"}
+                        </dd>
+                        <dt className="text-slate-600">Nghiệm thu</dt>
+                        <dd className="text-slate-900">
+                          {detailMarker.accepted ? "Đã nghiệm thu" : "Chưa nghiệm thu"}
+                        </dd>
+                        <dt className="text-slate-600">Thi công</dt>
+                        <dd className="text-slate-900">
+                          {constructionStatusLabel(detailMarker.construction_status)}
+                        </dd>
+                      </dl>
+                      <div className="mt-3 grid gap-2 min-[375px]:grid-cols-2">
+                        <button
+                          type="button"
+                          className={`${BUTTON} w-full ${FOCUS_RING}`}
+                          disabled={!onOpenComponent}
+                          onClick={() => onOpenComponent?.(detailMarker.component_id)}
+                        >
+                          Mở chi tiết
+                        </button>
+                        <button
+                          type="button"
+                          className={`${PRIMARY_BUTTON} w-full ${FOCUS_RING}`}
+                          disabled={!onRequestProgress}
+                          onClick={() =>
+                            onRequestProgress?.(
+                              detailMarker.component_id,
+                              detailMarker.current_stage_definition_id ??
+                                detailMarker.current_work_definition_id,
+                            )
+                          }
+                        >
+                          Ghi tiến độ
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
 
-              {detailMarker && !selection ? (
+              {detailMarker && !selection && !compact ? (
                 <section
                   aria-labelledby={detailHeadingId}
                   className="rounded-xl border border-slate-300 bg-white p-3 shadow-sm"
@@ -1154,6 +1398,7 @@ export default function DrawingMapPanel({ projectId, batchId, selection, onReque
                 </section>
               ) : null}
 
+              {!compact ? (
               <details
                 className="rounded-xl border border-slate-200 bg-white shadow-sm"
                 open
@@ -1209,6 +1454,7 @@ export default function DrawingMapPanel({ projectId, batchId, selection, onReque
                   ))}
                 </div>
               </details>
+              ) : null}
             </>
           )}
         </>

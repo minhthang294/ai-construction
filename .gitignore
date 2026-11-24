@@ -19,3 +19,6 @@ data/logs/
 /bản vẽ scan_1.pdf
 /Tập 1 - thuyết minh báo cáo KTKT sửa chữa nứt cọc dầm cầu cảng_0001.pdf
 /.tmp-component-*
+
+# Private acceptance workbooks
+/YCNT*.xlsx

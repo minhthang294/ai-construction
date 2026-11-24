@@ -49,6 +49,8 @@ type Props = {
   onFocusHandled?: () => void;
   /** Called after the journal deep link has been opened once. */
   onJournalOpened?: () => void;
+  /** Called after any initial view deep link has been applied. */
+  onViewOpened?: () => void;
 };
 
 const PAGE_SIZE = 100;
@@ -149,6 +151,7 @@ export default function ComponentCatalogImport({
   focusComponentId,
   onFocusHandled,
   onJournalOpened,
+  onViewOpened,
 }: Props) {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<ComponentPreview | null>(null);
@@ -210,6 +213,7 @@ export default function ComponentCatalogImport({
 
   useEffect(() => {
     if (initialView === "journal") onJournalOpened?.();
+    if (initialView) onViewOpened?.();
     // Deep link applies once per mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

@@ -19,6 +19,11 @@ from .component_models import (ComponentStage, DesignGroup, ProgressEvent, Repai
 from .database import get_db
 from .insights_router import _latest_events
 
+try:  # acceptance-owned records
+    from app.acceptance.models import AcceptanceRecord, ComponentAcceptanceLink
+except Exception:  # pragma: no cover - isolated core deployments
+    AcceptanceRecord = ComponentAcceptanceLink = None  # type: ignore[assignment]
+
 router = APIRouter(tags=["components"])
 MAP_ROOT = Path(os.environ.get(
     "DRAWING_MAP_STORAGE",
@@ -96,7 +101,31 @@ def drawing_map(project_id: str, db: Session = Depends(get_db), batch_id: str | 
         RepairScope.verification == "VERIFIED",
     )))
     latest = _latest_events(db, project_id)
+    accepted_ids: set[str] = set()
+    if (
+        AcceptanceRecord is not None
+        and ComponentAcceptanceLink is not None
+        and unique_components
+    ):
+        accepted_ids = set(
+            db.scalars(
+                select(ComponentAcceptanceLink.component_id)
+                .join(
+                    AcceptanceRecord,
+                    ComponentAcceptanceLink.record_id == AcceptanceRecord.id,
+                )
+                .where(
+                    ComponentAcceptanceLink.project_id == project_id,
+                    AcceptanceRecord.project_id == project_id,
+                    AcceptanceRecord.status == "confirmed",
+                    ComponentAcceptanceLink.component_id.in_(
+                        list(unique_components.values())
+                    ),
+                )
+            )
+        )
     current_work: dict[str, tuple[datetime, str, str, str]] = {}
+    latest_stage: dict[str, tuple[datetime, str, str, str, str]] = {}
     if unique_components:
         stage_events = db.execute(
             select(ComponentStage.component_id, ComponentStage.id, ComponentStage.stage_definition_id, StageDefinition.name,
@@ -112,13 +141,23 @@ def drawing_map(project_id: str, db: Session = Depends(get_db), batch_id: str | 
             latest_by_stage[(component_id, stage_id)] = (definition_id, name, status, created_at, event_id)
         t_values = load_t_values(db, list(unique_components.values()))
         for (component_id, _), (definition_id, name, status, created_at, event_id) in latest_by_stage.items():
+            display_name = display_stage_name(name, [t_values.get(component_id)])
             current = current_work.get(component_id)
             if status == "IN_PROGRESS" and (current is None or (created_at, event_id) > (current[0], current[1])):
                 current_work[component_id] = (
                     created_at,
                     event_id,
-                    display_stage_name(name, [t_values.get(component_id)]),
+                    display_name,
                     definition_id,
+                )
+            previous = latest_stage.get(component_id)
+            if previous is None or (created_at, event_id) > (previous[0], previous[1]):
+                latest_stage[component_id] = (
+                    created_at,
+                    event_id,
+                    display_name,
+                    definition_id,
+                    status,
                 )
     review_count = len(manifest.review)
     position_review_count = 0
@@ -142,6 +181,10 @@ def drawing_map(project_id: str, db: Session = Depends(get_db), batch_id: str | 
                             "design_group": group_name,
                             "current_work": current_work.get(component_id, (None, None, None))[2],
                             "current_work_definition_id": current_work.get(component_id, (None, None, None, None))[3],
+                            "current_stage_name": latest_stage.get(component_id, (None, None, None))[2],
+                            "current_stage_definition_id": latest_stage.get(component_id, (None, None, None, None))[3],
+                            "last_event_date": event.event_date.isoformat() if event else None,
+                            "accepted": component_id in accepted_ids,
                             "origin": "ADDITIONAL_SCOPE" if component_id in additional_ids else "DESIGN_SCOPE",
                             "construction_status": event.status if event else "NOT_STARTED"})
         sheets.append({**sheet.model_dump(exclude={"image", "markers"}), "markers": markers,

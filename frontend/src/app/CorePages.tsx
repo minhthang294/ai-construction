@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState, type CSSProperties } from "react";
 import PageHeader from "./PageHeader";
 import ConstructionProgressChart, { type ConstructionProgressSummary } from "./ConstructionProgressChart";
 import LatestDayCard from "./LatestDayCard";
 import SegmentProgressBars from "./SegmentProgressBars";
+const DrawingMapPanel = lazy(() => import("../features/site/components/DrawingMapPanel"));
 import type { LatestDay, SegmentProgress } from "./overviewFormat";
 import {
   buildLatestDayZaloSummary,
@@ -422,6 +423,7 @@ export function Dashboard({
   onNavigate,
   onOpenComponent,
   onOpenAcceptanceDraft,
+  onOpenMap,
 }: {
   token: string;
   projectId: string;
@@ -429,6 +431,7 @@ export function Dashboard({
   onNavigate?: (page: string) => void;
   onOpenComponent?: (projectId: string, componentId: string) => void;
   onOpenAcceptanceDraft?: (request: AcceptanceDraftRequest) => void;
+  onOpenMap?: () => void;
 }) {
   const [report, setReport] = useState<{ report_date: string } | null>(null);
   const [summary, setSummary] = useState<ConstructionProgressSummary | null>(null);
@@ -445,6 +448,7 @@ export function Dashboard({
   const [inProgressFailed, setInProgressFailed] = useState(false);
   const [pending, setPending] = useState<PendingAcceptanceResponse | null>(null);
   const [pendingFailed, setPendingFailed] = useState(false);
+  const [mapLayoutReady, setMapLayoutReady] = useState(false);
   const [copiedZalo, setCopiedZalo] = useState(false);
   const [zaloCopyFailed, setZaloCopyFailed] = useState(false);
   const {
@@ -453,6 +457,7 @@ export function Dashboard({
     error: batchError,
   } = useConstructionBatches(projectId);
   const { batchId, setBatchId } = useConstructionBatch(projectId, batches, batchLoading);
+  const selectedBatch = batches.find((batch) => batch.id === batchId) ?? null;
   const batchQuery = batchId ? `?batch_id=${encodeURIComponent(batchId)}` : "";
   useEffect(() => {
     const controller = new AbortController();
@@ -476,6 +481,7 @@ export function Dashboard({
     setPendingFailed(false);
     setInProgress(null);
     setPending(null);
+    setMapLayoutReady(false);
     Promise.allSettled([
       request(`/projects/${projectId}/overview/latest-day${batchQuery}`, token, { signal: controller.signal }),
       request(`/projects/${projectId}/overview/segments${batchQuery}`, token, { signal: controller.signal }),
@@ -497,6 +503,7 @@ export function Dashboard({
       else setInProgressFailed(true);
       if (pendingResult.status === "fulfilled") setPending(pendingResult.value);
       else setPendingFailed(true);
+      setMapLayoutReady(true);
     });
     return () => controller.abort();
   }, [projectId, token, batchQuery, batchId]);
@@ -764,6 +771,27 @@ export function Dashboard({
             </>
           )}
         </div>
+      </section>
+      <section className="app-card app-card-pad" aria-labelledby="dashboard-map-title">
+        <h2 id="dashboard-map-title" className="sr-only">Mặt bằng đợt thi công</h2>
+        <Suspense
+          fallback={
+            <p role="status" className="text-sm text-slate-600">
+              Đang tải mặt bằng…
+            </p>
+          }
+        >
+          <DrawingMapPanel
+            projectId={projectId}
+            batchId={batchId || null}
+            variant="compact"
+            primaryZone={selectedBatch?.primary_zone ?? null}
+            onOpenComponent={(componentId) => onOpenComponent?.(projectId, componentId)}
+            onRequestProgress={() => onNavigate?.("progress-paste")}
+            onOpenFullScreen={onOpenMap}
+            lazyReady={mapLayoutReady}
+          />
+        </Suspense>
       </section>
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         {cards.map(([label, value, hint, accent]) => {
