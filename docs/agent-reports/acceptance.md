@@ -1,5 +1,75 @@
 # Acceptance (PYC/BBNT) Agent Report
 
+## 2026-11-24 - import PD1 acceptance history from the private workbook
+
+New `scripts/import_acceptance_workbook.py` (`--database`, `--project`,
+`--xlsx`, optional `--reconciliation`, `--segment`, `--actor`, `--commit`).
+Preview is read-only; commit creates only workbook-backed PYC/BBNT records.
+No migration; workbook is never written.
+
+Rules:
+- Scope: DM rows whose location/target says `Phân đoạn <segment>` and whose
+  components resolve inside `Cầu chính` segment 1. Rows 6-8 (general/lán trại)
+  were skipped.
+- Codes come from the DM `Đối tượng` cell, resolved by canonical/raw code or
+  alias (for example `I40-42` -> `I-40-42`) on components of the segment.
+- Stages come from the reviewed `Đã ghi tiến độ` sheet when supplied; otherwise
+  deterministic work-text prefixes against the component's own stage
+  definitions. No fuzzy/LLM matching.
+- Confirmed only when the row has a number, a valid workbook date, no duplicate
+  number, all codes/stages resolved, and every matched repair scope is
+  `VERIFIED`. Missing/ambiguous date or number, duplicate number, unmatched code
+  or stage, or `NEEDS_REVIEW` scope keeps the record draft with the reason.
+- Formula date values are the workbook's computed values, never invented; the
+  provenance note records that the date came from a formula.
+- Idempotent on `sheet=DM; row=...; number=...` in the PYC notes; reruns create
+  zero new rows/links. One audit entry
+  (`acceptance_workbook_imported`) records counts and source name.
+- Historical confirmed records use the project manager account as confirmer and
+  the workbook NT date as `confirmed_at`; this imports a prior signature, it does
+  not create a new approval. Draft records have no confirmer.
+
+Preview against the job working-copy DB before commit:
+- PYC found 53, BBNT found 53; to create 53/53.
+- Confirmed 8; needs review 45.
+- Component-stage links 1816 (239 on confirmed, 1577 on drafts).
+- Rows skipped (not PD1): 3 (DM 6-8).
+- Unmatched codes: `F-36-39` on DM 46-50 (catalogue uses `I-36-39`).
+- Duplicate numbers: 0.
+
+Commit (working-copy DB only; project `DAP - PD1 da duyet (du lieu thuc te)`):
+- Created 53 PYC (`YC-04`..`YC-56`), 53 BBNT, 1816 links,
+  1 audit entry; confirmed 8, draft 45.
+- Confirmed: NT-04 (no component), NT-05 (54 links), NT-06 (24), NT-07 (25),
+  NT-53 (6), NT-54 (108), NT-55 (18), NT-56 (4).
+- Pending acceptance for PD1 dropped **74 -> 62** (12 components at the NT-07
+  `Lắp tấm vỏ composite tiền chế` stage). The other confirmed documents cover
+  stages that are not the current latest stage of a pending component.
+- Rerun with `--commit`: 0 created, `existing: 53`; workbook SHA-256 unchanged
+  (`559a2047...807c78`).
+
+Needs review (45):
+- DM 13-45 and 51-55: missing YC/NT dates in the workbook (draft; links kept
+  where codes/stages resolve).
+- DM 46-50: same missing dates plus `F-36-39` not found in the PD1 catalogue.
+- DM 56: missing dates; general work with no component codes.
+- DM 57 (NT-52): stages resolve, but four beams (`F-33-34`, `F-43-48`,
+  `I-30-31`, `I-40-42`) use a `NEEDS_REVIEW` additional scope; the reviewed
+  reconciliation also notes a formula date and unsigned BBNT. Kept draft, six
+  beams stay pending.
+
+Tests: `backend/tests/acceptance/test_import_workbook.py` builds synthetic
+workbooks only (confirmed row, missing date, PD2 skip, unmatched code, duplicate
+number, preview no-write, idempotent rerun, pending drop, workbook hash).
+Verification: full backend `384 passed, 6 skipped`.
+
+Run:
+```
+python scripts/import_acceptance_workbook.py --database <url> \
+  --project "<exact name>" --xlsx "<private workbook>" \
+  [--reconciliation "<reviewed reconciliation>"] --segment 1 [--commit]
+```
+
 ## 2026-11-23 - pending queue filter chip
 
 - The pending response now carries `stage_name` for a `stage_definition_id`
