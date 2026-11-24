@@ -1,5 +1,82 @@
 # Engineering AI Agent Report
 
+## 2026-11-24 — place missing drawing-map markers and add Cầu dẫn corner catalog
+
+### 1. Placement script and data
+
+- New `scripts/place_missing_markers.py` (`--database`, `--project`,
+  `--placements`, `--maps-root`, `--corner-source`, `--actor`, `--commit`).
+  Preview is read-only. Commit creates the missing corner catalog rows through
+  the manual-entry path (`StructuralComponent` + `RepairScope` + `ComponentAlias`,
+  `NEEDS_REVIEW`, `MANUAL_ENTRY`, source CSV hash/row) and inserts
+  `ComponentMapPosition` rows (`status=DRAFT`, `source=ai_extracted`, note with
+  drawing/page/grid evidence). It writes one audit entry
+  `component_map_positions_placed`. Idempotent per `(component, sheet)`.
+- Placements JSON: `data/storage/dap-maps/expansion/placements/placements.json`;
+  overlays + per-sheet report: same folder. The JSON is private-data-derived and
+  stays under gitignored `data/storage`.
+- The 36 corner rows come from `DAP-cau-dan-goc-dam-nhom-III.csv` (TK-98, PDF
+  104). They are stored as `type=beam` because the current schema/API accepts
+  only `pile|beam`; the `Q-xxx` code distinguishes them from `O-Q-*` beams. The
+  CSV has no `review_status`, so every row is `NEEDS_REVIEW`; nothing was
+  promoted to `VERIFIED`. Q-358 missing dimensions and Q-312 `c`/`70`/`0,07`
+  remain review items.
+
+### 2. Visual method (no OCR)
+
+- Rendered private `~/Downloads/bản vẽ scan_1.pdf` pages 96–102 (TK-90…TK-96)
+  and read them visually; no OCR/text extraction.
+- **x calibration uses the axis-circle centers**, not dimension ticks: the end
+  tick is the 1113 mm edge, so the earlier PD11/PD13/PD15 rows were shifted about
+  half a bay (~190 px). y uses the Q/P/O/N/M row-label circles, then a median
+  row offset from the nearest pile square.
+- Verification searched for the nearest pile square in ±15 px x / ±30 px y:
+  **max 28.9 px = 0.477% of image width**, mean 12.0 px. One PD18 M-row marker
+  (M371) is outside the ±30 px search window; the overlay still shows it on the
+  M row. This is a visual candidate check, not a survey.
+- Piles are placed at the drawing-grid intersection (axis × row), not at a
+  traced individual pile leader. This is the same candidate convention as the
+  earlier Cầu chính expansion.
+- Corner markers reuse the visual points already read in
+  `expansion/cau-dan/pdXX/candidates.json` (same image bytes as the live
+  `plan.jpg`); a second point offsets 0.008 to satisfy the current beam shape
+  (≥2 points). The segment is a display tick, not a real repair length.
+- 19 overlays saved as `expansion/placements/cau-dan-pdXX-plan.png` and
+  `...-plan-m.png`.
+
+### 3. M-row extension and result
+
+- Six new `plan-m.jpg` sheets (PD06/08/12/14/16/18) extend the original crop
+  300 px downward to show row M; the old `plan.jpg` files are unchanged. Each
+  `plan-m` sheet is added to the live manifest with no manifest markers; the 19
+  M-row piles are DB positions.
+- Catalog: **517 → 553 components** (+36 corner beams); 0 duplicate
+  `(type, canonical_code)`.
+- Positions: **221** new DRAFT/`ai_extracted` rows on 19 Cầu dẫn sheets
+  (185 piles + 36 corners); rerun adds 0. `drawing_map` returns **487 markers**
+  across 29 sheets (266 manifest + 221 DB; 12 Bunke/pd2 markers share components).
+- Per-sheet before/after and the 78 unresolved catalog components are in
+  `data/storage/dap-maps/expansion/placements/report.md`. Main unresolved:
+  Cầu chính PD1 53 piles + 8 unlabeled beams; PD3 10 piles; Bunke/PD2 7 piles.
+  TK-02/TK-09/TK-03/TK-10 were rendered: the labels exist, but the code numbers
+  145–151 / 160–164 are pile numbers, not the plan axes (1–48 / 97–144), so a
+  grid placement by code would be wrong. They stay unresolved; the 19 M-row
+  piles are now placed.
+- Tấm tựa tàu: assessment only. Three panels (K-111-112, K-135-136, K-1) need a
+  new `fender_panel` component type; detail sheets have no route-wide/global
+  coordinates, so nothing was placed. See `expansion/tam-tua-tau/report.md`.
+
+### 4. Verification
+
+- `backend/tests/engineering_ai/test_place_missing_markers.py` (2, synthetic:
+  marker validation, preview no-write, corner import + positions + audit,
+  idempotent rerun).
+- Full backend with temp `DATABASE_URL`/storage: **400 passed, 6 skipped**.
+- Fresh copy `acc4` from `data/storage/demo-live/app.db` via sqlite backup:
+  553 components, 221 positions, 0 duplicates; rerun `positions_added=0`.
+  The real DB was not written; no migration, no frontend/router edit, no
+  commit/push.
+
 ## 2026-11-24 — approved drawing maps, Bunke correction and segment batches
 
 ### 1. Live drawing maps — `scripts/promote_map_candidates.py`

@@ -1,5 +1,22 @@
 # Acceptance (PYC/BBNT) Agent Report
 
+## 2026-11-24 — fix `F-36-39` alias and link DM rows 46–50
+
+- New `scripts/fix_alias_f3639.py --database <url> --project <name> [--commit]`.
+  Preview is read-only; `--commit` adds `ComponentAlias F-36-39 -> I-36-39`
+  (raw alias kept, audited) and links the imported draft PYC/BBNT of DM rows
+  46–50 to `I-36-39` using the workbook importer's own stage matcher
+  (`_row_stage_links`), so stage selection is identical. PYC/BBNT status is not
+  changed (stays `draft`); rerun is idempotent per link and per alias.
+- Preview/commit on the `acc3` copy: 24 links added — YC-41 9, YC-42 4, YC-43 1,
+  YC-44 6, YC-45 4. Alias exists, all five records stay `draft`; rerun adds 0.
+- The reconciliation workbook has no `Đã ghi tiến độ` rows for DM 46–50, so the
+  importer's work-text prefix fallback is the exact same path used originally.
+- Tests: `backend/tests/acceptance/test_fix_alias_f3639.py` (2, synthetic;
+  preview no-write, commit/idempotent, conflicting alias aborts).
+- Full backend with temp env: **400 passed, 6 skipped**.
+- Copy DB only; no migration, no commit/stash/reset/push.
+
 ## 2026-11-24 - import PD1 acceptance history from the private workbook
 
 New `scripts/import_acceptance_workbook.py` (`--database`, `--project`,
