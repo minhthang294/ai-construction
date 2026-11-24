@@ -1,3 +1,5 @@
+import { buildZaloSummary, type PasteAppliedLine } from "../features/site/lib/progressPaste";
+
 export type OverviewWork = {
   stage_name: string;
   zone: string;
@@ -25,6 +27,33 @@ export type LatestDay = {
   photo_count: number;
   daily_report_exists: boolean;
   acceptance_today: AcceptanceToday[];
+};
+
+export type InProgressComponent = {
+  id: string;
+  code: string;
+  type: string;
+  status: string;
+  last_event_date: string;
+  days_since_update: number;
+};
+
+export type InProgressGroup = {
+  stage_name: string;
+  stage_definition_id: string;
+  zone: string;
+  segment: number;
+  component_type: string;
+  component_count: number;
+  days_since_update: number;
+  components: InProgressComponent[];
+};
+
+export type InProgressOverview = {
+  project_id: string;
+  today: string;
+  total_components: number;
+  groups: InProgressGroup[];
 };
 
 export type SegmentProgress = {
@@ -92,4 +121,26 @@ export function formatLatestDayLine(day: LatestDay): string {
   const line = `${date} · ${primary.stage_name} · PD${primary.segment} ${primary.zone} · ${primary.count} ${componentUnit(primary.component_type)} ${workStatusLabel(primary.status)}`;
   const others = day.works.length - 1;
   return others > 0 ? `${line} · +${others} nhóm công tác khác` : line;
+}
+
+/** Reuse the paste-flow Zalo formatter for the latest recorded day. */
+export function buildLatestDayZaloSummary(
+  day: LatestDay,
+  pendingAcceptance: number,
+): string {
+  if (!day.date || day.works.length === 0) return formatLatestDayLine(day);
+  const lines: PasteAppliedLine[] = day.works.map((work) => ({
+    work_text: work.stage_name,
+    stage_display_name: work.stage_name,
+    component_type: work.component_type,
+    stage_definition_id: "",
+    status: work.status === "COMPLETED" ? "COMPLETED" : "IN_PROGRESS",
+    component_ids: [],
+    codes: work.codes,
+  }));
+  return buildZaloSummary({
+    eventDate: day.date,
+    lines,
+    pendingAcceptance,
+  });
 }

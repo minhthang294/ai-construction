@@ -1279,3 +1279,35 @@ npm run build   # OK; ProgressPastePanel 25,82 kB
 ```
 
 **Chưa kiểm**: ảnh chụp 390px sau thay đổi (chỉ kiểm bằng type-check/build/test helper).
+
+## Tổng quan "Hôm nay" mobile-first - 2026-11-24
+
+Phạm vi: `frontend/src/app/*`, `frontend/src/features/site/*` (chỉ đọc/dùng helper), `backend/app/core/overview_router.py`, test và báo cáo. Không sửa engineering-ai/acceptance, không migration, không commit/push.
+
+### Màn hình
+
+- Ngay dưới chọn đợt có khối **Hôm nay**:
+  - Một nút primary **Ghi tiến độ từ tin nhắn** (đã bỏ nút primary trùng trong “Việc nhanh”).
+  - **Đang dở dang**: nhóm theo stage display name (có `t = … cm`), khu và phân đoạn; summary hiện số cấu kiện + số ngày kể từ cập nhật cũ nhất; mở nhóm để bấm từng mã → mở đúng component detail qua `onOpenComponent` của App.
+  - **Chờ nghiệm thu**: tổng số + tối đa 3 nhóm từ `/acceptance/pending?batch_id`; nút **Tạo PYC nháp** dựng `AcceptanceDraftRequest` từ toàn bộ cấu kiện đang chờ và đi qua `openAcceptanceDraft`/`toAcceptanceInitialState` sẵn có.
+  - **Hôm qua đã làm**: một dòng từ `/overview/latest-day`; nút **Sao chép Zalo** dùng lại `buildZaloSummary` qua helper `buildLatestDayZaloSummary`, có trạng thái đã sao chép/lỗi clipboard.
+- KPI, biểu đồ, thanh đoạn, “Việc nhanh” và thẻ báo cáo ngày vẫn nằm dưới. Mỗi khối mới có loading/empty/error riêng.
+
+### Backend
+
+- `GET /projects/{p}/overview/in-progress?batch_id=`: member access, project-scoped, bỏ qua event `voided_at`; lấy event mới nhất theo `created_at/id` của từng cấu kiện, chỉ giữ `IN_PROGRESS`/`BLOCKED`.
+- Gom theo stage definition + khu + phân đoạn + loại; `stage_name` dùng `display_stage_name` với `t_cm`; trả `days_since_update`, `last_event_date`, mã/status từng cấu kiện và tổng số. Không cần migration.
+- Test `test_in_progress_groups_latest_non_voided_events_by_stage_and_segment`: nhóm/t (3–5 cm), batch filter, COMPLETED không lọt, event voided bị bỏ qua, batch project khác không lộ dữ liệu.
+
+### Kiểm tra
+
+```bash
+cd backend
+..\.venv\Scripts\python.exe -m pytest tests -q
+# 378 passed, 6 skipped
+cd ../frontend
+npm test        # 35 files, 216 tests
+npm run build   # OK; main 310,06 kB
+```
+
+Screenshots: **bỏ qua** — không có app local chạy ở cổng 5173/8765 tại thời điểm kiểm tra.

@@ -1,6 +1,7 @@
 """Latest-day and per-segment overview on a temporary SQLite database."""
 
 from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
@@ -10,8 +11,9 @@ from sqlalchemy.orm import sessionmaker
 from app.acceptance.models import AcceptanceRecord, AcceptanceRequest, ComponentAcceptanceLink
 from app.core import access, auth, database
 from app.core.auth import password_hash
-from app.core.component_models import (ComponentStage, ProgressEvent, RepairScope, Segment,
-                                       StageDefinition, StructuralComponent, StructureZone)
+from app.core.component_models import (ComponentDesignParameter, ComponentStage, ProgressEvent,
+                                       RepairScope, Segment, StageDefinition,
+                                       StructuralComponent, StructureZone)
 from app.core.models import User
 from app.main import app
 from app.site.models import DailyReport, ManpowerEntry, SitePhoto
@@ -77,10 +79,12 @@ class Seed:
         return stage
 
     def event(self, component, stage, day: str, status: str):
-        self.db.add(ProgressEvent(component_id=component.id, component_stage_id=stage.id,
-                                  event_date=date.fromisoformat(day), status=status,
-                                  evidence_refs="[]", created_by=self.admin.id))
+        event = ProgressEvent(component_id=component.id, component_stage_id=stage.id,
+                              event_date=date.fromisoformat(day), status=status,
+                              evidence_refs="[]", created_by=self.admin.id)
+        self.db.add(event)
         self.db.flush()
+        return event
 
     def report(self, day: str, manpower: list[int | None]):
         report = DailyReport(project_id=self.project, report_date=date.fromisoformat(day))
@@ -296,3 +300,76 @@ def test_segments_report_construction_and_acceptance_independently(env):
                                       "completed": 0, "blocked": 0,
                                       "completion_ratio": 0.0}
     assert second["acceptance"] == {"confirmed": 0, "completion_ratio": 0.0}
+
+
+def test_in_progress_groups_latest_non_voided_events_by_stage_and_segment(env):
+    client, factory, admin = env
+    project = _project(client, admin, "In progress")
+    today = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).date()
+
+    def day_ago(days: int) -> str:
+        return date.fromordinal(today.toordinal() - days).isoformat()
+
+    with factory() as db:
+        seed = Seed(db, project, "Cầu chính")
+        seed.definition.name = "Đục bê tông om vỡ dày trung bình t"
+        first, first_scope = seed.component("A1", segment=1)
+        second, second_scope = seed.component("A2", segment=1)
+        blocked, blocked_scope = seed.component("B1", segment=2)
+        finished, finished_scope = seed.component("B2", segment=2)
+        reverted, reverted_scope = seed.component("B3", segment=2)
+        for component, value in ((first, 3.0), (second, 5.0)):
+            db.add(ComponentDesignParameter(
+                project_id=project, component_id=component.id, name="t_cm",
+                value=value, unit="cm", created_by=seed.admin.id))
+        seed.event(first, seed.stage(first, first_scope), day_ago(3), "IN_PROGRESS")
+        seed.event(second, seed.stage(second, second_scope), day_ago(1), "IN_PROGRESS")
+        seed.event(blocked, seed.stage(blocked, blocked_scope), day_ago(7), "BLOCKED")
+        seed.event(finished, seed.stage(finished, finished_scope), day_ago(1), "COMPLETED")
+        reverted_stage = seed.stage(reverted, reverted_scope)
+        seed.event(reverted, reverted_stage, day_ago(6), "IN_PROGRESS")
+        voided = seed.event(reverted, reverted_stage, day_ago(2), "COMPLETED")
+        voided.voided_at = datetime.now(timezone.utc)
+        db.commit()
+
+    batch = client.post(f"/api/v1/projects/{project}/construction-batches", headers=admin,
+                        json={"name": "Current"}).json()
+    client.post(f"/api/v1/projects/{project}/construction-batches/{batch['id']}/components",
+                headers=admin,
+                json={"component_ids": [first.id, second.id, blocked.id, finished.id]})
+
+    body = client.get(
+        f"/api/v1/projects/{project}/overview/in-progress?batch_id={batch['id']}",
+        headers=admin,
+    ).json()
+    assert body["total_components"] == 3
+    assert [group["segment"] for group in body["groups"]] == [1, 2]
+    assert body["groups"][0]["stage_name"].endswith("t = 3–5 cm")
+    assert body["groups"][0]["component_count"] == 2
+    assert body["groups"][0]["days_since_update"] == 3
+    assert [item["code"] for item in body["groups"][0]["components"]] == ["A1", "A2"]
+    assert body["groups"][0]["components"][1]["days_since_update"] == 1
+    assert body["groups"][1]["component_count"] == 1
+    assert body["groups"][1]["components"][0]["status"] == "BLOCKED"
+
+    reverted_body = client.get(
+        f"/api/v1/projects/{project}/overview/in-progress",
+        headers=admin,
+    ).json()
+    reverted_group = next(
+        group for group in reverted_body["groups"]
+        if any(item["id"] == reverted.id for item in group["components"])
+    )
+    reverted_item = next(
+        item for item in reverted_group["components"] if item["id"] == reverted.id
+    )
+    assert reverted_item["status"] == "IN_PROGRESS"
+    assert reverted_item["days_since_update"] == 6
+
+    other = _project(client, admin, "Other")
+    foreign = client.get(
+        f"/api/v1/projects/{other}/overview/in-progress?batch_id={batch['id']}",
+        headers=admin,
+    )
+    assert foreign.status_code == 200
+    assert foreign.json()["total_components"] == 0

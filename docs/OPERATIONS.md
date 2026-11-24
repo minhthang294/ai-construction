@@ -1,102 +1,86 @@
 # Vận hành và bàn giao
 
-Cập nhật: 12/11/2026. Đây là trạng thái đang chạy trên máy hiện tại.
+Cập nhật: 24/11/2026. Tài liệu này mô tả cách chạy và kiểm tra môi trường hiện tại; không chứa mật khẩu, token hay API key.
 
-## 1. Địa chỉ
+## 1. Địa chỉ và chạy
 
 - Giao diện: `http://localhost:5173`
 - API: `http://127.0.0.1:8765`
 - Health: `http://127.0.0.1:8765/health`
 
-Chạy lại:
+Trên Windows với dữ liệu demo đã chuẩn bị:
 
-```bash
-ENGINEERING_AI_MAX_PDF_BYTES=80000000 CONSTRUCTION_API_PORT=8765 scripts/start.sh
+```powershell
+data/storage/demo-live/run-backend.ps1
+data/storage/demo-live/run-frontend.ps1
 ```
+
+Hoặc `scripts/start.sh` / `scripts/start.bat` cho môi trường `.venv` + `frontend/node_modules` của repo.
 
 ## 2. Tài khoản
 
-- Username: `admin`
-- Mật khẩu ban đầu: `data/.admin-initial-password` (quyền `600`, đã ignore khỏi Git)
-- Đọc mật khẩu một lần, lưu an toàn, sau đó xoá file:
+Tạo tài khoản quản trị đầu tiên bằng `scripts/bootstrap_admin.sh` (script hỏi trực tiếp, không ghi mật khẩu ra file). Người dùng đổi mật khẩu trong giao diện bằng nút **Đổi mật khẩu**; backend thu hồi token cũ và buộc đăng nhập lại. Không lưu thông tin đăng nhập trong tài liệu.
+
+## 3. Dữ liệu hiện có
+
+- Project DAP và danh mục work item/cấu kiện đã nạp trong database đang dùng.
+- Hồ sơ, trang và kết quả trích xuất theo trang nằm trong DB/storage private; phần lớn extraction đang `proposed`.
+- Không có chức năng upload PDF/OCR trong ứng dụng. Hồ sơ mới được đưa vào bằng DB/storage đã duyệt và script import (xem [REAL_DATA_INGESTION.md](REAL_DATA_INGESTION.md)).
+- Storage mặc định: `data/storage/engineering-ai`, `data/storage/site`, `data/storage/acceptance`.
+
+## 4. Hỏi AI
+
+- Chat trong **Hỏi AI** trả lời trên dữ liệu trích xuất theo trang + cơ sở dữ liệu cấu kiện/tiến độ và luôn kèm citation hoặc từ chối khi thiếu nguồn.
+- Provider tùy chọn: `ENGINEERING_AI_PROVIDER`, `ENGINEERING_AI_OPENCODE_MODEL`, `ENGINEERING_AI_TIMEOUT`; không đặt key trong frontend. Provider lỗi thì fallback trích xuất trực tiếp, vẫn giữ citation.
+- Kiểm tra nhanh: hỏi một thông số có trong trang đã trích xuất, mở citation đối chiếu; hỏi một thông tin không có để thấy câu từ chối.
+
+## 5. Tiến độ, đợt thi công, sửa/hoàn tác
+
+- **Ghi tiến độ từ tin nhắn**: dán tin nhắn Zalo → parser tất định trả về dòng/cấu kiện, cảnh báo và câu hỏi tiếng Việt (trạng thái, công đoạn, mã lạ/trùng, ngày tương lai) → xem trước → ghi.
+- **Đợt thi công** gom cấu kiện ở nhiều khu; dùng để lọc khi ghi tiến độ và lập PYC.
+- Sau khi ghi, có thể sửa thông tin hoặc hoàn tác cả đợt ghi (`/progress/batches/{id}/undo`) và sửa từng sự kiện (`/progress/events/{id}/correct`). Sự kiện đã huỷ không được tính vào tiến độ, nghiệm thu hay câu trả lời AI.
+- Ghi tiến độ không tạo nghiệm thu.
+
+## 6. Tham số thiết kế `t`
 
 ```bash
-cat data/.admin-initial-password
-rm data/.admin-initial-password
+.venv/bin/python scripts/import_design_parameters.py \
+  --database data/app.db \
+  --project "TEN CONG TRINH" \
+  --csv duong-dan/DAP-coc-thong-so.csv
 ```
 
-Có thể đổi mật khẩu ngay trong giao diện: nút **Đổi mật khẩu** ở header. Backend thu hồi toàn bộ token cũ và buộc đăng nhập lại.
+Mặc định chỉ xem trước; `--commit` mới ghi. Script không ghi đè giá trị khác đã lưu, báo dòng không khớp/mơ hồ/xung đột và ghi audit. Chat trả lời chiều dày `t` của từng cọc kèm nguồn thiết kế.
 
-## 3. Dữ liệu thật đã nạp
+## 7. Ảnh và cấu kiện
 
-- Project: `THI CÔNG SỬA CHỮA VẾT NỨT CỌC VÀ DẦM CẦU CẢNG NHÀ MÁY DAP`
-- 42 work item lấy từ sheet `DM` của workbook (một số bổ sung trong quá trình dùng).
-- Hồ sơ:
-  - `bản vẽ scan_1.pdf` — 133 trang, trạng thái `ready`
-  - `Tập 1 - thuyết minh báo cáo KTKT sửa chữa nứt cọc dầm cầu cảng_0001.pdf` — 108 trang, trạng thái `ready`
-- Storage: `data/storage/engineering-ai` (khoảng 450 MB render + file gốc).
-- Search/chat theo project đã trả citation và mở đúng trang render.
-- Chat backend dùng **OpenCode DeepSeek V4.1 Flash** (`ENGINEERING_AI_PROVIDER=opencode_deepseek`); nếu OpenCode service lỗi thì tự fallback extractive, vẫn giữ citation.
-- Ví dụ đã kiểm tra: “Chiều dài cầu cảng là bao nhiêu?” → `165m [2]`, citation trang 10 hồ sơ thuyết minh.
+Ảnh hiện trường có thể gắn với cấu kiện; gợi ý của AI chỉ là đề xuất, kỹ sư xác nhận chú thích/loại ảnh trước khi dùng làm chứng cứ. Ảnh gốc lưu ngoài DB và tải qua API có kiểm quyền.
 
-## 4. Page extraction
+## 8. Nghiệm thu
 
-- **Đã extraction toàn bộ 241/241 trang**: 108 trang thuyết minh + 133 trang bản vẽ.
-- 241 bản ghi extraction, **7.664 key values**, **4.303 warnings**; tất cả đang `proposed`.
-- Chế độ: 117 trang bản vẽ dùng tile, 124 trang còn lại dùng direct.
-- Dữ liệu extraction nằm trong `engineering_ai_page_extractions`, mặc định `proposed`.
-- Review trong `AI hồ sơ kỹ thuật → Hồ sơ & trang → chọn trang`: panel hiển thị summary/key values/warnings/confidence, nút Xác nhận/Từ chối.
-- Chỉ dữ liệu `verified` mới nên dùng làm thông tin tin cậy; `proposed` phải đối chiếu trang gốc.
-- Import kết quả extraction hàng loạt:
+- Đầu trang **Nghiệm thu** có danh sách **Chờ nghiệm thu**: cấu kiện có tiến độ hoàn thành gần nhất và chưa có BBNT xác nhận. Đi từ màn hình khác thì bộ lọc công đoạn/đợt hiển thị chip **Đang lọc** + **Xem tất cả**; tiêu đề hiển thị `đang lọc / tổng`.
+- Chọn cấu kiện → **Tạo PYC nháp**: điền sẵn vị trí, công đoạn, ngày làm việc kế tiếp; liên kết cấu kiện ở trạng thái chờ, **không** tạo BBNT và không xác nhận nghiệm thu.
+- BBNT/checklist Có/Không/Chưa xác nhận; chỉ người có quyền xác nhận. Xuất PYC/BBNT tất định từ template gốc, không giữ dữ liệu nhân sự/kết luận cũ.
+
+## 9. Sao lưu
 
 ```bash
-.venv/bin/python scripts/import_page_extractions.py \
-  /tmp/opencode/full-drawings-a \
-  /tmp/opencode/full-drawings-b \
-  /tmp/opencode/full-drawings-c \
-  /tmp/opencode/full-drawings-d \
-  --prompt-version batch-v1
+python3 scripts/backup.py /tmp/opencode/backup-$(date +%Y%m%d).tar.gz
 ```
 
-Với bản vẽ dùng `--tile-grid 2 --tile-workers 4`. Script chỉ dùng DeepSeek V4.1 Flash.
+Archive gồm `app.db`, `storage/`, `templates/`; giữ bản sao ngoài `data/`. Không commit archive hoặc dữ liệu công trình.
 
-## 5. Nghiệm thu
-
-Đã kiểm tra end-to-end với dữ liệu thật:
-
-- Tạo PYC `PYC-001` từ work item.
-- Preview đúng số phiếu.
-- Tạo BBNT, checklist, xác nhận `approved`.
-- Xuất PYC và BBNT ra Excel và PDF thành công, mở được bằng OpenPyXL.
-- Numbering mặc định `PYC-001`; cấu hình tại `Nghiệm thu → Cấu hình số`.
-
-## 6. Sao lưu
-
-Đã có bản sao lưu sau khi extraction đầy đủ:
-
-```bash
-python3 scripts/backup.py /tmp/opencode/backup-ready-20261113.tar.gz
-```
-
-Kích thước khoảng 510 MB. Sao lưu định kỳ ra ngoài `data/`; archive chứa hồ sơ công trình, không commit.
-
-## 7. Kiểm tra
+## 10. Kiểm tra
 
 ```bash
 scripts/verify_all.sh
 ```
 
-Kết quả hiện tại:
+Script chạy backend test, frontend test và production build với DB/storage tạm. Chạy lại sau mỗi thay đổi schema/template.
 
-- Backend: **292 passed**
-- Frontend: **115 passed**
-- Production build: pass
-- Migration head: `e2f6a1c9d430`
+## 11. Giới hạn cần biết
 
-## 8. Giới hạn cần biết
-
-1. **AI trả lời dùng OpenCode DeepSeek V4.1 Flash** ở backend (`ENGINEERING_AI_PROVIDER=opencode_deepseek`). Nếu OpenCode service không khả dụng, tự fallback extractive. Câu trả lời vẫn có citation và kiểm tra grounding.
-2. **OCR bản vẽ có lỗi**; không dùng số OCR/model làm kết luận kỹ thuật khi chưa kiểm tra trang gốc.
-3. **Page extraction đã đủ 241 trang** nhưng toàn bộ đang `proposed`; cần kỹ sư review/verify trước khi dùng làm dữ liệu tin cậy.
-4. **PWA/camera trên điện thoại** cần HTTPS và kiểm tra thiết bị thật.
-5. SQLite một file; phù hợp một máy/công trường nhỏ, chưa phải multi-worker.
+1. AI chỉ đáng tin khi citation trỏ đúng trang gốc; extraction `proposed` phải được kỹ sư xác nhận.
+2. Không dùng kết quả AI làm kết luận kỹ thuật hoặc tự xác nhận nghiệm thu.
+3. PWA/camera trên điện thoại cần HTTPS và kiểm tra trên thiết bị thật.
+4. SQLite một file; phù hợp một máy/công trường nhỏ, chưa phải multi-worker.

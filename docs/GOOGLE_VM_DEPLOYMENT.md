@@ -43,8 +43,8 @@ Trên VM, đối chiếu mã SHA-256 trước khi giải nén.
 sha256sum "$HOME/ai-construction-release.tar.gz"
 sudo apt-get update
 sudo apt-get install -y python3-venv sqlite3 curl
-# Cài các gói này khi sử dụng xuất PDF hoặc OCR.
-sudo apt-get install -y libreoffice-calc fonts-dejavu-core tesseract-ocr tesseract-ocr-vie
+# Cài gói này khi cần xuất PDF.
+sudo apt-get install -y libreoffice-calc fonts-dejavu-core
 ```
 
 Cài Caddy bằng gói systemd theo hướng dẫn chính thức. [Cài Caddy trên Ubuntu](https://caddyserver.com/docs/install#debian-ubuntu-raspbian)
@@ -115,7 +115,7 @@ curl --fail https://construction.example.com/health
 curl --fail --head https://construction.example.com/
 ```
 
-Kiểm trên điện thoại và với tài khoản theo vai trò thực tế. Mở Tổng quan, đi qua **Việc nhanh → Cập nhật tiến độ thi công**, đối chiếu cấu kiện DAP và khối lượng thiết kế, rồi thử ghi và xuất ở công trình kiểm thử riêng. Kiểm lại camera, PYC/BBNT PDF, và tải ảnh/PDF theo chức năng được bật.
+Kiểm trên điện thoại và với tài khoản theo vai trò thực tế. Mở Tổng quan, đi qua **Cấu kiện**, **Ghi tiến độ từ tin nhắn**, **Đợt thi công** và **Nghiệm thu** (danh sách chờ nghiệm thu, tạo PYC nháp), rồi thử ghi và xuất ở công trình kiểm thử riêng. Kiểm lại camera, ảnh gắn cấu kiện, PYC/BBNT PDF, citation của **Hỏi AI** và phân quyền theo chức năng được bật.
 
 ## 5. Cập nhật và quay lui
 

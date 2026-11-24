@@ -1,5 +1,41 @@
 # Engineering AI Agent Report
 
+## 2026-11-24 — docs and dependency cleanup
+
+- Rewrote docs for the current product: no PDF upload/OCR; AI answers from
+  AI-extracted page data + component/progress DB with citations. Added the
+  paste-Zalo progress flow (questions, future-date guard, undo/correct),
+  construction batches (Đợt thi công), per-pile `t` import script, pending
+  acceptance queue/PYC draft and photo-component links. Local run uses
+  `data/storage/demo-live/run-backend.ps1` / `run-frontend.ps1` (or
+  `scripts/start.*`). Removed password/secret examples.
+- Files: `README.md`, `docs/INSTALLATION.md`, `docs/OPERATIONS.md`,
+  `docs/USER_GUIDE.md`, `docs/AI_ARCHITECTURE.md`,
+  `docs/GOOGLE_VM_DEPLOYMENT.md`, `docs/REAL_DATA_INGESTION.md`,
+  `docs/SOURCE_DOCUMENT_STATUS.md`.
+- OCR env cleanup: removed `TESSDATA_PREFIX` export from `scripts/start.sh`
+  (the remaining OCR-related script sets its own fallback).
+- Dependency audit (`backend/app`, `scripts`):
+  - Removed `reportlab`: zero imports anywhere; PYC/BBNT PDF uses LibreOffice
+    + PyMuPDF.
+  - Kept `PyMuPDF` (acceptance preview/filter, site PDF, extraction script),
+    `Pillow` (EXIF in site, scripts), `sqlite-vec` (`core/database.py`),
+    `python-docx` (`site/service.py`), `openpyxl`, `httpx`, `python-multipart`
+    (Excel upload route), `tzdata` (ZoneInfo on Windows).
+  - `pytesseract` and embedding libs (sentence-transformers/openai/numpy/torch)
+    were never declared and have no imports; Tesseract only exists as an
+    optional subprocess inside the offline `scripts/deepseek_page_extract.py`.
+  - `frontend/package.json`: every dependency is referenced by Vite/TS/Vitest
+    or source; nothing removed.
+- Verification: backend `378 passed, 6 skipped, 0 failed` (one earlier run had
+  a transient `test_overview` failure that passed in isolation and on rerun);
+  `npm test` 216 passed; `npm run build` OK.
+- Left untouched because they were outside the requested list but still
+  describe the removed ingest/OCR pipeline: `docs/MASTER_ARCHITECTURE.md`,
+  `docs/ADDENDUM_ARCHITECTURE.md`, `docs/IMPLEMENTATION_ROADMAP.md`,
+  `docs/API_CONTRACTS.md`, `docs/DATA_MODEL.md` (OCR page fields still exist in
+  the DB schema).
+
 ## 2026-11-23 — future-date guard and Vietnamese parse messages
 
 - `progress_parse` now compares the parsed `event_date` with today. A future

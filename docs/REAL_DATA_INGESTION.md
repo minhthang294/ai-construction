@@ -1,6 +1,6 @@
-# Nạp hồ sơ thật và kiểm chứng
+# Nạp dữ liệu thật và kiểm chứng
 
-Quy trình này chỉ dùng cho dữ liệu công trình thật. Không thay thế việc kỹ sư đọc bản vẽ gốc.
+Quy trình này chỉ dùng cho dữ liệu công trình thật. Không thay thế việc kỹ sư đọc bản vẽ gốc. Ứng dụng không có upload PDF/OCR: hồ sơ, trang và kết quả trích xuất theo trang được tạo offline bằng DeepSeek V4.1 Flash rồi nạp vào DB/storage đã duyệt.
 
 ## 0. Chuẩn bị
 
@@ -16,51 +16,54 @@ Quy trình này chỉ dùng cho dữ liệu công trình thật. Không thay th�
    scripts/bootstrap_admin.sh
    ```
 
-3. Cài `vie` cho OCR và kiểm tra:
+3. Chạy ứng dụng bằng `scripts/start.sh` (hoặc `data/storage/demo-live/run-backend.ps1` trên Windows) để có storage và template canonical.
 
-   ```bash
-   TESSDATA_PREFIX="$HOME/.local/share/tessdata" tesseract --list-langs
-   ```
+## 1. Hồ sơ và trích xuất theo trang
 
-4. Chạy ứng dụng bằng `scripts/start.sh` để có storage, template canonical và `TESSDATA_PREFIX` đúng.
-
-## 1. Nguồn thật hiện có
-
-| Tệp | Số trang | Dung lượng | Ghi chú |
-| --- | --- | --- | --- |
-| `bản vẽ scan_1.pdf` | 133 | ~49 MB | scan ảnh, không có text |
-| `Tập 1 - thuyết minh báo cáo KTKT sửa chữa nứt cọc dầm cầu cảng_0001.pdf` | 108 | ~66 MB | scan ảnh, không có text |
-
-File thuyết minh vượt giới hạn mặc định 50 MB. Đặt trước khi khởi động backend:
+- File gốc, trang và kết quả trích xuất nằm trong DB (`engineering_ai_documents`, `document_pages`, `engineering_ai_page_extractions`) và storage private. Không upload lại qua giao diện.
+- Với database đã duyệt, khôi phục nguyên bộ `app.db` + `storage/` + `templates/` để giữ đúng trang và citation.
+- Khi đã có tài liệu/trang trong DB, nạp thêm kết quả trích xuất đã review bằng script:
 
 ```bash
-export ENGINEERING_AI_MAX_PDF_BYTES=80000000
-export TESSDATA_PREFIX="$HOME/.local/share/tessdata"
+.venv/bin/python scripts/import_page_extractions.py \
+  /duong-dan/full-drawings-a \
+  /duong-dan/full-drawings-b \
+  --project DAP \
+  --prompt-version batch-v1
 ```
 
-## 2. Tạo project và tải hồ sơ
+Script chỉ gửi metadata extraction, không ghi đè text trang hay file gốc. Kết quả mặc định là `proposed`; kỹ sư xác nhận trong **AI hồ sơ kỹ thuật → Hồ sơ & trang**.
 
-1. Đăng nhập bằng tài khoản quản trị.
-2. Tạo project đúng tên công trình trong hồ sơ; không dùng dữ liệu demo.
-3. Vào `Kho tài liệu`, tải lần lượt hai PDF. Mỗi tệp trả về trạng thái `pending`/`running`, sau đó `ready`.
-4. Không tải lại cùng tệp để "thử"; upload trùng hash được xử lý idempotent nhưng vẫn tốn thời gian.
-5. Theo dõi trạng thái trong UI. Nếu backend restart giữa chừng, dùng chức năng ingest lại thay vì tạo bản ghi mới.
+## 2. Tham số thiết kế `t` của cọc
 
-Ước tính trên máy hiện tại: OCR 1–3 giây/trang, khoảng 8–15 phút cho 241 trang, cộng thời gian render/chunk/embedding. Nên chạy khi máy rảnh và giữ backend sống đến khi cả hai tài liệu `ready`.
+Dùng CSV đã đối chiếu bản vẽ. Mặc định chỉ xem trước:
 
-## 3. Kiểm chứng bắt buộc
+```bash
+.venv/bin/python scripts/import_design_parameters.py \
+  --database data/app.db \
+  --project "TEN CONG TRINH" \
+  --csv duong-dan/DAP-coc-thong-so.csv
+```
 
-- Đúng số trang: 133 và 108.
+Thêm `--commit` mới ghi. Script báo rõ số dòng khớp, cọc có `t`, dòng không khớp/mơ hồ/xung đột; không ghi đè giá trị khác đã lưu và ghi một audit entry.
+
+## 3. Danh mục, tiến độ và nghiệm thu
+
+1. Nhập danh mục cấu kiện trong **Cấu kiện** (xem trước Excel rồi xác nhận).
+2. Ghi tiến độ bằng **Ghi tiến độ từ tin nhắn** hoặc trong **Hiện trường**; dùng đợt thi công để gom cấu kiện.
+3. Tạo PYC từ danh sách **Chờ nghiệm thu** hoặc từ báo cáo ngày có liên kết work item/daily report.
+
+## 4. Kiểm chứng bắt buộc
+
+- Đúng số trang tài liệu và đúng tên file gốc.
 - Mỗi citation có `document_id`, `page_number`, `quote`; quote phải là đoạn nguyên văn trong text trang.
-- Trang OCR confidence thấp phải hiện cảnh báo và không được coi là kết luận kỹ thuật.
+- Kết quả trích xuất `proposed` hiện cảnh báo và không được coi là kết luận kỹ thuật.
 - Câu hỏi không có nguồn phải trả đúng câu từ chối, không bịa số liệu.
 - Đối chiếu thử một vài thông số thực (số hiệu bản vẽ, kích thước, ngày) bằng cách mở đúng trang gốc cạnh citation.
 - Không dùng kết quả AI để tự xác nhận nghiệm thu; mọi checklist vẫn `unconfirmed` cho đến khi người có quyền xác nhận.
 
-## 4. Sau khi hồ sơ `ready`
+## 5. Sau khi dữ liệu sẵn sàng
 
-1. Tạo PYC từ báo cáo ngày có liên kết work item/daily report.
-2. Kiểm tra lại template canonical sau khi người dùng sửa workbook:
-   `scripts/refresh_acceptance_template.sh`.
-3. Xuất PYC/BBNT, mở file kiểm tra không còn dữ liệu nhân sự/kết luận cũ.
-4. Chạy `scripts/verify_all.sh` trước khi bàn giao hoặc triển khai.
+1. Kiểm tra lại template canonical sau khi người dùng sửa workbook: `scripts/refresh_acceptance_template.sh`.
+2. Xuất PYC/BBNT, mở file kiểm tra không còn dữ liệu nhân sự/kết luận cũ.
+3. Chạy `scripts/verify_all.sh` trước khi bàn giao hoặc triển khai.

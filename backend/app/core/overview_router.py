@@ -330,6 +330,97 @@ def overview_latest_day(project_id: str, batch_id: str | None = None,
     }
 
 
+@router.get("/projects/{project_id}/overview/in-progress")
+def overview_in_progress(project_id: str, batch_id: str | None = None,
+                         db: Session = Depends(get_db)):
+    """Components whose latest non-voided event is still open or blocked."""
+    require_project_member(project_id)
+    today = datetime.now(LOCAL_TZ).date()
+
+    query = (
+        select(
+            ProgressEvent,
+            StructuralComponent,
+            Segment,
+            StructureZone,
+            StageDefinition,
+        )
+        .join(StructuralComponent, ProgressEvent.component_id == StructuralComponent.id)
+        .join(Segment, StructuralComponent.segment_id == Segment.id)
+        .join(StructureZone, Segment.zone_id == StructureZone.id)
+        .join(ComponentStage, ProgressEvent.component_stage_id == ComponentStage.id)
+        .join(StageDefinition, ComponentStage.stage_definition_id == StageDefinition.id)
+        .where(
+            StructuralComponent.project_id == project_id,
+            StructureZone.project_id == project_id,
+            ProgressEvent.voided_at.is_(None),
+        )
+        .order_by(ProgressEvent.created_at, ProgressEvent.id)
+    )
+    if batch_id:
+        query = query.where(
+            StructuralComponent.id.in_(batch_component_ids(project_id, batch_id))
+        )
+    latest: dict[str, tuple] = {}
+    for row in db.execute(query).all():
+        latest[row[1].id] = row
+
+    open_rows = [
+        row for row in latest.values()
+        if row[0].status in ("IN_PROGRESS", "BLOCKED")
+    ]
+    t_by_component = load_t_values(db, [row[1].id for row in open_rows])
+    grouped: dict[tuple, dict] = {}
+    for event, component, segment, zone, definition in open_rows:
+        key = (definition.id, zone.id, segment.number, component.type)
+        group = grouped.setdefault(
+            key,
+            {
+                "stage_name": "",
+                "stage_definition_id": definition.id,
+                "zone": zone.name,
+                "segment": segment.number,
+                "component_type": component.type,
+                "component_count": 0,
+                "days_since_update": 0,
+                "components": [],
+                "_name": definition.name,
+                "_t_values": [],
+            },
+        )
+        days = max(0, (today - event.event_date).days)
+        group["component_count"] += 1
+        group["days_since_update"] = max(group["days_since_update"], days)
+        group["_t_values"].append(t_by_component.get(component.id))
+        group["components"].append(
+            {
+                "id": component.id,
+                "code": component.canonical_code,
+                "type": component.type,
+                "status": event.status,
+                "last_event_date": event.event_date.isoformat(),
+                "days_since_update": days,
+            }
+        )
+
+    groups = []
+    for group in grouped.values():
+        group["stage_name"] = display_stage_name(
+            group.pop("_name"), group.pop("_t_values")
+        )
+        group["components"].sort(key=lambda item: item["code"])
+        groups.append(group)
+    groups.sort(key=lambda item: (
+        item["zone"], item["segment"], item["stage_name"]
+    ))
+    return {
+        "project_id": project_id,
+        "today": today.isoformat(),
+        "total_components": sum(group["component_count"] for group in groups),
+        "groups": groups,
+    }
+
+
 @router.get("/projects/{project_id}/overview/segments")
 def overview_segments(project_id: str, batch_id: str | None = None,
                       db: Session = Depends(get_db)):

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildLatestDayZaloSummary,
   componentUnit,
   formatLatestDayLine,
   formatOverviewPercent,
@@ -74,5 +75,24 @@ describe("overview formatting", () => {
       { stage_name: "B", zone: "Z", segment: 1, component_type: "pile", status: "COMPLETED",
         count: 1, codes: ["F64"] },
     ])).toEqual(["F64", "F67"]);
+  });
+
+  it("builds the copyable Zalo summary from the latest day groups", () => {
+    const text = buildLatestDayZaloSummary(day({
+      works: [{
+        stage_name: "Đục bê tông om vỡ",
+        zone: "Cầu chính",
+        segment: 2,
+        component_type: "pile",
+        status: "COMPLETED",
+        count: 2,
+        codes: ["F67", "F64"],
+      }],
+    }), 4);
+    expect(text).toContain("Ngày 21/11/2026");
+    expect(text).toContain("Tổng: 2 cọc");
+    expect(text).toContain("Đục bê tông om vỡ: 2 cọc");
+    expect(text).toContain("F67, F64");
+    expect(text).toContain("Chưa nghiệm thu: 4 cấu kiện đã xong");
   });
 });

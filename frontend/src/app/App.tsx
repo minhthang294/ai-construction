@@ -238,6 +238,28 @@ export default function App() {
     setMenuOpen(false);
   }
 
+  function openAcceptanceDraft(request: AcceptanceDraftRequest) {
+    if (request.projectId && request.projectId !== projectId) {
+      setProjectId(request.projectId);
+      localStorage.setItem("last_project_id", request.projectId);
+    }
+    setAcceptanceNavigation({
+      projectId: request.projectId || projectId,
+      state: toAcceptanceInitialState(request),
+    });
+    navigate("acceptance");
+  }
+
+  function openDashboardComponent(targetProjectId: string, componentId: string) {
+    if (targetProjectId && targetProjectId !== projectId) {
+      setProjectId(targetProjectId);
+      localStorage.setItem("last_project_id", targetProjectId);
+    }
+    setPageHistory((current) => [...current, page]);
+    setPage("components");
+    setComponentFocus({ projectId: targetProjectId, componentId });
+  }
+
   function goBack() {
     const previous = pageHistory.at(-1) || "dashboard";
     if (!canLeaveAcceptance(previous)) return;
@@ -569,7 +591,15 @@ export default function App() {
               </button>
             </section>
           ) : page === "dashboard" ? (
-            <Dashboard key={projectId} token={token} projectId={projectId} date={today} onNavigate={(next) => navigate(next as PageId)} />
+            <Dashboard
+              key={projectId}
+              token={token}
+              projectId={projectId}
+              date={today}
+              onNavigate={(next) => navigate(next as PageId)}
+              onOpenComponent={openDashboardComponent}
+              onOpenAcceptanceDraft={openAcceptanceDraft}
+            />
           ) : page === "work-items" ? (
             <WorkItemList token={token} projectId={projectId} />
           ) : page === "progress-paste" ? (
@@ -589,15 +619,7 @@ export default function App() {
                 navigate("daily-report");
               }}
               onOpenAcceptance={(request: AcceptanceDraftRequest) => {
-                if (request.projectId && request.projectId !== projectId) {
-                  setProjectId(request.projectId);
-                  localStorage.setItem("last_project_id", request.projectId);
-                }
-                setAcceptanceNavigation({
-                  projectId: request.projectId || projectId,
-                  state: toAcceptanceInitialState(request),
-                });
-                navigate("acceptance");
+                openAcceptanceDraft(request);
               }}
             />
           ) : page === "components" ? (

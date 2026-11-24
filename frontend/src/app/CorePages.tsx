@@ -4,12 +4,20 @@ import ConstructionProgressChart, { type ConstructionProgressSummary } from "./C
 import LatestDayCard from "./LatestDayCard";
 import SegmentProgressBars from "./SegmentProgressBars";
 import type { LatestDay, SegmentProgress } from "./overviewFormat";
+import {
+  buildLatestDayZaloSummary,
+  formatLatestDayLine,
+  workStatusLabel,
+  type InProgressOverview,
+} from "./overviewFormat";
+import type { PendingAcceptanceResponse } from "../features/acceptance/types";
+import type { AcceptanceDraftRequest } from "./acceptanceHandoff";
 import ConstructionBatchSelector from "../features/site/components/ConstructionBatchSelector";
 import {
   useConstructionBatch,
   useConstructionBatches,
 } from "../features/site/hooks/useConstructionBatch";
-import { listComponentProgress } from "../features/site/lib/api";
+import { copyText, listComponentProgress } from "../features/site/lib/api";
 import type { ProgressRow } from "../features/site/lib/componentProgress";
 import {
   AcceptanceIcon,
@@ -412,11 +420,15 @@ export function Dashboard({
   projectId,
   date,
   onNavigate,
+  onOpenComponent,
+  onOpenAcceptanceDraft,
 }: {
   token: string;
   projectId: string;
   date: string;
   onNavigate?: (page: string) => void;
+  onOpenComponent?: (projectId: string, componentId: string) => void;
+  onOpenAcceptanceDraft?: (request: AcceptanceDraftRequest) => void;
 }) {
   const [report, setReport] = useState<{ report_date: string } | null>(null);
   const [summary, setSummary] = useState<ConstructionProgressSummary | null>(null);
@@ -429,6 +441,12 @@ export function Dashboard({
   const [issues, setIssues] = useState<Array<{ type: string; component_id: string }> | null>(null);
   const [issuesFailed, setIssuesFailed] = useState(false);
   const [showIssues, setShowIssues] = useState(false);
+  const [inProgress, setInProgress] = useState<InProgressOverview | null>(null);
+  const [inProgressFailed, setInProgressFailed] = useState(false);
+  const [pending, setPending] = useState<PendingAcceptanceResponse | null>(null);
+  const [pendingFailed, setPendingFailed] = useState(false);
+  const [copiedZalo, setCopiedZalo] = useState(false);
+  const [zaloCopyFailed, setZaloCopyFailed] = useState(false);
   const {
     batches,
     loading: batchLoading,
@@ -454,12 +472,18 @@ export function Dashboard({
     setLatestFailed(false);
     setSegmentsFailed(false);
     setIssuesFailed(false);
+    setInProgressFailed(false);
+    setPendingFailed(false);
+    setInProgress(null);
+    setPending(null);
     Promise.allSettled([
       request(`/projects/${projectId}/overview/latest-day${batchQuery}`, token, { signal: controller.signal }),
       request(`/projects/${projectId}/overview/segments${batchQuery}`, token, { signal: controller.signal }),
       request(`/projects/${projectId}/reconciliation/issues`, token, { signal: controller.signal }),
       listComponentProgress(projectId, undefined, batchId || undefined),
-    ]).then(([latest, segment, issuesResult, batchRows]) => {
+      request(`/projects/${projectId}/overview/in-progress${batchQuery}`, token, { signal: controller.signal }),
+      request(`/projects/${projectId}/acceptance/pending${batchQuery}`, token, { signal: controller.signal }),
+    ]).then(([latest, segment, issuesResult, batchRows, inProgressResult, pendingResult]) => {
       if (controller.signal.aborted) return;
       if (latest.status === "fulfilled") setLatestDay(latest.value);
       else setLatestFailed(true);
@@ -469,6 +493,10 @@ export function Dashboard({
       else setIssuesFailed(true);
       if (batchRows.status === "fulfilled") setRows(batchRows.value);
       else setRows(null);
+      if (inProgressResult.status === "fulfilled") setInProgress(inProgressResult.value);
+      else setInProgressFailed(true);
+      if (pendingResult.status === "fulfilled") setPending(pendingResult.value);
+      else setPendingFailed(true);
     });
     return () => controller.abort();
   }, [projectId, token, batchQuery, batchId]);
@@ -528,6 +556,45 @@ export function Dashboard({
     { label: "Lập phiếu nghiệm thu", page: "acceptance", icon: AcceptanceIcon, description: "PYC và BBNT" },
     { label: "Hỏi AI", page: "documents", icon: DocumentsIcon, description: "Hỏi đáp về cấu kiện, tiến độ" },
   ];
+  const pendingComponents = pending
+    ? pending.groups.flatMap((group) => group.components)
+    : [];
+  const pendingEventDate = pending
+    ? [...new Set(pending.groups.flatMap((group) => group.event_dates))]
+        .sort()
+        .at(-1) ?? date
+    : date;
+  const pendingStageIds = [
+    ...new Set(pendingComponents.map((item) => item.stage_definition_id)),
+  ];
+  const zaloText = latestDay
+    ? buildLatestDayZaloSummary(latestDay, pending?.total_components ?? 0)
+    : "";
+
+  function openPendingAcceptanceDraft() {
+    if (!pending || !onOpenAcceptanceDraft || pendingComponents.length === 0) return;
+    onOpenAcceptanceDraft({
+      projectId,
+      batchId: pending.batch_id ?? batchId ?? null,
+      eventDate: pendingEventDate,
+      componentIds: pendingComponents.map((item) => item.component_id),
+      componentCodes: pendingComponents.map((item) => item.code),
+      stageDefinitionIds: pendingStageIds,
+    });
+  }
+
+  async function copyZaloSummary() {
+    if (!zaloText) return;
+    try {
+      await copyText(zaloText);
+      setZaloCopyFailed(false);
+      setCopiedZalo(true);
+      window.setTimeout(() => setCopiedZalo(false), 2000);
+    } catch {
+      setCopiedZalo(false);
+      setZaloCopyFailed(true);
+    }
+  }
   return (
     <div className="space-y-6">
       <PageHeader
@@ -541,6 +608,163 @@ export function Dashboard({
         loading={batchLoading}
         error={batchError}
       />
+      <section className="app-card app-card-pad space-y-3" aria-labelledby="today-work-title">
+        <div>
+          <h2 id="today-work-title" className="text-base font-semibold text-slate-950">
+            Hôm nay
+          </h2>
+          <p className="mt-1 text-sm leading-6 app-text-secondary">
+            Ba việc chính: ghi tiến độ, xem việc đang dở, tạo PYC cho cấu kiện chờ nghiệm thu.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="app-button app-button-primary flex min-h-14 w-full items-center gap-3 px-3 py-3 text-left disabled:opacity-60"
+          onClick={() => onNavigate?.("progress-paste")}
+          disabled={!onNavigate}
+        >
+          <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-white/15 text-white">
+            <WorkIcon className="size-5" />
+          </span>
+          <span className="min-w-0">
+            <span className="block text-base font-semibold">Ghi tiến độ từ tin nhắn</span>
+            <span className="block text-sm text-white/90">Dán tin nhắn Zalo, xem lại rồi ghi</span>
+          </span>
+        </button>
+
+        <div className="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
+          <div className="flex flex-wrap items-baseline justify-between gap-1">
+            <h3 className="text-sm font-semibold text-slate-950">Đang dở dang</h3>
+            <span className="text-xs text-slate-600">
+              {inProgress ? `${inProgress.total_components} cấu kiện` : ""}
+            </span>
+          </div>
+          {inProgressFailed ? (
+            <p role="alert" className="text-sm text-red-800">Chưa tải được cấu kiện đang dở dang.</p>
+          ) : !inProgress ? (
+            <p role="status" className="text-sm text-slate-600">Đang tải cấu kiện đang dở dang…</p>
+          ) : inProgress.groups.length === 0 ? (
+            <p className="text-sm text-slate-600">Không có cấu kiện đang thi công hoặc tạm dừng trong đợt này.</p>
+          ) : (
+            <div className="space-y-2">
+              {inProgress.groups.map((group) => (
+                <details
+                  key={`${group.stage_definition_id}|${group.zone}|${group.segment}|${group.component_type}`}
+                  className="rounded-lg border border-slate-200"
+                >
+                  <summary className="flex min-h-11 cursor-pointer list-none items-start justify-between gap-2 p-2 [&::-webkit-details-marker]:hidden">
+                    <span className="min-w-0">
+                      <span className="block break-words text-sm font-semibold text-slate-900">
+                        {group.stage_name}
+                      </span>
+                      <span className="block text-xs leading-5 text-slate-600">
+                        PD{group.segment} · {group.zone} · {group.component_count} cấu kiện
+                      </span>
+                    </span>
+                    <span className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800">
+                      {group.days_since_update === 0
+                        ? "cập nhật hôm nay"
+                        : `${group.days_since_update} ngày`}
+                    </span>
+                  </summary>
+                  <div className="grid gap-1 border-t border-slate-100 p-2">
+                    {group.components.map((component) => (
+                      <button
+                        key={component.id}
+                        type="button"
+                        className="flex min-h-11 w-full items-center justify-between gap-2 rounded-lg px-2 text-left hover:bg-slate-50 disabled:opacity-60"
+                        onClick={() => onOpenComponent?.(projectId, component.id)}
+                        disabled={!onOpenComponent}
+                      >
+                        <span className="font-mono text-sm font-semibold text-slate-900">
+                          {component.code}
+                        </span>
+                        <span className="text-xs text-slate-600">
+                          {workStatusLabel(component.status)} ·{" "}
+                          {component.days_since_update === 0
+                            ? "hôm nay"
+                            : `${component.days_since_update} ngày`}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </details>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
+          <div className="flex flex-wrap items-baseline justify-between gap-1">
+            <h3 className="text-sm font-semibold text-slate-950">Chờ nghiệm thu</h3>
+            <span className="text-xs text-slate-600">
+              {pending ? `${pending.total_components} cấu kiện` : ""}
+            </span>
+          </div>
+          {pendingFailed ? (
+            <p role="alert" className="text-sm text-red-800">Chưa tải được danh sách chờ nghiệm thu.</p>
+          ) : !pending ? (
+            <p role="status" className="text-sm text-slate-600">Đang tải danh sách chờ nghiệm thu…</p>
+          ) : pending.groups.length === 0 ? (
+            <p className="text-sm text-slate-600">Không có cấu kiện chờ nghiệm thu trong đợt này.</p>
+          ) : (
+            <>
+              <ul className="space-y-1 text-sm text-slate-800">
+                {pending.groups.slice(0, 3).map((group) => (
+                  <li key={`${group.stage_name}|${group.zone}|${group.segment}`} className="flex items-baseline justify-between gap-2">
+                    <span className="min-w-0 break-words">
+                      {group.stage_name} · PD{group.segment} {group.zone}
+                    </span>
+                    <span className="shrink-0 font-semibold tabular-nums">
+                      {group.components.length}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              {pending.groups.length > 3 ? (
+                <p className="text-xs text-slate-600">+{pending.groups.length - 3} nhóm khác</p>
+              ) : null}
+              {onOpenAcceptanceDraft ? (
+                <button
+                  type="button"
+                  className="app-button app-button-secondary min-h-12 w-full"
+                  onClick={openPendingAcceptanceDraft}
+                >
+                  Tạo PYC nháp
+                </button>
+              ) : null}
+            </>
+          )}
+        </div>
+
+        <div className="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
+          <h3 className="text-sm font-semibold text-slate-950">Hôm qua đã làm</h3>
+          {latestFailed ? (
+            <p role="alert" className="text-sm text-red-800">Chưa tải được công tác ngày gần nhất.</p>
+          ) : !latestDay ? (
+            <p role="status" className="text-sm text-slate-600">Đang tải công tác ngày gần nhất…</p>
+          ) : (
+            <>
+              <p className="text-sm font-medium leading-6 text-slate-900">
+                {formatLatestDayLine(latestDay)}
+              </p>
+              <button
+                type="button"
+                className="app-button app-button-secondary min-h-11 w-full"
+                disabled={!latestDay.date}
+                onClick={() => void copyZaloSummary()}
+              >
+                {copiedZalo ? "Đã sao chép Zalo" : "Sao chép Zalo"}
+              </button>
+              {zaloCopyFailed ? (
+                <p role="alert" className="text-sm text-red-800">
+                  Trình duyệt không cho sao chép. Chọn nội dung bên trên và sao chép thủ công.
+                </p>
+              ) : null}
+            </>
+          )}
+        </div>
+      </section>
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         {cards.map(([label, value, hint, accent]) => {
           const body = (
@@ -597,21 +821,7 @@ export function Dashboard({
       )}
       <section className="app-card app-card-pad">
         <h2 className="text-base font-semibold text-slate-950">Việc nhanh</h2>
-        <button
-          type="button"
-          className="mt-3 flex min-h-14 w-full items-center gap-3 rounded-xl bg-[#405e9b] px-3 py-3 text-left text-white shadow-sm hover:bg-[#344c7e] disabled:opacity-60"
-          onClick={() => onNavigate?.("progress-paste")}
-          disabled={!onNavigate}
-        >
-          <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-white/15 text-white">
-            <WorkIcon className="size-5" />
-          </span>
-          <span className="min-w-0">
-            <span className="block text-base font-semibold">Ghi tiến độ từ tin nhắn</span>
-            <span className="block text-sm text-slate-100">Dán tin nhắn Zalo, xem lại rồi ghi</span>
-          </span>
-        </button>
-        <div className="mt-2 grid gap-2 min-[375px]:grid-cols-2 xl:grid-cols-4">
+        <div className="mt-3 grid gap-2 min-[375px]:grid-cols-2 xl:grid-cols-4">
           {quickActions.map(({ page, label, icon: ActionIcon, description }) => (
             <button
               key={page}
