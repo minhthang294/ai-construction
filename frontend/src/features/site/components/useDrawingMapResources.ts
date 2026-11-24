@@ -1,6 +1,6 @@
 /** Map/filters/image loading state for the drawing map panel. */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   EMPTY_DRAWING_FILTERS,
   containBox,
@@ -13,6 +13,10 @@ import {
   type DrawingMap,
   type ImageBox,
 } from "../lib/drawingMap";
+import {
+  peekDrawingImageBlob,
+  prefetchDrawingSheetImage,
+} from "../lib/drawingImageCache";
 import {
   errorMessage,
   hasActiveFilters,
@@ -58,6 +62,7 @@ export function useDrawingMapResources({
   const [imageError, setImageError] = useState<string | null>(null);
   const [imageReloadKey, setImageReloadKey] = useState(0);
   const [imageBox, setImageBox] = useState<ImageBox | null>(null);
+  const forcedImageUrl = useRef("");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -164,13 +169,31 @@ export function useDrawingMapResources({
       setImageBox(null);
       return;
     }
+    const forceNetwork =
+      imageReloadKey > 0 && forcedImageUrl.current === activeImageUrl;
+    if (forceNetwork) forcedImageUrl.current = "";
+    const memoryCached = forceNetwork
+      ? null
+      : peekDrawingImageBlob(activeImageUrl);
+    if (memoryCached) {
+      const url = URL.createObjectURL(memoryCached);
+      setImageUrl(url);
+      setImageState("ready");
+      setImageError(null);
+      setImageBox(null);
+      return () => URL.revokeObjectURL(url);
+    }
     const controller = new AbortController();
     let created: string | null = null;
     setImageUrl(null);
     setImageState("loading");
     setImageError(null);
     setImageBox(null);
-    fetchDrawingSheetImageUrl(activeImageUrl, controller.signal)
+    fetchDrawingSheetImageUrl(
+      activeImageUrl,
+      controller.signal,
+      forceNetwork,
+    )
       .then((url) => {
         if (controller.signal.aborted) {
           URL.revokeObjectURL(url);
@@ -190,6 +213,39 @@ export function useDrawingMapResources({
       if (created) URL.revokeObjectURL(created);
     };
   }, [activeImageUrl, imageReloadKey]);
+
+  useEffect(() => {
+    if (!compact || !map || map.sheets.length === 0) return;
+    let cancelled = false;
+    let idleId: number | undefined;
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (
+        callback: () => void,
+        options?: { timeout: number },
+      ) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+    const timer = window.setTimeout(() => {
+      const run = () => {
+        if (cancelled) return;
+        for (const sheet of map.sheets) {
+          if (sheet.markers.length > 0) {
+            void prefetchDrawingSheetImage(sheet.image_url);
+          }
+        }
+      };
+      if (idleWindow.requestIdleCallback) {
+        idleId = idleWindow.requestIdleCallback(run, { timeout: 2000 });
+      } else {
+        run();
+      }
+    }, 300);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+      if (idleId !== undefined) idleWindow.cancelIdleCallback?.(idleId);
+    };
+  }, [compact, map]);
 
   useEffect(() => {
     if (imageState !== "ready") return;
@@ -250,7 +306,10 @@ export function useDrawingMapResources({
     imageState,
     imageError,
     imageReloadKey,
-    retryImage: () => setImageReloadKey((current) => current + 1),
+    retryImage: () => {
+      forcedImageUrl.current = activeImageUrl;
+      setImageReloadKey((current) => current + 1);
+    },
     imageBox,
     setImageBox,
   };

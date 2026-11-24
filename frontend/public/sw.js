@@ -8,7 +8,8 @@ self.addEventListener("install", (event) => event.waitUntil((async () => {
 })()));
 self.addEventListener("activate", (event) => {
   event.waitUntil(caches.keys().then((keys) => Promise.all(
-    keys.filter((key) => key !== CACHE).map((key) => caches.delete(key))
+    keys.filter((key) => key.startsWith("site-assistant-shell-") && key !== CACHE)
+      .map((key) => caches.delete(key))
   )));
 });
 self.addEventListener("fetch", (event) => {

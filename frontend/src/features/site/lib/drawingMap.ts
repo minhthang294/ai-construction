@@ -1,6 +1,7 @@
 /** Read-only pilot drawing map: project-scoped fetch, filters and viewport math. */
 
 import { ApiError, apiFetch } from "./api";
+import { getDrawingImageBlob } from "./drawingImageCache";
 
 export type DrawingMarker = {
   component_id: string;
@@ -520,14 +521,15 @@ export async function reviewDrawingMapPosition(
   return res.json();
 }
 
-/** Private sheet bytes fetched with the bearer token; caller revokes the URL. */
+/** Private sheet bytes, served from the versioned private cache when possible. */
 export async function fetchDrawingSheetImageUrl(
   imageUrl: string,
   signal?: AbortSignal,
+  skipCache = false,
 ): Promise<string> {
-  const res = await apiFetch(apiRelativePath(imageUrl), { signal });
-  if (!res.ok) throw new ApiError(await readError(res), res.status);
-  return URL.createObjectURL(await res.blob());
+  return URL.createObjectURL(
+    await getDrawingImageBlob(imageUrl, signal, skipCache),
+  );
 }
 
 export async function fetchComponentDetail(

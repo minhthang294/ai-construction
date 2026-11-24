@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import InstallAppButton, { useInstallApp } from "../features/site/components/InstallAppButton";
+import { clearDrawingImageCache } from "../features/site/lib/drawingImageCache";
 import { Dashboard, ProjectSetup, WorkItemList, request } from "./CorePages";
 import type { Project } from "./CorePages";
 import ChangePasswordDialog from "./ChangePasswordDialog";
@@ -175,6 +176,7 @@ export default function App() {
         setError(cause.message);
         setToken("");
         localStorage.removeItem("access_token");
+        void clearDrawingImageCache();
       });
   }, [token]);
 
@@ -188,6 +190,7 @@ export default function App() {
       });
       localStorage.setItem("access_token", result.access_token);
       localStorage.setItem("last_username", username);
+      await clearDrawingImageCache();
       setToken(result.access_token);
       setPassword("");
       setError("");
@@ -201,6 +204,7 @@ export default function App() {
     if (!canLeaveAcceptance("dashboard")) return;
     void request("/auth/logout", token, { method: "POST" }).catch(() => undefined);
     localStorage.removeItem("access_token");
+    void clearDrawingImageCache();
     setToken("");
     setProjects([]);
     setProjectId("");
@@ -221,6 +225,7 @@ export default function App() {
 
   function handlePasswordChanged() {
     localStorage.removeItem("access_token");
+    void clearDrawingImageCache();
     setToken("");
     setProjects([]);
     setProjectId("");

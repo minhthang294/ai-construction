@@ -1461,3 +1461,51 @@ npm run build   # OK; main 311,01 kB; DrawingMapPanel chunk 47,55 kB
 Sau mỗi file lớn đều chạy lại `npm test` + `npm run build`; các mốc: 237 → 250 → 260 → 272 → 291 → 292 tests.
 
 **Chưa kiểm / screenshot**: backend local tại `127.0.0.1:8765` không có route `map-position` trong OpenAPI (process cũ, không reload), nên bỏ qua screenshot Playwright theo yêu cầu. Chưa có browser/E2E cho toolbar/aspect 390px; kiểm bằng helper test, typecheck và build.
+
+## Cache ảnh bản vẽ có version + derivative + Cache Storage - 2026-11-24
+
+Phạm vi: `backend/app/core/drawing_map_router.py`, `frontend/src/features/site/*`, `frontend/src/app/*`, `frontend/public/sw.js`, test, báo cáo. Không migration, không đổi schema, không sửa backend ngoài router bản đồ.
+
+### Backend
+
+- `image_url` công khai thêm `?v=<12 ký tự>` lấy từ `sha256(mtime_ns:size)` của file gốc; version cache trong bộ nhớ theo `(path, mtime_ns, size)`, xoá entry cũ khi file đổi. Marker vẫn dùng toạ độ 0..1 nên không lệch khi ảnh derivative nhỏ hơn.
+- `GET .../drawing-map/{sheet_id}/image`:
+  - trả `Cache-Control: private, max-age=31536000, immutable`, `ETag` theo version + variant (`webp`/`jpeg`/`full`), `Last-Modified`, `Vary: Accept`; trả `304` khi `If-None-Match` khớp.
+  - mặc định trả derivative dài cạnh tối đa 2400 px, JPEG progressive quality 80 hoặc WebP quality 80 nếu Pillow hỗ trợ WebP và `Accept` có `image/webp`.
+  - derivative ghi atomic vào `<key>/.cache/<name>.<version>.<webp|jpg>` (temp + `os.replace`), tái sử dụng nếu đã có; xoá derivative cũ cùng định dạng khi version đổi.
+  - `?full=1` trả file gốc JPEG cho deep zoom; vẫn project-scoped + membership check.
+  - Pillow lỗi/không đọc được ảnh thì fallback file gốc, không làm hỏng route.
+- Frontend gửi `Accept: image/webp,image/jpeg,*/*` khi tải ảnh để nhận WebP.
+
+### Đo dung lượng pd2/beam.jpg
+
+| Biến thể | Bytes | Giảm |
+| --- | ---: | ---: |
+| Gốc 7500×5300 | 2.704.167 (2,58 MB) | — |
+| WebP 2400 px q80 | 178.086 (0,17 MB) | **-93,4%** |
+| JPEG progressive 2400 px q80 | 328.249 (0,31 MB) | **-87,9%** |
+
+### Frontend cache
+
+- `drawingImageCache` dùng Cache Storage `drawing-map-images-v1` + memory blob, key là URL versioned (bỏ prefix `/api/v1`), đọc cache trước khi gọi mạng; blob đã có trong memory được dùng ngay (không flash loading), mở lại bản đồ không tải lại nếu version không đổi.
+- Ghi cache bọc `try/catch` (quota/lỗi storage không làm hỏng trang), giữ một version mỗi path (dọn version cũ trong memory + Cache Storage).
+- Overview compact prefetch ảnh các sheet có marker sau khi render (idle, timeout 2 s), bỏ qua sheet đã có trong memory; ảnh private vẫn tải bằng Bearer token.
+- Xoá cache khi login, logout, token hết hạn và đổi mật khẩu để không lộ ảnh giữa người dùng trên cùng trình duyệt.
+- Service worker đã bỏ qua `/api/`; `activate` chỉ xoá cache shell cũ (`site-assistant-shell-*`), không xoá cache ảnh.
+
+### Kiểm tra
+
+```bash
+cd backend
+$env:DATABASE_URL="sqlite:///C:/Users/Thang Minh Pham/AppData/Local/Temp/opencode/full-test-image-cache.db"
+..\.venv\Scripts\python.exe -m pytest -q
+# 396 passed, 6 skipped
+
+cd ../frontend
+npm test        # 41 files, 297 tests passed
+npm run build   # OK; main 312,70 kB; DrawingMapPanel chunk 47,96 kB
+```
+
+Test backend mới: header immutable/ETag/Last-Modified, 304 theo `If-None-Match`, derivative JPEG/WebP tạo và tái sử dụng (1 lần generate), `full=1` trả gốc, version đổi khi mtime đổi và `image_url` đổi theo, dọn derivative cũ. Test frontend: key versioned, ghi/đọc blob qua memory + Cache Storage, chỉ giữ version mới nhất, bỏ qua network khi blob đã cache, clear khi logout.
+
+**Chưa kiểm**: chưa có browser/E2E đo thời gian mở lại bản đồ hoặc kiểm tra WebP thực tế trên thiết bị; chưa đo dung lượng các sheet còn lại (chỉ pd2 theo yêu cầu). File derivative sẽ nằm trong `.cache` cạnh ảnh gốc trên máy chủ sau lần request đầu.

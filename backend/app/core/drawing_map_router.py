@@ -1,14 +1,17 @@
 """Project-scoped access to reviewed drawing overlays and private sheet images."""
 
+import hashlib
 import json
 import os
 import re
+import threading
 import unicodedata
+from email.utils import formatdate
 from pathlib import Path
 from datetime import datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, StringConstraints, ValidationError
 from sqlalchemy import select
@@ -39,6 +42,17 @@ SheetSlug = Annotated[str, StringConstraints(pattern=r"^[a-z0-9_-]{1,80}$")]
 SheetId = Annotated[str, StringConstraints(pattern=r"^[a-z0-9_-]{1,121}$")]
 ImageName = Annotated[str, StringConstraints(pattern=r"^[a-z0-9-]{1,60}\.(jpg|jpeg)$")]
 KEY_PATTERN = re.compile(r"^[a-z0-9_-]{1,40}$")
+IMAGE_CACHE_DIR = ".cache"
+IMAGE_MAX_SIDE = 2400
+IMAGE_QUALITY = 80
+IMAGE_CACHE_HEADERS = {
+    "Cache-Control": "private, max-age=31536000, immutable",
+    "Vary": "Accept",
+}
+_IMAGE_VERSION_CACHE: dict[tuple[str, int, int], str] = {}
+_IMAGE_VERSION_LOCK = threading.Lock()
+_DERIVATIVE_LOCK = threading.Lock()
+_WEBP_SUPPORTED: bool | None = None
 
 
 class Marker(BaseModel):
@@ -112,6 +126,158 @@ def _find_sheet(project_id: str, public_id: str) -> tuple[str, Sheet] | None:
             if f"{key}-{sheet.id}" == public_id:
                 return key, sheet
     return None
+
+
+def _image_version(path: Path) -> str:
+    """Short version from file metadata; cached until mtime/size changes."""
+    stat = path.stat()
+    key = (str(path), stat.st_mtime_ns, stat.st_size)
+    with _IMAGE_VERSION_LOCK:
+        cached = _IMAGE_VERSION_CACHE.get(key)
+        if cached is not None:
+            return cached
+        version = hashlib.sha256(
+            f"{stat.st_mtime_ns}:{stat.st_size}".encode()
+        ).hexdigest()[:12]
+        for old_key in [
+            existing
+            for existing in _IMAGE_VERSION_CACHE
+            if existing[0] == key[0] and existing != key
+        ]:
+            _IMAGE_VERSION_CACHE.pop(old_key, None)
+        _IMAGE_VERSION_CACHE[key] = version
+        return version
+
+
+def _safe_image_version(path: Path) -> str | None:
+    try:
+        return _image_version(path)
+    except OSError:
+        return None
+
+
+def _webp_supported() -> bool:
+    global _WEBP_SUPPORTED
+    if _WEBP_SUPPORTED is None:
+        try:
+            from PIL import features
+
+            _WEBP_SUPPORTED = bool(features.check("webp"))
+        except Exception:  # pragma: no cover - Pillow is a deployment dependency
+            _WEBP_SUPPORTED = False
+    return _WEBP_SUPPORTED
+
+
+def _preferred_image_format(request: Request) -> str:
+    accept = request.headers.get("accept", "").lower()
+    return "WEBP" if "image/webp" in accept and _webp_supported() else "JPEG"
+
+
+def _derivative_path(source: Path, version: str, image_format: str) -> Path:
+    suffix = "webp" if image_format == "WEBP" else "jpg"
+    return source.parent / IMAGE_CACHE_DIR / f"{source.stem}.{version}.{suffix}"
+
+
+def _generate_derivative(source: Path, destination: Path, image_format: str) -> None:
+    from PIL import Image, ImageOps
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(
+        f".{destination.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+    )
+    try:
+        with Image.open(source) as opened:
+            image = ImageOps.exif_transpose(opened) or opened
+            if image.mode not in ("RGB", "RGBA", "L"):
+                image = image.convert("RGB")
+            image.thumbnail(
+                (IMAGE_MAX_SIDE, IMAGE_MAX_SIDE), Image.Resampling.LANCZOS
+            )
+            if image_format == "WEBP":
+                image.save(temporary, "WEBP", quality=IMAGE_QUALITY, method=4)
+            else:
+                if image.mode != "RGB":
+                    image = image.convert("RGB")
+                image.save(
+                    temporary,
+                    "JPEG",
+                    quality=IMAGE_QUALITY,
+                    optimize=True,
+                    progressive=True,
+                )
+        os.replace(temporary, destination)
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def _ensure_derivative(source: Path, version: str, image_format: str) -> Path:
+    destination = _derivative_path(source, version, image_format)
+    if destination.is_file():
+        return destination
+    with _DERIVATIVE_LOCK:
+        if not destination.is_file():
+            _generate_derivative(source, destination, image_format)
+            try:
+                for stale in destination.parent.glob(
+                    f"{source.stem}.*{destination.suffix}"
+                ):
+                    if stale != destination and stale.is_file():
+                        stale.unlink()
+            except OSError:
+                pass
+    return destination
+
+
+def _etag_matches(if_none_match: str | None, etag: str) -> bool:
+    if not if_none_match:
+        return False
+    for candidate in if_none_match.split(","):
+        value = candidate.strip()
+        if value == "*" or value == etag or value.removeprefix("W/") == etag:
+            return True
+    return False
+
+
+def _image_headers(version: str, variant: str, modified: float) -> dict[str, str]:
+    return {
+        **IMAGE_CACHE_HEADERS,
+        "ETag": f'"{version}-{variant}"',
+        "Last-Modified": formatdate(modified, usegmt=True),
+    }
+
+
+def _serve_sheet_image(
+    request: Request, source: Path, full: bool
+) -> FileResponse | Response:
+    version = _image_version(source)
+    if full:
+        served = source
+        variant = "full"
+        media_type = "image/jpeg"
+    else:
+        image_format = _preferred_image_format(request)
+        try:
+            served = _ensure_derivative(source, version, image_format)
+        except Exception:
+            if image_format == "WEBP":
+                try:
+                    image_format = "JPEG"
+                    served = _ensure_derivative(source, version, image_format)
+                except Exception:
+                    served = source
+                    image_format = "SOURCE"
+            else:
+                served = source
+                image_format = "SOURCE"
+        variant = image_format.lower()
+        media_type = "image/webp" if image_format == "WEBP" else "image/jpeg"
+    headers = _image_headers(version, variant, source.stat().st_mtime)
+    if _etag_matches(request.headers.get("if-none-match"), headers["ETag"]):
+        return Response(status_code=304, headers=headers)
+    return FileResponse(served, media_type=media_type, headers=headers)
 
 
 def _sheet_matches(
@@ -390,13 +556,17 @@ def drawing_map(
 
             if (batch_ids is not None or zone or segment is not None) and not markers:
                 continue
+            image_version = _safe_image_version(MAP_ROOT / key / sheet.image)
+            image_url = f"/projects/{project_id}/drawing-map/{public_id}/image"
+            if image_version:
+                image_url += f"?v={image_version}"
             sheets.append({
                 **sheet.model_dump(exclude={"image", "markers", "id", "zone", "segment"}),
                 "id": public_id,
                 "zone": sheet.zone,
                 "segment": sheet.segment,
                 "markers": markers,
-                "image_url": f"/projects/{project_id}/drawing-map/{public_id}/image",
+                "image_url": image_url,
             })
     review_count += sum(
         1 for position in positions
@@ -518,7 +688,12 @@ def review_map_position(
 
 
 @router.get("/projects/{project_id}/drawing-map/{sheet_id}/image")
-def drawing_map_image(project_id: str, sheet_id: SheetId):
+def drawing_map_image(
+    project_id: str,
+    sheet_id: SheetId,
+    request: Request,
+    full: bool = False,
+):
     require_project_member(project_id)
     found = _find_sheet(project_id, sheet_id)
     if found:
@@ -526,5 +701,5 @@ def drawing_map_image(project_id: str, sheet_id: SheetId):
         root = (MAP_ROOT / key).resolve()
         path = (root / sheet.image).resolve()
         if path.parent == root and path.is_file():
-            return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "private, no-store"})
+            return _serve_sheet_image(request, path, full)
     raise HTTPException(404, "Drawing sheet not found")

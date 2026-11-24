@@ -1,10 +1,13 @@
 import json
+import os
 from datetime import date, datetime, timezone
 
 import pytest
 from fastapi import HTTPException
+from PIL import Image
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
+from starlette.requests import Request
 
 from app.core import drawing_map_router as drawing
 from app.core.component_models import (ComponentDesignParameter, ComponentMapPosition,
@@ -17,13 +20,30 @@ from app.acceptance.models import AcceptanceRecord, AcceptanceRequest, Component
 from app.core.models import AuditLog
 
 
+def _request(headers: dict[str, str] | None = None) -> Request:
+    return Request({
+        "type": "http",
+        "method": "GET",
+        "path": "/",
+        "headers": [
+            (key.lower().encode(), value.encode())
+            for key, value in (headers or {}).items()
+        ],
+    })
+
+
+def _write_jpeg(path, size=(3000, 2000)) -> None:
+    Image.effect_noise(size, 100).convert("RGB").save(path, "JPEG", quality=95)
+
+
 def test_private_drawing_images_require_membership_and_matching_manifest(tmp_path, monkeypatch):
     seen = []
     monkeypatch.setattr(drawing, "MAP_ROOT", tmp_path)
     monkeypatch.setattr(drawing, "require_project_member", seen.append)
     folder = tmp_path / "pd2"
     folder.mkdir()
-    (folder / "beam.jpg").write_bytes(b"private")
+    original = folder / "beam.jpg"
+    _write_jpeg(original)
     manifest = folder / "manifest.json"
     manifest.write_text(json.dumps({
         "project_id": "dap",
@@ -32,18 +52,62 @@ def test_private_drawing_images_require_membership_and_matching_manifest(tmp_pat
             "page": 38, "image": "beam.jpg", "markers": [],
         }],
     }))
-    response = drawing.drawing_map_image("dap", "pd2-beam")
-    assert response.path == folder / "beam.jpg"
-    assert response.headers["cache-control"] == "private, no-store"
+    calls = []
+    generate = drawing._generate_derivative
+
+    def tracked(*args):
+        calls.append(args)
+        return generate(*args)
+
+    monkeypatch.setattr(drawing, "_generate_derivative", tracked)
+    response = drawing.drawing_map_image("dap", "pd2-beam", _request())
+    assert response.path.parent == folder / ".cache"
+    assert response.path.suffix == ".jpg"
+    assert response.path.stat().st_size < original.stat().st_size
+    assert response.headers["cache-control"] == "private, max-age=31536000, immutable"
+    assert response.headers["etag"]
+    assert response.headers["last-modified"]
+    assert len(calls) == 1
+
+    reused = drawing.drawing_map_image("dap", "pd2-beam", _request())
+    assert reused.path == response.path
+    assert len(calls) == 1
+
+    not_modified = drawing.drawing_map_image(
+        "dap", "pd2-beam", _request({"if-none-match": response.headers["etag"]})
+    )
+    assert not_modified.status_code == 304
+    assert not_modified.headers["etag"] == response.headers["etag"]
+
+    full = drawing.drawing_map_image("dap", "pd2-beam", _request(), full=True)
+    assert full.path == original
+    assert full.headers["cache-control"] == "private, max-age=31536000, immutable"
+    assert full.headers["etag"] != response.headers["etag"]
+
+    if drawing._webp_supported():
+        webp = drawing.drawing_map_image(
+            "dap", "pd2-beam", _request({"accept": "image/webp"})
+        )
+        assert webp.media_type == "image/webp"
+        assert webp.path.suffix == ".webp"
+
     with pytest.raises(HTTPException, match="Drawing sheet not found"):
-        drawing.drawing_map_image("other", "pd2-beam")
+        drawing.drawing_map_image("other", "pd2-beam", _request())
     with pytest.raises(HTTPException, match="Drawing sheet not found"):
-        drawing.drawing_map_image("dap", "pd2-../../beam")
-    assert seen == ["dap", "other", "dap"]
+        drawing.drawing_map_image("dap", "pd2-../../beam", _request())
+    assert seen.count("dap") >= 4
+    assert seen[-2:] == ["other", "dap"]
+
+    version = drawing._image_version(original)
+    os.utime(original, ns=(original.stat().st_atime_ns, original.stat().st_mtime_ns + 1_000_000))
+    assert drawing._image_version(original) != version
+    refreshed = drawing.drawing_map_image("dap", "pd2-beam", _request())
+    assert refreshed.path != response.path
+    assert len(list((folder / ".cache").glob("beam.*.jpg"))) == 1
 
     manifest.write_text(manifest.read_text().replace("beam.jpg", "../beam.jpg"))
     with pytest.raises(HTTPException, match="Drawing map is not available"):
-        drawing.drawing_map_image("dap", "beam")
+        drawing.drawing_map_image("dap", "pd2-beam", _request())
 
 
 def test_markers_resolve_only_verified_codes_in_the_pilot_segment(monkeypatch):
@@ -166,6 +230,18 @@ def test_multi_manifest_filters_by_batch_zone_and_segment(tmp_path, monkeypatch)
 
         both = drawing.drawing_map("p", db, batch_id=batch_id)
         assert [sheet["id"] for sheet in both["sheets"]] == ["bunke-main", "pd2-main"]
+        assert all("?v=" in sheet["image_url"] for sheet in both["sheets"])
+        before_version = next(
+            sheet["image_url"] for sheet in both["sheets"] if sheet["id"] == "pd2-main"
+        )
+        target = tmp_path / "pd2" / "sheet.jpg"
+        os.utime(target, ns=(target.stat().st_atime_ns, target.stat().st_mtime_ns + 1_000_000))
+        after_version = next(
+            sheet["image_url"]
+            for sheet in drawing.drawing_map("p", db, batch_id=batch_id)["sheets"]
+            if sheet["id"] == "pd2-main"
+        )
+        assert after_version != before_version
         only_bunke = drawing.drawing_map("p", db, zone="Bunke")
         assert [sheet["id"] for sheet in only_bunke["sheets"]] == ["bunke-main"]
         only_segment = drawing.drawing_map("p", db, segment=2)
@@ -180,7 +256,7 @@ def test_multi_manifest_filters_by_batch_zone_and_segment(tmp_path, monkeypatch)
         one = drawing.drawing_map("p", db, batch_id=single_batch.id)
         assert [sheet["id"] for sheet in one["sheets"]] == ["pd2-main"]
 
-    image = drawing.drawing_map_image("p", "bunke-main")
+    image = drawing.drawing_map_image("p", "bunke-main", _request())
     assert image.path == (tmp_path / "bunke" / "sheet.jpg").resolve()
 
 
