@@ -1420,3 +1420,44 @@ Backend test mới: đa manifest + `zone`/`segment`/`batch_id`, bỏ `expansion`
 - Chưa có E2E thao tác chạm/kéo thật trên thiết bị; logic đặt điểm dùng chung hàm `clientToSheetPoint` đã có unit test.
 - Nếu người dùng bỏ chọn “Thêm vào đợt đang chọn” trong khi đang lọc theo đợt, marker phát sinh sẽ không hiện trên bản đồ lọc đó cho tới khi thêm vào đợt.
 - Ảnh bản vẽ vẫn là dữ liệu riêng trong `data/storage/dap-maps`, không đưa vào repo.
+
+## Refactor file lớn + polish thẻ Mặt bằng - 2026-11-24
+
+Phạm vi: `frontend/src/features/site/*`, `frontend/src/app/*`, `frontend/src/features/acceptance/pages/AcceptancePage.tsx` (được phép refactor lần này), test và báo cáo. Không sửa backend, `scripts/`, `frontend/src/features/engineering-ai`, không đổi hành vi API/nghiệp vụ, không commit/stash/reset/push.
+
+### Task A - tách file, giữ nguyên hành vi
+
+| File gốc | Trước | Sau | Ghi chú |
+| --- | ---: | ---: | --- |
+| `frontend/src/features/site/components/DrawingMapPanel.tsx` | 1854 | 449 | canvas, filters, sheet tabs, detail, placement, list, view controls + 5 hook files |
+| `frontend/src/features/site/components/ComponentProgressPanel.tsx` | 1362 | 493 | progress card, toolbar, selection, list, editor/preview/banners + helpers |
+| `frontend/src/features/site/components/ComponentCatalogImport.tsx` | 1133 | 433 | tabs, catalog list, import section/preview, candidate card, manual form |
+| `frontend/src/features/site/components/DailyProgressPanel.tsx` | 1043 | 478 | header, banners, line card, footer, preview panel + helpers |
+| `frontend/src/features/acceptance/pages/AcceptancePage.tsx` | 1625 | 443 | page shell/tabs, requests/records panels, editor, settings, pending, notices + 5 hooks |
+| `frontend/src/features/site/lib/drawingMapPanel.ts` | mới | 219 | helper thuần + test 241 dòng |
+| `frontend/src/features/site/lib/componentProgressPanel.ts` | mới | 201 | helper thuần + test 304 dòng |
+| `frontend/src/features/site/lib/componentCatalogImport.ts` | mới | 71 | helper thuần + test 87 dòng |
+| `frontend/src/features/site/lib/dailyProgressPanel.ts` | mới | 151 | helper thuần + test 302 dòng |
+| `frontend/src/features/acceptance/pages/acceptancePageModel.ts` | mới | 249 | helper thuần + test 383 dòng |
+
+Tất cả file component/hook mới đều dưới 500 dòng (file lớn nhất: `RecordDraftEditor.tsx` 317, `DailyProgressLineCard.tsx` 374, `DrawingMapCanvas.tsx` 385, `DrawingMapDetailPanel.tsx` 387). Default export, Props, text tiếng Việt, class Tailwind, aria-label và thứ tự request/handler được giữ nguyên; các hook chỉ tách logic stateful, không đổi payload API.
+
+Helper thuần được test thêm: format/label, marker target/colour/dash/aria, placement point/validate, compact aspect, progress filters/editor definitions/quantity groups, catalog labels/tab index/page remaining, daily line/preview labels, acceptance draft/payload/date/error/pending filter.
+
+### Task B - toolbar một hàng và chiều cao thẻ Mặt bằng
+
+- `DrawingMapViewControls` đổi thanh zoom sang một hàng `flex-nowrap`: nút icon −, +, **Vừa khung**, **Toàn tờ** (SVG, giữ nguyên `aria-label`/`title`), phần trăm là text nhỏ `text-[11px]`; nút vẫn ≥44px. Không còn wrap hai hàng ở 390px.
+- `DrawingMapCanvas` (compact) bỏ chiều cao cố định `34vh`; dùng `aspect-ratio` theo bbox marker đã fit và tỉ lệ ảnh (`contentAspectRatio`), kẹp `min-h-[45vh] max-h-[65vh]`. Fallback tỉ lệ 1.4 khi chưa có ảnh/bbox; bbox suy biến dùng tỉ lệ ảnh; dầm nằm ngang được kẹp 0.5–3 để không thành dải quá mỏng.
+- Thêm test `contentAspectRatio` (bbox thường, rỗng, một điểm, dầm ngang).
+
+### Kiểm tra
+
+```bash
+cd frontend
+npm test        # 40 files, 292 tests passed
+npm run build   # OK; main 311,01 kB; DrawingMapPanel chunk 47,55 kB
+```
+
+Sau mỗi file lớn đều chạy lại `npm test` + `npm run build`; các mốc: 237 → 250 → 260 → 272 → 291 → 292 tests.
+
+**Chưa kiểm / screenshot**: backend local tại `127.0.0.1:8765` không có route `map-position` trong OpenAPI (process cũ, không reload), nên bỏ qua screenshot Playwright theo yêu cầu. Chưa có browser/E2E cho toolbar/aspect 390px; kiểm bằng helper test, typecheck và build.
