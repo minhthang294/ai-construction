@@ -1366,3 +1366,57 @@ node shoot.js   # phone/desktop errors: []
 ```
 
 Playwright kiểm thêm: mặc định 131% → **Toàn tờ** 100% → **Vừa khung** 131%; marker hit area 44×44; thanh zoom nằm dưới ảnh.
+
+## Mặt bằng đa manifest + cấu kiện phát sinh + tọa độ DB - 2026-11-24
+
+Phạm vi được giao: `backend/app/core/*`, `backend/app/site/*`, `frontend/src/app/*`, `frontend/src/features/site/*`, test, `docs/API_CONTRACTS.md`, `docs/DATA_MODEL.md`, báo cáo này; đúng **một** migration mới. Không sửa `backend/app/acceptance`, `backend/app/engineering_ai`, `scripts/import_acceptance_workbook.py`.
+
+### 1. Bản đồ đa manifest, lọc và ảnh an toàn
+
+- `drawing_map_router` đọc **mọi** `data/storage/dap-maps/<key>/manifest.json`, bỏ qua thư mục `expansion`, chỉ nhận key `[a-z0-9_-]`; mỗi manifest vẫn lọc đúng `project_id`.
+- Sheet id công khai là `<key>-<sheet.id>` (ví dụ `pd2-beam`), ảnh resolve trong đúng `<key>/`; kiểm `path.parent == root` và `image` chỉ cho tên `*.jpg|*.jpeg`, chặn path traversal. Manifest `pd2` giữ nguyên shape/kết quả.
+- Manifest sheet nhận thêm `zone`, `segment` tùy chọn (không bắt buộc với manifest cũ). `GET /drawing-map` nhận `batch_id`, `zone`, `segment`; khi có lọc, chỉ trả sheet còn marker phù hợp nên một đợt trải PD1 + Bunke trả cả hai trang.
+- Marker gộp tọa độ DB: cùng `component_id + sheet_id` thì DB thắng manifest; marker DB có `position_id`, `position_status`, `position_note`. Cấu kiện có `RepairScope ADDITIONAL_SCOPE` (không bị `REJECTED`) hoặc `record_origin=ADDITIONAL` mang `origin=ADDITIONAL_SCOPE`.
+
+### 2. Bảng `component_map_positions` và API ghi
+
+- Model `ComponentMapPosition`: `project_id`, `component_id`, `sheet_id`, `points` JSON 0..1, `status DRAFT/REVIEWED`, `source manual`, `created_by/at`, `reviewed_by/at`, `note`; unique `(component_id, sheet_id)`.
+- Migration `f8b9c0d1e2f3_component_map_positions.py` nối tiếp head `e6f7a8b9c0d1`; upgrade tạo bảng + 3 index, downgrade xóa bảng, không đụng dữ liệu cấu kiện.
+- `PUT /projects/{p}/components/{id}/map-position`: quản lý/kỹ sư; cọc đúng 1 điểm, dầm ≥2; lưu nháp và audit `component_map_position_saved` kèm `before`/`after`, nên di chuyển marker thiết kế tạo override có vết.
+- `POST /projects/{p}/components/{id}/map-position/review?sheet_id=`: chỉ `project_manager`, chặn duyệt lại (`409`), audit `component_map_position_reviewed`.
+- `POST /projects/{p}/components` nhận thêm `design_group_id`, `approval_reference` (và ghi vào `RepairScope`); thêm `GET /projects/{p}/design-groups` để form chọn nhóm. `record_origin` của nhập thủ công vẫn là `MANUAL_ENTRY`; phạm vi phát sinh nằm ở `RepairScope ADDITIONAL_SCOPE`.
+
+### 3. UI Cấu kiện → Mặt bằng
+
+- Form **Thêm cấu kiện phát sinh** (`AdditionalComponentForm`): mã/mã gốc, loại, phân đoạn mặc định theo `primary_zone` của đợt, nhóm thiết kế tùy chọn, căn cứ/hồ sơ, kiểm tra trùng trước khi tạo, tùy chọn **Thêm vào đợt đang chọn** (mặc định bật khi có đợt). Tạo bằng API cấu kiện hiện có với `scope=ADDITIONAL_SCOPE`.
+- Sau khi tạo, `DrawingMapPanel` vào chế độ đặt vị trí: chạm 1 điểm cho cọc, chạm ≥2 điểm cho dầm, kéo từng điểm để chỉnh, **Lưu vị trí nháp**. Nút **Đặt lại vị trí** trên chi tiết marker cũng vào chế độ này để ghi đè marker thiết kế; nút **Duyệt vị trí** hiện khi marker có `position_status=DRAFT`.
+- Chuyển trang bị khóa trong lúc đặt để tọa độ không lệch sheet; lưu xong bản đồ tự tải lại và marker phát sinh hiện nét đứt.
+
+### File chính
+
+`backend/app/core/drawing_map_router.py`, `component_models.py`, `component_router.py`, `backend/alembic/versions/f8b9c0d1e2f3_component_map_positions.py`, `backend/tests/test_drawing_map.py`, `backend/tests/test_component_migration.py`, `frontend/src/features/site/lib/drawingMap.ts`, `componentImport.ts`, `api.ts`, `frontend/src/features/site/components/DrawingMapPanel.tsx`, `AdditionalComponentForm.tsx`, `ComponentCatalogImport.tsx`, `frontend/src/features/site/lib/drawingMap.test.ts`, `docs/API_CONTRACTS.md`, `docs/DATA_MODEL.md`.
+
+### Kiểm tra đã chạy
+
+```bash
+cd backend
+..\.venv\Scripts\python.exe -m pytest -q
+# 384 passed, 6 skipped
+
+$env:DATABASE_URL="sqlite:///$env:TEMP/alembic-heads.db"
+..\.venv\Scripts\python.exe -m alembic heads
+# f8b9c0d1e2f3 (head)
+
+cd ../frontend
+npm test        # 35 files, 224 tests
+npm run build   # OK; main 311,01 kB; DrawingMapPanel chunk 40,27 kB
+```
+
+Backend test mới: đa manifest + `zone`/`segment`/`batch_id`, bỏ `expansion`, ảnh đúng thư mục; tạo vị trí DB cho marker thiết kế (override thắng manifest), cấu kiện phát sinh hiện marker, duyệt vị trí + audit; migration round-trip `e6f7a8b9c0d1 → head → e6f7a8b9c0d1 → head`. Frontend test mới: round-trip screen → tọa độ chuẩn hóa qua zoom/pan, từ chối điểm ngoài ảnh và geometry không hợp lệ.
+
+### Unresolved / chưa kiểm
+
+- Chưa chạy lại screenshot Playwright cho luồng mới: cần backend local khởi động lại để nạp route/model mới; chưa xác nhận app local đang chạy bản mới.
+- Chưa có E2E thao tác chạm/kéo thật trên thiết bị; logic đặt điểm dùng chung hàm `clientToSheetPoint` đã có unit test.
+- Nếu người dùng bỏ chọn “Thêm vào đợt đang chọn” trong khi đang lọc theo đợt, marker phát sinh sẽ không hiện trên bản đồ lọc đó cho tới khi thêm vào đợt.
+- Ảnh bản vẽ vẫn là dữ liệu riêng trong `data/storage/dap-maps`, không đưa vào repo.

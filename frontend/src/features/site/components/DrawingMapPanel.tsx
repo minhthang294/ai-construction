@@ -13,6 +13,7 @@ import {
   MIN_ZOOM,
   clampPan,
   clampZoom,
+  clientToSheetPoint,
   componentTypeLabel,
   constructionStatusLabel,
   constructionStatusColor,
@@ -30,7 +31,9 @@ import {
   originLabel,
   pickPrimarySheet,
   pinchZoom,
+  reviewDrawingMapPosition,
   sanitizePoints,
+  saveDrawingMapPosition,
   type ComponentDetail,
   type DrawingFilters,
   type DrawingMap,
@@ -47,6 +50,18 @@ type Selection = {
   onToggle: (componentId: string) => void;
 };
 
+export type PlacementTarget = {
+  componentId: string;
+  code: string;
+  type: "pile" | "beam";
+};
+
+type Placement = PlacementTarget & {
+  sheetId: string;
+  points: Array<[number, number]>;
+  override: boolean;
+};
+
 type Props = {
   projectId: string;
   batchId?: string | null;
@@ -59,6 +74,11 @@ type Props = {
   onOpenFullScreen?: () => void;
   /** Compact card waits for surrounding async layout before it loads the image. */
   lazyReady?: boolean;
+  /** Start placement for a component created on this screen. */
+  placement?: PlacementTarget | null;
+  onPlacementDone?: () => void;
+  /** Bump after an external write so the map refetches. */
+  refreshKey?: number;
 };
 
 type LoadState = "loading" | "ready" | "pending" | "error";
@@ -140,6 +160,7 @@ type GestureState = {
   pointers: Map<number, Pan>;
   start: Pan;
   startPan: Pan;
+  moved: boolean;
   pinchDistance: number;
   pinchStartZoom: number;
 };
@@ -154,6 +175,9 @@ export default function DrawingMapPanel({
   onOpenComponent,
   onOpenFullScreen,
   lazyReady = true,
+  placement: placementRequest,
+  onPlacementDone,
+  refreshKey = 0,
 }: Props) {
   const compact = variant === "compact";
   const rootRef = useRef<HTMLElement>(null);
@@ -166,6 +190,13 @@ export default function DrawingMapPanel({
     ...EMPTY_DRAWING_FILTERS,
   });
   const [activeSheetId, setActiveSheetId] = useState("");
+  const [placement, setPlacement] = useState<Placement | null>(null);
+  const [placementBusy, setPlacementBusy] = useState(false);
+  const [placementError, setPlacementError] = useState<string | null>(null);
+  const [positionMessage, setPositionMessage] = useState<string | null>(null);
+  const [positionError, setPositionError] = useState<string | null>(null);
+  const [dragPointIndex, setDragPointIndex] = useState<number | null>(null);
+  const [reviewBusyId, setReviewBusyId] = useState<string | null>(null);
 
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [imageState, setImageState] = useState<ImageState>("idle");
@@ -203,6 +234,7 @@ export default function DrawingMapPanel({
     pointers: new Map(),
     start: { x: 0, y: 0 },
     startPan: { x: 0, y: 0 },
+    moved: false,
     pinchDistance: 0,
     pinchStartZoom: 1,
   });
@@ -235,7 +267,7 @@ export default function DrawingMapPanel({
         setLoadState("error");
       });
     return () => controller.abort();
-  }, [projectId, batchId, reloadKey, compact, primaryZone]);
+  }, [projectId, batchId, reloadKey, compact, primaryZone, refreshKey]);
 
   useEffect(() => {
     if (!compact || !map) return;
@@ -318,6 +350,19 @@ export default function DrawingMapPanel({
       filters.status ||
       filters.origin,
   );
+
+  useEffect(() => {
+    if (!placementRequest) return;
+    setPlacement({
+      ...placementRequest,
+      sheetId: activeSheet?.id ?? "",
+      points: [],
+      override: false,
+    });
+    setPlacementError(null);
+    setPositionMessage(null);
+    setPositionError(null);
+  }, [placementRequest, activeSheet?.id]);
 
   useEffect(() => {
     if (!activeImageUrl) {
@@ -522,6 +567,7 @@ export default function DrawingMapPanel({
     gesture.current.mode = "drag";
     gesture.current.start = point;
     gesture.current.startPan = viewRef.current.pan;
+    gesture.current.moved = false;
   }
 
   function pointerDistance(a: Pan, b: Pan): number {
@@ -569,6 +615,14 @@ export default function DrawingMapPanel({
       return;
     }
     if (state.mode === "drag" && state.pointers.size === 1) {
+      if (
+        Math.hypot(
+          event.clientX - state.start.x,
+          event.clientY - state.start.y,
+        ) > 6
+      ) {
+        state.moved = true;
+      }
       setView((current) => ({
         zoom: current.zoom,
         pan: clampPan(
@@ -586,14 +640,134 @@ export default function DrawingMapPanel({
 
   function endPointer(event: React.PointerEvent<HTMLDivElement>) {
     const state = gesture.current;
+    const wasSingleTap =
+      state.pointers.size === 1 && state.mode === "drag" && !state.moved;
     state.pointers.delete(event.pointerId);
     if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
+    if (wasSingleTap && placement) {
+      addPlacementPoint(event);
+    }
     if (state.pointers.size === 1) {
       beginDrag(Array.from(state.pointers.values())[0]);
+      state.moved = true;
     } else if (state.pointers.size === 0) {
       state.mode = "none";
+    }
+  }
+
+  function placementPointAt(event: { clientX: number; clientY: number }) {
+    const viewport = viewportRef.current;
+    if (!viewport || !imageBox) return null;
+    const rect = viewport.getBoundingClientRect();
+    return clientToSheetPoint(
+      { x: event.clientX, y: event.clientY },
+      rect,
+      imageBox,
+      viewRef.current,
+    );
+  }
+
+  function addPlacementPoint(event: { clientX: number; clientY: number }) {
+    const point = placementPointAt(event);
+    if (!point) return;
+    setPlacement((current) => {
+      if (!current) return current;
+      if (current.type === "pile") return { ...current, points: [point] };
+      if (current.points.length >= 30) return current;
+      return { ...current, points: [...current.points, point] };
+    });
+    setPlacementError(null);
+  }
+
+  function updatePlacementPoint(index: number, event: { clientX: number; clientY: number }) {
+    const point = placementPointAt(event);
+    if (!point) return;
+    setPlacement((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        points: current.points.map((existing, currentIndex) =>
+          currentIndex === index ? point : existing,
+        ),
+      };
+    });
+  }
+
+  async function savePlacement() {
+    if (!placement) return;
+    if (placement.type === "pile" && placement.points.length !== 1) {
+      setPlacementError("Cọc cần đúng một điểm trên bản vẽ.");
+      return;
+    }
+    if (placement.type === "beam" && placement.points.length < 2) {
+      setPlacementError("Dầm cần ít nhất hai điểm để vẽ đường tim.");
+      return;
+    }
+    setPlacementBusy(true);
+    setPlacementError(null);
+    try {
+      await saveDrawingMapPosition(projectId, placement.componentId, {
+        sheet_id: placement.sheetId,
+        points: placement.points,
+        note: placement.override ? "Ghi đè vị trí thiết kế" : null,
+      });
+      setPlacement(null);
+      setPositionMessage(
+        `Đã lưu vị trí nháp cho ${placement.code}. Quản lý dự án sẽ duyệt lại.`,
+      );
+      setReloadKey((current) => current + 1);
+      onPlacementDone?.();
+    } catch (error) {
+      setPlacementError(errorMessage(error));
+    } finally {
+      setPlacementBusy(false);
+    }
+  }
+
+  function cancelPlacement() {
+    setPlacement(null);
+    setPlacementError(null);
+    onPlacementDone?.();
+  }
+
+  function startOverride(marker: DrawingMarker) {
+    setPlacement({
+      componentId: marker.component_id,
+      code: marker.code,
+      type: marker.type,
+      sheetId: activeSheet?.id ?? "",
+      points: sanitizePoints(marker.points),
+      override: true,
+    });
+    setPlacementError(null);
+    setPositionMessage(null);
+    setPositionError(null);
+    closeDetail();
+  }
+
+  async function reviewPosition(marker: DrawingMarker) {
+    if (!activeSheet) return;
+    setReviewBusyId(marker.component_id);
+    setPositionError(null);
+    try {
+      await reviewDrawingMapPosition(
+        projectId,
+        marker.component_id,
+        activeSheet.id,
+      );
+      setDetailMarker((current) =>
+        current && current.component_id === marker.component_id
+          ? { ...current, position_status: "REVIEWED" }
+          : current,
+      );
+      setPositionMessage(`Đã duyệt vị trí ${marker.code}.`);
+      setReloadKey((current) => current + 1);
+    } catch (error) {
+      setPositionError(errorMessage(error));
+    } finally {
+      setReviewBusyId(null);
     }
   }
 
@@ -661,6 +835,86 @@ export default function DrawingMapPanel({
           ) : null}
         </div>
       )}
+
+      {positionMessage ? (
+        <p
+          role="status"
+          className="rounded-xl border border-emerald-200 bg-emerald-50 p-2 text-xs leading-5 text-emerald-950"
+        >
+          {positionMessage}
+        </p>
+      ) : null}
+
+      {positionError ? (
+        <p
+          role="alert"
+          className="rounded-xl border border-red-200 bg-red-50 p-2 text-xs leading-5 text-red-900"
+        >
+          {positionError}
+        </p>
+      ) : null}
+
+      {placement ? (
+        <section className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+          <p className="font-semibold">
+            {placement.override ? "Ghi đè vị trí" : "Đặt vị trí"} ·{" "}
+            <span className="font-mono">{placement.code}</span>
+          </p>
+          <p className="mt-1 text-xs leading-5">
+            {placement.sheetId
+              ? `Trang đang đặt: ${activeSheet?.title ?? placement.sheetId}. `
+              : "Hãy mở một trang bản vẽ còn hiển thị. "}
+            {placement.type === "pile"
+              ? "Chạm một điểm lên cọc, kéo điểm để chỉnh."
+              : `Chạm ít nhất hai điểm dọc theo dầm (${placement.points.length} điểm), kéo từng điểm để chỉnh.`}
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button
+              type="button"
+              className={`${PRIMARY_BUTTON} ${FOCUS_RING}`}
+              disabled={
+                placementBusy ||
+                !placement.sheetId ||
+                (placement.type === "pile"
+                  ? placement.points.length !== 1
+                  : placement.points.length < 2)
+              }
+              onClick={() => void savePlacement()}
+            >
+              {placementBusy ? "Đang lưu…" : "Lưu vị trí nháp"}
+            </button>
+            {placement.type === "beam" && placement.points.length > 0 ? (
+              <button
+                type="button"
+                className={`${BUTTON} ${FOCUS_RING}`}
+                disabled={placementBusy}
+                onClick={() =>
+                  setPlacement((current) =>
+                    current
+                      ? { ...current, points: current.points.slice(0, -1) }
+                      : current,
+                  )
+                }
+              >
+                Xóa điểm cuối
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className={`${BUTTON} ${FOCUS_RING}`}
+              disabled={placementBusy}
+              onClick={cancelPlacement}
+            >
+              Hủy đặt vị trí
+            </button>
+          </div>
+          {placementError ? (
+            <p role="alert" className="mt-2 text-xs text-red-800">
+              {placementError}
+            </p>
+          ) : null}
+        </section>
+      ) : null}
 
       {loadState === "loading" ? (
         <p className="rounded-xl border border-slate-200 bg-white p-3 text-sm text-slate-600">
@@ -815,7 +1069,8 @@ export default function DrawingMapPanel({
                       key={sheet.id}
                       type="button"
                       aria-pressed={selected}
-                      className={`min-h-11 min-w-0 shrink-0 rounded-lg border px-3 text-left text-sm ${
+                      disabled={Boolean(placement)}
+                      className={`min-h-11 min-w-0 shrink-0 rounded-lg border px-3 text-left text-sm disabled:cursor-not-allowed disabled:opacity-60 ${
                         selected
                           ? "border-slate-700 bg-slate-800 text-white"
                           : "border-slate-300 bg-white text-slate-800"
@@ -975,7 +1230,7 @@ export default function DrawingMapPanel({
                                           stroke={selected ? "#111827" : color}
                                           strokeWidth={selected ? 2 : 1.25}
                                           strokeLinecap="round" strokeLinejoin="round"
-                                          strokeDasharray={marker.location_review ? "2 3" : isAdditionalScope(marker) ? "5 3" : undefined}
+                                          strokeDasharray={marker.location_review || marker.position_status === "DRAFT" ? "2 3" : isAdditionalScope(marker) ? "5 3" : undefined}
                                           opacity={opacity}
                                           vectorEffect="non-scaling-stroke" />
                                       </>
@@ -1002,7 +1257,7 @@ export default function DrawingMapPanel({
                                           fill="none"
                                           stroke={selected ? "#111827" : color}
                                           strokeWidth={selected ? 2 : 1.25}
-                                          strokeDasharray={marker.location_review ? "1.5 2" : isAdditionalScope(marker) ? "2 2" : undefined}
+                                          strokeDasharray={marker.location_review || marker.position_status === "DRAFT" ? "1.5 2" : isAdditionalScope(marker) ? "2 2" : undefined}
                                           opacity={opacity}
                                           vectorEffect="non-scaling-stroke"
                                         />
@@ -1012,6 +1267,32 @@ export default function DrawingMapPanel({
                                 );
                               })}
                             </svg>
+                            {placement &&
+                            placement.sheetId === activeSheet?.id &&
+                            placement.points.length > 0 ? (
+                              <svg
+                                aria-hidden="true"
+                                focusable="false"
+                                viewBox="0 0 1 1"
+                                preserveAspectRatio="none"
+                                className="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
+                              >
+                                {placement.points.length > 1 ? (
+                                  <polyline
+                                    points={placement.points
+                                      .map(([x, y]) => `${x},${y}`)
+                                      .join(" ")}
+                                    fill="none"
+                                    stroke="#b45309"
+                                    strokeWidth={2}
+                                    strokeDasharray="5 3"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    vectorEffect="non-scaling-stroke"
+                                  />
+                                ) : null}
+                              </svg>
+                            ) : null}
                             {mapTargets.map((target) => {
                               const { marker, x, y } = target;
                               // Keep a 32px screen-space hit area even at 100%.
@@ -1029,7 +1310,7 @@ export default function DrawingMapPanel({
                                     : `Mở chi tiết ${markerLabel(marker)}${marker.current_work ? `, đang làm ${marker.current_work}` : ""}`}
                                   aria-pressed={selected}
                                   className={`absolute z-10 -translate-x-1/2 -translate-y-1/2 rounded-full bg-transparent ${FOCUS_RING}`}
-                                  disabled={Boolean(selection && (selection.disabled || !selectable))}
+                                  disabled={Boolean(placement) || Boolean(selection && (selection.disabled || !selectable))}
                                   style={{
                                     left: `${x * 100}%`,
                                     top: `${y * 100}%`,
@@ -1061,6 +1342,49 @@ export default function DrawingMapPanel({
                                 </button>
                               );
                             })}
+                            {placement &&
+                            placement.sheetId === activeSheet?.id &&
+                            placement.points.map(([x, y], index) => (
+                              <button
+                                key={`placement-${index}`}
+                                type="button"
+                                aria-label={`Điểm đặt vị trí ${index + 1}, kéo để chỉnh`}
+                                className="absolute z-20 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-amber-600 bg-amber-200/80 shadow-sm"
+                                style={{
+                                  left: `${x * 100}%`,
+                                  top: `${y * 100}%`,
+                                  width: 28 / view.zoom,
+                                  height: 28 / view.zoom,
+                                  touchAction: "none",
+                                }}
+                                onPointerDown={(event) => {
+                                  event.stopPropagation();
+                                  event.currentTarget.setPointerCapture?.(
+                                    event.pointerId,
+                                  );
+                                  setDragPointIndex(index);
+                                }}
+                                onPointerMove={(event) => {
+                                  if (dragPointIndex !== index) return;
+                                  event.stopPropagation();
+                                  updatePlacementPoint(index, event);
+                                }}
+                                onPointerUp={(event) => {
+                                  event.stopPropagation();
+                                  setDragPointIndex(null);
+                                  if (
+                                    event.currentTarget.hasPointerCapture?.(
+                                      event.pointerId,
+                                    )
+                                  ) {
+                                    event.currentTarget.releasePointerCapture(
+                                      event.pointerId,
+                                    );
+                                  }
+                                }}
+                                onPointerCancel={() => setDragPointIndex(null)}
+                              />
+                            ))}
                           </div>
                         ) : null}
                       </div>
@@ -1270,6 +1594,34 @@ export default function DrawingMapPanel({
                     </button>
                   ) : null}
 
+                  <div className="mt-3 grid gap-2 min-[375px]:grid-cols-2">
+                    <button
+                      type="button"
+                      className={`${BUTTON} w-full ${FOCUS_RING}`}
+                      disabled={Boolean(placement)}
+                      onClick={() => startOverride(detailMarker)}
+                    >
+                      Đặt lại vị trí
+                    </button>
+                    {detailMarker.position_id &&
+                    detailMarker.position_status === "DRAFT" ? (
+                      <button
+                        type="button"
+                        className={`${PRIMARY_BUTTON} w-full ${FOCUS_RING}`}
+                        disabled={reviewBusyId === detailMarker.component_id}
+                        onClick={() => void reviewPosition(detailMarker)}
+                      >
+                        {reviewBusyId === detailMarker.component_id
+                          ? "Đang duyệt…"
+                          : "Duyệt vị trí"}
+                      </button>
+                    ) : null}
+                  </div>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Đặt lại vị trí sẽ ghi đè vị trí bản vẽ và lưu vết kiểm
+                    toán. Chỉ quản lý dự án duyệt được vị trí.
+                  </p>
+
                   {detailState === "loading" ? (
                     <p className="mt-3 text-sm text-slate-600">
                       Đang tải chi tiết cấu kiện…
@@ -1305,6 +1657,14 @@ export default function DrawingMapPanel({
                         <dt className="text-slate-600">Nguồn bản ghi</dt>
                         <dd className="break-words text-slate-900">
                           {recordOriginLabel(detail.record_origin)}
+                        </dd>
+                        <dt className="text-slate-600">Vị trí bản vẽ</dt>
+                        <dd className="break-words text-slate-900">
+                          {detailMarker.position_status === "DRAFT"
+                            ? "Nháp, chờ duyệt"
+                            : detailMarker.position_status === "REVIEWED"
+                              ? "Đã duyệt"
+                              : "Theo bản vẽ"}
                         </dd>
                         <dt className="text-slate-600">Bí danh</dt>
                         <dd className="break-words text-slate-900">

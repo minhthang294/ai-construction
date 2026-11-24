@@ -83,6 +83,8 @@ class ComponentCreate(BaseModel):
     raw_code: str = Field(min_length=1, max_length=120)
     canonical_code: str = Field(min_length=1, max_length=120)
     scope: Literal["DESIGN_SCOPE", "ADDITIONAL_SCOPE"]
+    design_group_id: str | None = Field(default=None, max_length=36)
+    approval_reference: str | None = Field(default=None, max_length=1000)
     aliases: list[str] = Field(default_factory=list, max_length=20)
 
 
@@ -357,13 +359,29 @@ def create_component(project_id: str, payload: ComponentCreate, db: Session = De
         ComponentAlias.type == payload.type, ComponentAlias.alias.in_(aliases)))
     if duplicate or alias_taken:
         raise HTTPException(409, "Component code or alias already exists in this segment")
+    group = None
+    if payload.design_group_id:
+        group = db.scalar(select(DesignGroup).where(
+            DesignGroup.id == payload.design_group_id,
+            DesignGroup.project_id == project_id,
+        ))
+        if group is None:
+            raise HTTPException(404, "Design group not found")
+    record_origin = "MANUAL_ENTRY"
     try:
         component = StructuralComponent(project_id=project_id, segment_id=segment.id, type=payload.type,
             raw_code=raw_code, canonical_code=code, verification="NEEDS_REVIEW",
-            record_origin="MANUAL_ENTRY", created_by=actor.id)
+            record_origin=record_origin, design_group_id=group.id if group else None,
+            created_by=actor.id)
         db.add(component)
         db.flush()
-        db.add(RepairScope(component_id=component.id, kind=payload.scope, verification="NEEDS_REVIEW", revision=1))
+        db.add(RepairScope(
+            component_id=component.id,
+            kind=payload.scope,
+            verification="NEEDS_REVIEW",
+            revision=1,
+            approval_reference=(payload.approval_reference or "").strip() or None,
+        ))
         for alias in aliases:
             db.add(ComponentAlias(component_id=component.id, project_id=project_id,
                                   segment_id=segment.id, type=payload.type, alias=alias))
@@ -371,7 +389,9 @@ def create_component(project_id: str, payload: ComponentCreate, db: Session = De
                         entity="StructuralComponent", entity_id=component.id,
                         detail=json.dumps({"canonical_code": code, "raw_code": raw_code,
                                            "segment_id": segment.id, "scope": payload.scope,
-                                           "record_origin": "MANUAL_ENTRY"})))
+                                           "design_group_id": group.id if group else None,
+                                           "approval_reference": (payload.approval_reference or "").strip() or None,
+                                           "record_origin": record_origin})))
         db.commit()
     except IntegrityError as exc:
         db.rollback()
@@ -380,12 +400,13 @@ def create_component(project_id: str, payload: ComponentCreate, db: Session = De
     return {"id": component.id, "type": component.type, "raw_code": component.raw_code,
             "canonical_code": component.canonical_code, "segment_id": segment.id,
             "segment_number": segment.number, "zone": zone.name if zone else None,
-            "design_group_id": None, "design_group": None,
+            "design_group_id": group.id if group else None,
+            "design_group": group.name if group else None,
             "aliases": [alias for alias in aliases if alias != code],
             "verification": component.verification, "record_origin": component.record_origin,
             "source": {"sha256": None, "sheet": None, "row": None},
             "scopes": [{"kind": payload.scope, "revision": 1, "verification": "NEEDS_REVIEW",
-                        "approval_reference": None}]}
+                        "approval_reference": (payload.approval_reference or "").strip() or None}]}
 
 
 @router.get("/projects/{project_id}/stage-definitions")
@@ -571,6 +592,15 @@ def list_segments(project_id: str, zone: str | None = None, db: Session = Depend
         query = query.where(StructureZone.name_key == zone_key(zone))
     return [{"id": segment.id, "number": segment.number, "source_code": segment.source_code,
              "zone": area.name} for segment, area in db.execute(query.order_by(Segment.number))]
+
+
+@router.get("/projects/{project_id}/design-groups")
+def list_design_groups(project_id: str, db: Session = Depends(get_db)):
+    require_project_member(project_id)
+    groups = db.scalars(select(DesignGroup).where(
+        DesignGroup.project_id == project_id).order_by(DesignGroup.name, DesignGroup.drawing))
+    return [{"id": group.id, "name": group.name, "drawing": group.drawing,
+             "group_type": group.group_type} for group in groups]
 
 
 @router.get("/projects/{project_id}/components")

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import ComponentProgressPanel from "./ComponentProgressPanel";
-import DrawingMapPanel from "./DrawingMapPanel";
+import DrawingMapPanel, { type PlacementTarget } from "./DrawingMapPanel";
+import AdditionalComponentForm from "./AdditionalComponentForm";
 import DailyProgressPanel from "./DailyProgressPanel";
 import JournalPanel from "./JournalPanel";
 import ConstructionBatchSelector from "./ConstructionBatchSelector";
@@ -187,6 +188,20 @@ export default function ComponentCatalogImport({
   );
   const selectedBatch = batches.find((batch) => batch.id === batchId) ?? null;
   const primaryZone = selectedBatch?.primary_zone ?? null;
+  const [mapPlacement, setMapPlacement] = useState<PlacementTarget | null>(null);
+  const [mapRefreshKey, setMapRefreshKey] = useState(0);
+  const handleAdditionalCreated = useCallback((component: ComponentSummary) => {
+    setMapPlacement({
+      componentId: component.id,
+      code: component.canonical_code,
+      type: component.type,
+    });
+    setMapRefreshKey((current) => current + 1);
+  }, []);
+  const handlePlacementDone = useCallback(() => {
+    setMapPlacement(null);
+    setMapRefreshKey((current) => current + 1);
+  }, []);
 
   const [manual, setManual] = useState<ManualComponentDraft>({
     ...EMPTY_MANUAL_COMPONENT,
@@ -248,6 +263,11 @@ export default function ComponentCatalogImport({
     void loadCatalog("");
     void loadSegments();
   }, [loadCatalog, loadSegments, view]);
+
+  useEffect(() => {
+    if (view !== "map") return;
+    void loadSegments();
+  }, [loadSegments, view]);
 
   const zones = useMemo(
     () => Array.from(new Set((preview?.components ?? []).map((item) => item.zone))),
@@ -466,7 +486,24 @@ export default function ComponentCatalogImport({
       ) : view === "journal" ? (
         <JournalPanel projectId={projectId} initialDate={initialJournalDate} />
       ) : view === "map" ? (
-        <DrawingMapPanel projectId={projectId} batchId={batchId} onRequestProgress={requestDailyProgress} />
+        <div className="space-y-3">
+          <AdditionalComponentForm
+            key={batchId ?? "no-batch"}
+            projectId={projectId}
+            batchId={batchId}
+            segments={segments}
+            primaryZone={primaryZone}
+            onCreated={handleAdditionalCreated}
+          />
+          <DrawingMapPanel
+            projectId={projectId}
+            batchId={batchId}
+            onRequestProgress={requestDailyProgress}
+            placement={mapPlacement}
+            onPlacementDone={handlePlacementDone}
+            refreshKey={mapRefreshKey}
+          />
+        </div>
       ) : (
         <>
           <div className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm">

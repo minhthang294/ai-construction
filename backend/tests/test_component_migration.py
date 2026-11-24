@@ -183,3 +183,49 @@ def test_progress_migration_is_additive_and_preserves_component_data(tmp_path):
     migrate("upgrade", "head")
     with sqlite3.connect(db_path) as db:
         assert db.execute("select canonical_code from structural_components where id='c'").fetchone() == ("P1",)
+
+
+def test_map_positions_migration_round_trip_preserves_component(tmp_path):
+    backend = Path(__file__).resolve().parents[1]
+    db_path = tmp_path / "map-positions-migration.db"
+    env = {**os.environ, "DATABASE_URL": f"sqlite:///{db_path.as_posix()}"}
+
+    def migrate(*args):
+        subprocess.run([sys.executable, "-m", "alembic", *args], cwd=backend, env=env,
+                       check=True, capture_output=True, text=True)
+
+    migrate("upgrade", "e6f7a8b9c0d1")
+    with sqlite3.connect(db_path) as db:
+        db.execute("insert into users (id, username, password_hash, role) values ('u', 'u', 'x', 'admin')")
+        db.execute("insert into projects (id, name, status, created_at) values ('p', 'kept', 'active', '2026-01-01')")
+        db.execute("insert into structure_zones (id, project_id, name, name_key) values ('z', 'p', 'Zone', 'zone')")
+        db.execute("insert into structure_segments (id, zone_id, number, source_code) values ('s', 'z', 1, 'S1')")
+        db.execute("insert into structural_components (id, project_id, segment_id, type, raw_code, canonical_code,"
+                   " verification, record_origin, created_by, created_at)"
+                   " values ('c', 'p', 's', 'pile', 'P1', 'P1', 'VERIFIED', 'SEED_IMPORT', 'u', '2026-01-01')")
+        db.commit()
+
+    migrate("upgrade", "head")
+    with sqlite3.connect(db_path) as db:
+        assert db.execute(
+            "select name from sqlite_master where type='table' and name='component_map_positions'"
+        ).fetchone()
+        db.execute(
+            "insert into component_map_positions (id, project_id, component_id, sheet_id, points, status,"
+            " source, created_by, created_at) values ('m', 'p', 'c', 'pd2-beam',"
+            " '[[0.5, 0.5]]', 'DRAFT', 'manual', 'u', '2026-01-02')"
+        )
+        db.commit()
+
+    migrate("downgrade", "e6f7a8b9c0d1")
+    with sqlite3.connect(db_path) as db:
+        assert db.execute(
+            "select name from sqlite_master where type='table' and name='component_map_positions'"
+        ).fetchone() is None
+        assert db.execute("select canonical_code from structural_components where id='c'").fetchone() == ("P1",)
+
+    migrate("upgrade", "head")
+    with sqlite3.connect(db_path) as db:
+        assert db.execute(
+            "select name from sqlite_master where type='table' and name='component_map_positions'"
+        ).fetchone()

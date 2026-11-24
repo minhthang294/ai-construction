@@ -80,6 +80,31 @@ class RepairScope(Base):
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class ComponentMapPosition(Base):
+    """DB override or additional-component position on one drawing sheet."""
+
+    __tablename__ = "component_map_positions"
+    __table_args__ = (UniqueConstraint("component_id", "sheet_id"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id"), nullable=False, index=True
+    )
+    component_id: Mapped[str] = mapped_column(
+        ForeignKey("structural_components.id"), nullable=False, index=True
+    )
+    sheet_id: Mapped[str] = mapped_column(String(121), nullable=False, index=True)
+    points: Mapped[list] = mapped_column(JSON, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="DRAFT")
+    source: Mapped[str] = mapped_column(String(20), nullable=False, default="manual")
+    created_by: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=now, nullable=False
+    )
+    reviewed_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    note: Mapped[str | None] = mapped_column(Text)
+
+
 class ComponentWorkLink(Base):
     __tablename__ = "component_work_links"
     __table_args__ = (UniqueConstraint("component_id", "source_hash", "dm_row"),)

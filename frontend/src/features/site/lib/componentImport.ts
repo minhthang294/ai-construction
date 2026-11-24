@@ -72,6 +72,14 @@ export type ComponentSegment = {
   zone: string;
 };
 
+/** Item returned by `GET /projects/{p}/design-groups`. */
+export type DesignGroupSummary = {
+  id: string;
+  name: string;
+  drawing: string;
+  group_type: string;
+};
+
 export type ComponentFilters = {
   query: string;
   zone: string;
@@ -105,6 +113,8 @@ export type ManualComponentInput = {
   raw_code: string;
   canonical_code: string;
   scope: ComponentScope;
+  design_group_id?: string | null;
+  approval_reference?: string | null;
 };
 
 export const EMPTY_MANUAL_COMPONENT: ManualComponentDraft = {

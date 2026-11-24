@@ -19,6 +19,9 @@ export type DrawingMarker = {
   points: Array<[number, number]>;
   origin: string;
   construction_status: string;
+  position_id?: string | null;
+  position_status?: string | null;
+  position_note?: string | null;
 };
 
 export type DrawingSheet = {
@@ -27,6 +30,8 @@ export type DrawingSheet = {
   drawing: string;
   page: number;
   image_url: string;
+  zone?: string | null;
+  segment?: number | null;
   markers: DrawingMarker[];
 };
 
@@ -393,6 +398,45 @@ export function fitViewToBounds(
   };
 }
 
+export type ViewportRect = {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+};
+
+/**
+ * Inverse of the CSS transform used on the sheet: screen point -> normalised
+ * sheet point. Returns null outside the drawn image so taps on the letterbox
+ * do not create off-sheet positions.
+ */
+export function clientToSheetPoint(
+  client: { x: number; y: number },
+  rect: ViewportRect,
+  imageBox: ImageBox,
+  view: View,
+): [number, number] | null {
+  if (
+    ![rect.width, rect.height, imageBox.width, imageBox.height].every(
+      (value) => Number.isFinite(value) && value > 0,
+    )
+  ) {
+    return null;
+  }
+  const zoom = clampZoom(view.zoom);
+  const x =
+    (client.x - rect.left - rect.width / 2 - view.pan.x) / zoom +
+    rect.width / 2;
+  const y =
+    (client.y - rect.top - rect.height / 2 - view.pan.y) / zoom +
+    rect.height / 2;
+  const u = (x - imageBox.left) / imageBox.width;
+  const v = (y - imageBox.top) / imageBox.height;
+  if (!Number.isFinite(u) || !Number.isFinite(v)) return null;
+  if (u < 0 || u > 1 || v < 0 || v > 1) return null;
+  return [u, v];
+}
+
 /** Accept both `/projects/...` and `/api/v1/projects/...` from the server. */
 export function apiRelativePath(url: string): string {
   const trimmed = url.trim();
@@ -414,9 +458,64 @@ export async function fetchDrawingMap(
   projectId: string,
   batchId?: string | null,
   signal?: AbortSignal,
+  filters?: { zone?: string | null; segment?: number | null },
 ): Promise<DrawingMap> {
-  const suffix = batchId ? `?batch_id=${encodeURIComponent(batchId)}` : "";
-  const res = await apiFetch(`/projects/${projectId}/drawing-map${suffix}`, { signal });
+  const params = new URLSearchParams();
+  if (batchId) params.set("batch_id", batchId);
+  if (filters?.zone) params.set("zone", filters.zone);
+  if (filters?.segment != null) params.set("segment", String(filters.segment));
+  const query = params.toString();
+  const res = await apiFetch(
+    `/projects/${projectId}/drawing-map${query ? `?${query}` : ""}`,
+    { signal },
+  );
+  if (!res.ok) throw new ApiError(await readError(res), res.status);
+  return res.json();
+}
+
+export type MapPositionInput = {
+  sheet_id: string;
+  points: Array<[number, number]>;
+  note?: string | null;
+};
+
+export type MapPosition = {
+  id: string;
+  component_id: string;
+  sheet_id: string;
+  points: Array<[number, number]>;
+  status: string;
+  source: string;
+  note: string | null;
+  reviewed_at?: string | null;
+};
+
+export async function saveDrawingMapPosition(
+  projectId: string,
+  componentId: string,
+  payload: MapPositionInput,
+): Promise<MapPosition> {
+  const res = await apiFetch(
+    `/projects/${projectId}/components/${componentId}/map-position`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+  if (!res.ok) throw new ApiError(await readError(res), res.status);
+  return res.json();
+}
+
+export async function reviewDrawingMapPosition(
+  projectId: string,
+  componentId: string,
+  sheetId: string,
+): Promise<MapPosition> {
+  const res = await apiFetch(
+    `/projects/${projectId}/components/${componentId}/map-position/review?sheet_id=${encodeURIComponent(sheetId)}`,
+    { method: "POST" },
+  );
   if (!res.ok) throw new ApiError(await readError(res), res.status);
   return res.json();
 }

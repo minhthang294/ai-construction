@@ -10,9 +10,10 @@ Prefix `/api/v1`. JSON UTF-8. Auth Bearer; mọi request project-scoped kiểm m
 | `DELETE /projects/{p}` | Xóa mềm, trả `{id}`, giữ hồ sơ liên quan và ghi audit. Công trình đã xóa bị ẩn và các API theo công trình trả `404`. |
 | `POST/GET /projects/{p}/work-items` | Danh mục công việc, import có preview trước khi lưu |
 | `GET /projects/{p}/segments?zone=...` | Các phân đoạn đã nhập trong công trình |
+| `GET /projects/{p}/design-groups` | Nhóm thiết kế của công trình (`{id, name, drawing, group_type}`) để gán khi tạo cấu kiện phát sinh |
 | `GET /projects/{p}/components?q=...` | Danh mục theo project; `q` khớp mã chuẩn hoặc alias; lọc `zone`, `segment_id`, `type`, `group_id`, `scope` |
 | `GET /projects/{p}/components/{id}` | Mã gốc/chuẩn, nhóm thiết kế, nguồn seed, phạm vi và các dòng DM liên quan; kèm `design_parameters[]` (`t_cm`, `L1_m`..) và tên bước đã render `t = … cm` khi có số liệu |
-| `POST /projects/{p}/components` | Tạo cấu kiện thủ công: `{segment_id, type, raw_code, canonical_code, scope, aliases?}`; chỉ quản lý/kỹ sư, segment cùng project, trả `201` |
+| `POST /projects/{p}/components` | Tạo cấu kiện thủ công: `{segment_id, type, raw_code, canonical_code, scope, design_group_id?, approval_reference?, aliases?}`; chỉ quản lý/kỹ sư, segment cùng project, trả `201` |
 | `POST /projects/{p}/components/import-preview` | Upload seed XLSX; trả candidates, liên kết DM, hash và conflicts; không ghi DB |
 | `POST /projects/{p}/components/import-commit` | JSON `{reviewed: true, idempotency_key, preview, source_file_base64}`; đối chiếu lại file, từ chối xung đột, ghi audit trong transaction |
 | `GET/POST /projects/{p}/stage-definitions?type=` | Định nghĩa bước thi công theo project + loại cấu kiện (`pile`/`beam`); đọc cho member, tạo cho quản lý/kỹ sư |
@@ -35,8 +36,10 @@ Prefix `/api/v1`. JSON UTF-8. Auth Bearer; mọi request project-scoped kiểm m
 | `POST /projects/{p}/progress/events/{id}/correct` | Sửa trạng thái một sự kiện kèm lý do bắt buộc `{status, reason}`: void sự kiện cũ + tạo sự kiện mới; audit cả hai |
 | `GET /projects/{p}/components/{id}/progress-events` | Lịch sử tiến độ còn hiệu lực (bỏ sự kiện đã void); mỗi sự kiện có `batch_id` |
 | `GET /projects/{p}/components?batch_id=` | Lọc danh mục theo đợt thi công; `progress`, `progress/summary`, `drawing-map`, `overview/latest-day`, `overview/segments` nhận cùng `batch_id` |
-| `GET /projects/{p}/drawing-map` | Mặt bằng theo project/zone/segment. Marker trả `design_group`, `current_work`/`current_work_definition_id` (bước mới nhất đang IN_PROGRESS), `location_review`; phản hồi có `review_count` (mã chưa đặt được) và `position_review_count` (tọa độ đang chờ duyệt). |
-| `GET /projects/{p}/drawing-map/{sheet_id}/image` | Trả ảnh riêng cho thành viên dự án. |
+| `GET /projects/{p}/drawing-map` | Mặt bằng theo project, gộp mọi `data/storage/dap-maps/<key>/manifest.json` (bỏ qua `expansion`). Lọc `batch_id`, `zone`, `segment`; `sheet_id` công khai dạng `<key>-<sheet.id>` và duy nhất toàn cục. Marker trả `design_group`, `current_work`/`current_work_definition_id` (bước mới nhất đang IN_PROGRESS), `location_review`, `origin` (`DESIGN_SCOPE`/`ADDITIONAL_SCOPE`), `position_id`, `position_status`, `position_note`. Tọa độ DB thắng manifest khi cùng component + sheet. Phản hồi có `review_count` (mã chưa đặt được) và `position_review_count` (tọa độ đang chờ duyệt). |
+| `PUT /projects/{p}/components/{id}/map-position` | Lưu/ghi đè vị trí nháp `{sheet_id, points:[[x,y],...], note?}`; tọa độ chuẩn hóa 0..1; cọc đúng 1 điểm, dầm tối thiểu 2 điểm; chỉ quản lý/kỹ sư; ghi audit kèm giá trị trước |
+| `POST /projects/{p}/components/{id}/map-position/review?sheet_id=` | Duyệt vị trí nháp (hoặc vị trí mới nhất nếu bỏ `sheet_id`); chỉ `project_manager`; ghi audit |
+| `GET /projects/{p}/drawing-map/{sheet_id}/image` | Trả ảnh riêng cho thành viên dự án; đường dẫn được resolve trong đúng thư mục `<key>` của manifest, chặn path traversal. |
 | `GET /projects/{p}/progress/summary` | Tổng hợp project-scoped trên cấu kiện đã duyệt: tổng/đã duyệt/chờ duyệt, số có phạm vi phát sinh, 4 trạng thái thi công + tỷ lệ, liên kết/xác nhận nghiệm thu + tỷ lệ; hai tỷ lệ độc lập |
 | `GET /projects/{p}/overview/latest-day` | Ngày gần nhất có sự kiện tiến độ hoặc báo cáo ngày: trả `{date, works:[{stage_name, zone, segment, component_type, status, count, codes[]}], manpower_total|null, photo_count, daily_report_exists, acceptance_today[]}`; `stage_name` gắn `t = … cm`/dải `t = a–b cm`; nếu các cọc khác t, `codes[]` kèm giá trị từng mã. Chỉ đọc bản ghi thật, nghiệm thu không suy ra từ tiến độ |
 | `GET /projects/{p}/overview/segments` | Tiến độ theo zone + segment: số cấu kiện và đã xác minh, đếm thi công hoàn thành/đang thi công/chưa bắt đầu và nghiệm thu đã xác nhận; hai tỷ lệ độc lập trên cùng mẫu số đã xác minh |

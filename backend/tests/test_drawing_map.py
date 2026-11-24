@@ -3,15 +3,18 @@ from datetime import date, datetime, timezone
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from app.core import drawing_map_router as drawing
-from app.core.component_models import (ComponentDesignParameter, ComponentStage,
-                                       ProgressEvent, StageDefinition, Segment,
+from app.core.component_models import (ComponentDesignParameter, ComponentMapPosition,
+                                       ComponentStage, ConstructionBatch,
+                                       ConstructionBatchComponent, ProgressEvent,
+                                       RepairScope, StageDefinition, Segment,
                                        StructuralComponent, StructureZone)
 from app.core.database import Base
 from app.acceptance.models import AcceptanceRecord, AcceptanceRequest, ComponentAcceptanceLink
+from app.core.models import AuditLog
 
 
 def test_private_drawing_images_require_membership_and_matching_manifest(tmp_path, monkeypatch):
@@ -29,12 +32,14 @@ def test_private_drawing_images_require_membership_and_matching_manifest(tmp_pat
             "page": 38, "image": "beam.jpg", "markers": [],
         }],
     }))
-    response = drawing.drawing_map_image("dap", "beam")
+    response = drawing.drawing_map_image("dap", "pd2-beam")
     assert response.path == folder / "beam.jpg"
     assert response.headers["cache-control"] == "private, no-store"
     with pytest.raises(HTTPException, match="Drawing sheet not found"):
-        drawing.drawing_map_image("other", "beam")
-    assert seen == ["dap", "other"]
+        drawing.drawing_map_image("other", "pd2-beam")
+    with pytest.raises(HTTPException, match="Drawing sheet not found"):
+        drawing.drawing_map_image("dap", "pd2-../../beam")
+    assert seen == ["dap", "other", "dap"]
 
     manifest.write_text(manifest.read_text().replace("beam.jpg", "../beam.jpg"))
     with pytest.raises(HTTPException, match="Drawing map is not available"):
@@ -53,7 +58,7 @@ def test_markers_resolve_only_verified_codes_in_the_pilot_segment(monkeypatch):
             ],
         }],
     })
-    monkeypatch.setattr(drawing, "_manifest", lambda project: manifest)
+    monkeypatch.setattr(drawing, "_manifest_entries", lambda project: [("pd2", manifest)])
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
     with Session(engine) as db:
@@ -81,7 +86,7 @@ def test_markers_expose_terminal_stage_last_event_and_acceptance(monkeypatch):
             ],
         }],
     })
-    monkeypatch.setattr(drawing, "_manifest", lambda project: manifest)
+    monkeypatch.setattr(drawing, "_manifest_entries", lambda project: [("pd2", manifest)])
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
     with Session(engine) as db:
@@ -112,3 +117,137 @@ def test_markers_expose_terminal_stage_last_event_and_acceptance(monkeypatch):
     assert marker["current_stage_name"].endswith("t = 3 cm")
     assert marker["last_event_date"] == "2026-11-20"
     assert marker["accepted"] is True
+
+
+def test_multi_manifest_filters_by_batch_zone_and_segment(tmp_path, monkeypatch):
+    monkeypatch.setattr(drawing, "require_project_member", lambda project: None)
+    for key, marker, zone, segment in (
+        ("pd2", "A1", "Cầu chính", 2),
+        ("bunke", "B1", "Bunke", 1),
+    ):
+        folder = tmp_path / key
+        folder.mkdir()
+        (folder / "sheet.jpg").write_bytes(b"image")
+        (folder / "manifest.json").write_text(json.dumps({
+            "project_id": "p",
+            "sheets": [{
+                "id": "main", "title": key, "drawing": "TK-32", "page": 1,
+                "image": "sheet.jpg", "zone": zone, "segment": segment,
+                "markers": [{"code": marker, "type": "pile",
+                             "points": [[0.5, 0.5]], "zone": zone, "segment": segment}],
+            }],
+        }), encoding="utf-8")
+    # Expansion folders and foreign projects must be ignored.
+    (tmp_path / "expansion").mkdir()
+    (tmp_path / "expansion" / "manifest.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(drawing, "MAP_ROOT", tmp_path)
+
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        db.add(StructureZone(id="z1", project_id="p", name="Cầu chính", name_key="cầu chính"))
+        db.add(StructureZone(id="z2", project_id="p", name="Bunke", name_key="bunke"))
+        db.add(Segment(id="s1", zone_id="z1", number=2, source_code="2"))
+        db.add(Segment(id="s2", zone_id="z2", number=1, source_code="1"))
+        for component_id, code, segment_id in (("c1", "A1", "s1"), ("c2", "B1", "s2")):
+            db.add(StructuralComponent(
+                id=component_id, project_id="p", segment_id=segment_id, type="pile",
+                raw_code=code, canonical_code=code, verification="VERIFIED", created_by="u",
+            ))
+        batch = ConstructionBatch(project_id="p", name="Both", created_by="u")
+        db.add(batch)
+        db.flush()
+        db.add_all([
+            ConstructionBatchComponent(batch_id=batch.id, component_id="c1", added_by="u"),
+            ConstructionBatchComponent(batch_id=batch.id, component_id="c2", added_by="u"),
+        ])
+        db.commit()
+        batch_id = batch.id
+
+        both = drawing.drawing_map("p", db, batch_id=batch_id)
+        assert [sheet["id"] for sheet in both["sheets"]] == ["bunke-main", "pd2-main"]
+        only_bunke = drawing.drawing_map("p", db, zone="Bunke")
+        assert [sheet["id"] for sheet in only_bunke["sheets"]] == ["bunke-main"]
+        only_segment = drawing.drawing_map("p", db, segment=2)
+        assert [sheet["id"] for sheet in only_segment["sheets"]] == ["pd2-main"]
+
+        single_batch = ConstructionBatch(project_id="p", name="One", created_by="u")
+        db.add(single_batch)
+        db.flush()
+        db.add(ConstructionBatchComponent(
+            batch_id=single_batch.id, component_id="c1", added_by="u"))
+        db.commit()
+        one = drawing.drawing_map("p", db, batch_id=single_batch.id)
+        assert [sheet["id"] for sheet in one["sheets"]] == ["pd2-main"]
+
+    image = drawing.drawing_map_image("p", "bunke-main")
+    assert image.path == (tmp_path / "bunke" / "sheet.jpg").resolve()
+
+
+def test_db_position_override_additional_marker_and_review(monkeypatch):
+    actor = type("U", (), {"id": "u"})()
+    roles_seen = []
+
+    def fake_role(project, roles):
+        roles_seen.append(set(roles))
+        return actor
+
+    monkeypatch.setattr(drawing, "require_project_member", lambda project: None)
+    monkeypatch.setattr(drawing, "require_project_role", fake_role)
+    manifest = drawing.Manifest.model_validate({
+        "project_id": "p",
+        "sheets": [{
+            "id": "main", "title": "Test", "drawing": "TK-32", "page": 1,
+            "image": "sheet.jpg", "zone": "Cầu chính", "segment": 2,
+            "markers": [{"code": "A1", "type": "pile", "points": [[0.5, 0.5]]}],
+        }],
+    })
+    monkeypatch.setattr(drawing, "_manifest_entries", lambda project: [("pd2", manifest)])
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        db.add(StructureZone(id="z", project_id="p", name="Cầu chính", name_key="cau chinh"))
+        db.add(Segment(id="s", zone_id="z", number=2, source_code="2"))
+        db.add(StructuralComponent(
+            id="c1", project_id="p", segment_id="s", type="pile",
+            raw_code="A1", canonical_code="A1", verification="VERIFIED", created_by="u",
+        ))
+        db.add(StructuralComponent(
+            id="c2", project_id="p", segment_id="s", type="pile",
+            raw_code="NEW1", canonical_code="NEW1", verification="NEEDS_REVIEW",
+            record_origin="ADDITIONAL", created_by="u",
+        ))
+        db.add(RepairScope(id="scope2", component_id="c2", kind="ADDITIONAL_SCOPE",
+                           verification="NEEDS_REVIEW", revision=1))
+        db.commit()
+
+        drawing.save_map_position(
+            "p", "c1",
+            drawing.MapPositionIn(sheet_id="pd2-main", points=[(0.1, 0.1)],
+                                  note="moved"),
+            db,
+        )
+        drawing.save_map_position(
+            "p", "c2",
+            drawing.MapPositionIn(sheet_id="pd2-main", points=[(0.2, 0.2)]),
+            db,
+        )
+        body = drawing.drawing_map("p", db)
+    markers = {marker["component_id"]: marker for marker in body["sheets"][0]["markers"]}
+    assert markers["c1"]["points"] == [[0.1, 0.1]]
+    assert markers["c1"]["position_status"] == "DRAFT"
+    assert markers["c2"]["origin"] == "ADDITIONAL_SCOPE"
+    assert markers["c2"]["position_status"] == "DRAFT"
+    assert body["position_review_count"] == 2
+
+    with Session(engine) as db:
+        reviewed = drawing.review_map_position("p", "c2", db)
+        assert reviewed["status"] == "REVIEWED"
+        assert db.scalar(select(AuditLog).where(
+            AuditLog.action == "component_map_position_saved")) is not None
+        assert db.scalar(select(AuditLog).where(
+            AuditLog.action == "component_map_position_reviewed")) is not None
+        assert db.scalar(select(ComponentMapPosition).where(
+            ComponentMapPosition.component_id == "c1")).status == "DRAFT"
+    assert {"project_manager", "engineer"} in roles_seen
+    assert roles_seen[-1] == {"project_manager"}

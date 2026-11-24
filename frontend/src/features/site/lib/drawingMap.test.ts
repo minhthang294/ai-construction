@@ -4,6 +4,7 @@ import {
   apiRelativePath,
   clampPan,
   clampZoom,
+  clientToSheetPoint,
   constructionStatusColor,
   containBox,
   countMarkers,
@@ -265,5 +266,50 @@ describe("compact overview map helpers", () => {
     expect(pickPrimarySheet([bunke, main], "Bunke")?.id).toBe("bunke");
     expect(pickPrimarySheet([bunke, main], null)?.id).toBe("bunke");
     expect(pickPrimarySheet([], "Cầu chính")).toBeNull();
+  });
+});
+
+describe("placement point mapping", () => {
+  const imageBox = { left: 10, top: 20, width: 400, height: 200 };
+  const rect = { left: 0, top: 0, width: 500, height: 300 };
+
+  it("round-trips a normalised point through zoom and pan", () => {
+    const view = { zoom: 2, pan: { x: 30, y: -20 } };
+    const [u, v] = [0.25, 0.75];
+    const screenX =
+      (imageBox.left + u * imageBox.width - rect.width / 2) * view.zoom +
+      rect.width / 2 +
+      view.pan.x;
+    const screenY =
+      (imageBox.top + v * imageBox.height - rect.height / 2) * view.zoom +
+      rect.height / 2 +
+      view.pan.y;
+    const point = clientToSheetPoint(
+      { x: screenX, y: screenY },
+      rect,
+      imageBox,
+      view,
+    );
+    expect(point?.[0]).toBeCloseTo(u);
+    expect(point?.[1]).toBeCloseTo(v);
+  });
+
+  it("rejects taps outside the drawn image and unusable geometry", () => {
+    const view = { zoom: 1, pan: { x: 0, y: 0 } };
+    expect(clientToSheetPoint({ x: 2, y: 2 }, rect, imageBox, view)).toBeNull();
+    expect(
+      clientToSheetPoint({ x: 250, y: 150 }, rect, imageBox, {
+        zoom: 0,
+        pan: { x: 0, y: 0 },
+      }),
+    ).toEqual([0.6, 0.65]);
+    expect(
+      clientToSheetPoint(
+        { x: 0, y: 0 },
+        { ...rect, width: 0 },
+        imageBox,
+        view,
+      ),
+    ).toBeNull();
   });
 });

@@ -14,6 +14,7 @@ import type {
   ComponentPreview,
   ComponentSegment,
   ComponentSummary,
+  DesignGroupSummary,
   ManualComponentInput,
 } from "./componentImport";
 import type {
@@ -307,6 +308,14 @@ export async function listSegments(
 ): Promise<ComponentSegment[]> {
   const suffix = zone ? `?zone=${encodeURIComponent(zone)}` : "";
   const res = await apiFetch(`/projects/${projectId}/segments${suffix}`);
+  if (!res.ok) return fail(res);
+  return res.json();
+}
+
+export async function listDesignGroups(
+  projectId: string,
+): Promise<DesignGroupSummary[]> {
+  const res = await apiFetch(`/projects/${projectId}/design-groups`);
   if (!res.ok) return fail(res);
   return res.json();
 }
