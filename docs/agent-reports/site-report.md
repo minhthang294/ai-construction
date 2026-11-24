@@ -1344,3 +1344,25 @@ node shoot.js   # phone/desktop errors: []
 Lazy image đã kiểm bằng Playwright: trước khi cuộn `0` request ảnh bản vẽ; cuộn tới thẻ → `1` request, không tải thêm sheet khác. Thẻ compact cao ~60vh trên phone, danh sách 81 mã không còn render trong card.
 
 **Chưa kiểm**: thao tác chạm marker/zoom thật trên thiết bị; bottom sheet mới xem qua code, chưa có E2E tương tác.
+
+## Mặt bằng: fit theo phạm vi cấu kiện - 2026-11-24
+
+Phạm vi: `frontend/src/features/site/*`, test, báo cáo. Không sửa backend/acceptance/engineering-ai.
+
+- **Fit mặc định**: `markerBounds` + `fitViewToBounds` tính bbox điểm marker của sheet đang xem (đã lọc theo đợt), thêm padding 8%, giới hạn zoom 1–4 và pan theo tâm. Cả thẻ Tổng quan và Cấu kiện → Mặt bằng dùng chung logic này; mở sheet/ảnh xong tự fit (ví dụ thực tế 131% thay vì 100%).
+- **Vừa khung** quay lại fit bbox; thêm **Toàn tờ** đưa về 100%/pan 0.
+- **Thanh zoom** chuyển khỏi overlay trên bản vẽ thành bar dưới ảnh (nút −, %, +, Vừa khung, Toàn tờ; ≥44px); không còn che nét vẽ. Kiểm DOM: `toolbar.top == image.bottom`.
+- **Hit area marker**: nút trong suốt đặt `32 / zoom` trong hệ toạ độ đã scale, nên luôn ≥32px trên màn hình kể cả 100%; thực đo 44px do token touch target toàn cục.
+- Unit test helper: fit bbox giữa/off-centre, clamp pan, marker rỗng, một điểm + cap zoom 4.
+
+### Kiểm tra
+
+```bash
+cd frontend
+npm test        # 35 files, 222 tests
+npm run build   # OK; main 310,90 kB; DrawingMapPanel chunk 34,21 kB
+cd C:/Users/Thang Minh Pham/.claude/jobs/0f99d406/tmp/shots
+node shoot.js   # phone/desktop errors: []
+```
+
+Playwright kiểm thêm: mặc định 131% → **Toàn tờ** 100% → **Vừa khung** 131%; marker hit area 44×44; thanh zoom nằm dưới ảnh.

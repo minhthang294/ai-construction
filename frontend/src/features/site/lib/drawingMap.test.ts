@@ -11,7 +11,10 @@ import {
   pickPrimarySheet,
   pinchZoom,
   sanitizePoints,
+  fitViewToBounds,
+  markerBounds,
   type DrawingSheet,
+  type ImageBox,
 } from "./drawingMap";
 
 function sheet(overrides: Partial<DrawingSheet> = {}): DrawingSheet {
@@ -173,6 +176,65 @@ it("accepts image paths with or without the API prefix", () => {
   expect(apiRelativePath("/projects/p/drawing-map/s/image")).toBe(
     "/projects/p/drawing-map/s/image",
   );
+});
+
+describe("fit the view to the batch marker bounding box", () => {
+  const imageBox: ImageBox = { left: 0, top: 50, width: 400, height: 200 };
+
+  it("fits a centred marker box with 10% padding", () => {
+    const view = fitViewToBounds(
+      { minX: 0.25, minY: 0.25, maxX: 0.75, maxY: 0.75 },
+      imageBox,
+      400,
+      300,
+      0.1,
+    );
+    expect(view?.zoom).toBeCloseTo(1.6);
+    expect(view?.pan.x).toBeCloseTo(0);
+    expect(view?.pan.y).toBeCloseTo(0);
+  });
+
+  it("centres an off-centre box and clamps pan to the zoom limit", () => {
+    const view = fitViewToBounds(
+      { minX: 0.01, minY: 0.4, maxX: 0.05, maxY: 0.5 },
+      imageBox,
+      400,
+      300,
+      0.1,
+    );
+    expect(view?.zoom).toBe(4);
+    expect(view?.pan).toEqual({ x: 600, y: 40 });
+  });
+
+  it("bounds markers defensively and reports an empty sheet", () => {
+    expect(markerBounds([])).toBeNull();
+    expect(
+      markerBounds([
+        {
+          component_id: "c1", code: "F1", type: "pile", points: [[0.2, 0.3]],
+          origin: "DESIGN_SCOPE", construction_status: "COMPLETED",
+        },
+        {
+          component_id: "c2", code: "F2", type: "pile",
+          points: [[0.6, 0.7], [0.8, 0.9]],
+          origin: "DESIGN_SCOPE", construction_status: "COMPLETED",
+        },
+      ]),
+    ).toEqual({ minX: 0.2, minY: 0.3, maxX: 0.8, maxY: 0.9 });
+    expect(fitViewToBounds(null, imageBox, 400, 300, 0.08)).toBeNull();
+  });
+
+  it("uses a minimum span for one point and caps zoom at four", () => {
+    const view = fitViewToBounds(
+      { minX: 0.5, minY: 0.5, maxX: 0.5, maxY: 0.5 },
+      imageBox,
+      400,
+      300,
+      0.08,
+    );
+    expect(view?.zoom).toBe(4);
+    expect(view?.pan).toEqual({ x: 0, y: 0 });
+  });
 });
 
 describe("compact overview map helpers", () => {

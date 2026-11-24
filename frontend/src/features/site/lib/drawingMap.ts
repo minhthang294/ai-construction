@@ -277,6 +277,12 @@ export function containBox(
 
 export type Pan = { x: number; y: number };
 export type View = { zoom: number; pan: Pan };
+export type MarkerBounds = {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+};
 
 export const MIN_ZOOM = 1;
 export const MAX_ZOOM = 4;
@@ -317,6 +323,74 @@ export function pinchZoom(
     return clampZoom(startZoom);
   }
   return clampZoom(startZoom * (currentDistance / startDistance));
+}
+
+/** Normalised bounding box of every drawable marker point on one sheet. */
+export function markerBounds(
+  markers: ReadonlyArray<DrawingMarker>,
+): MarkerBounds | null {
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  for (const marker of markers) {
+    for (const [x, y] of sanitizePoints(marker.points)) {
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  }
+  if (!Number.isFinite(minX) || !Number.isFinite(minY)) return null;
+  return { minX, minY, maxX, maxY };
+}
+
+/**
+ * Fit a normalised marker box inside the measured image box with padding.
+ * Pan is expressed in the same centre-scaled coordinates as the CSS transform.
+ */
+export function fitViewToBounds(
+  bounds: MarkerBounds | null,
+  imageBox: ImageBox,
+  viewportWidth: number,
+  viewportHeight: number,
+  padding = 0.08,
+): View | null {
+  if (
+    !bounds ||
+    !imageBox ||
+    ![imageBox.width, imageBox.height, viewportWidth, viewportHeight].every(
+      (value) => Number.isFinite(value) && value > 0,
+    )
+  ) {
+    return null;
+  }
+  const pad = Math.min(0.45, Math.max(0, padding));
+  const minSpan = 0.02;
+  const centerX = (bounds.minX + bounds.maxX) / 2;
+  const centerY = (bounds.minY + bounds.maxY) / 2;
+  const width = Math.max(bounds.maxX - bounds.minX, minSpan) * imageBox.width;
+  const height = Math.max(bounds.maxY - bounds.minY, minSpan) * imageBox.height;
+  const zoom = clampZoom(
+    Math.min(
+      (viewportWidth * (1 - 2 * pad)) / width,
+      (viewportHeight * (1 - 2 * pad)) / height,
+    ),
+  );
+  const imageCenterX = imageBox.left + centerX * imageBox.width;
+  const imageCenterY = imageBox.top + centerY * imageBox.height;
+  return {
+    zoom,
+    pan: clampPan(
+      {
+        x: (viewportWidth / 2 - imageCenterX) * zoom,
+        y: (viewportHeight / 2 - imageCenterY) * zoom,
+      },
+      zoom,
+      viewportWidth,
+      viewportHeight,
+    ),
+  };
 }
 
 /** Accept both `/projects/...` and `/api/v1/projects/...` from the server. */

@@ -24,7 +24,9 @@ import {
   fetchDrawingMap,
   fetchDrawingSheetImageUrl,
   filterDrawingSheets,
+  fitViewToBounds,
   isAdditionalScope,
+  markerBounds,
   originLabel,
   pickPrimarySheet,
   pinchZoom,
@@ -172,6 +174,10 @@ export default function DrawingMapPanel({
   const [imageBox, setImageBox] = useState<ImageBox | null>(null);
 
   const [view, setViewState] = useState<View>({
+    zoom: 1,
+    pan: { x: 0, y: 0 },
+  });
+  const [fitView, setFitView] = useState<View>({
     zoom: 1,
     pan: { x: 0, y: 0 },
   });
@@ -374,6 +380,22 @@ export default function DrawingMapPanel({
   }, [imageState, imageUrl]);
 
   useEffect(() => {
+    if (imageState !== "ready" || !imageBox || !activeSheet) return;
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const fitted = fitViewToBounds(
+      markerBounds(activeSheet.markers),
+      imageBox,
+      viewport.clientWidth,
+      viewport.clientHeight,
+      0.08,
+    );
+    const next = fitted ?? { zoom: 1, pan: { x: 0, y: 0 } };
+    setFitView(next);
+    setView(next);
+  }, [activeSheetKey, imageBox, imageState, setView]);
+
+  useEffect(() => {
     if (imageState !== "ready" || !activeSheetKey) return;
     const element = viewportRef.current;
     if (!element) return;
@@ -489,6 +511,10 @@ export default function DrawingMapPanel({
   }
 
   function resetView() {
+    setView(fitView);
+  }
+
+  function showWholeSheet() {
     setView({ zoom: 1, pan: { x: 0, y: 0 } });
   }
 
@@ -842,41 +868,6 @@ export default function DrawingMapPanel({
                     onPointerUp={endPointer}
                     onPointerCancel={endPointer}
                   >
-                    <div
-                      className="absolute right-2 top-2 z-20 flex flex-wrap items-center justify-end gap-1"
-                      onPointerDown={(event) => event.stopPropagation()}
-                    >
-                      <button
-                        type="button"
-                        aria-label="Thu nhỏ bản vẽ"
-                        className={`${BUTTON} min-w-11 px-0 ${FOCUS_RING}`}
-                        disabled={view.zoom <= MIN_ZOOM}
-                        onClick={() => zoomBy(-0.5)}
-                      >
-                        −
-                      </button>
-                      <span className="min-h-11 rounded-lg border border-slate-300 bg-white px-2 py-3 text-xs font-semibold text-slate-700">
-                        {Math.round(view.zoom * 100)}%
-                      </span>
-                      <button
-                        type="button"
-                        aria-label="Phóng to bản vẽ"
-                        className={`${BUTTON} min-w-11 px-0 ${FOCUS_RING}`}
-                        disabled={view.zoom >= MAX_ZOOM}
-                        onClick={() => zoomBy(0.5)}
-                      >
-                        +
-                      </button>
-                      <button
-                        type="button"
-                        aria-label="Đưa bản vẽ về vừa khung"
-                        className={`${BUTTON} ${FOCUS_RING}`}
-                        onClick={resetView}
-                      >
-                        Vừa khung
-                      </button>
-                    </div>
-
                     {compact && !imageInView ? (
                       <p className="absolute inset-0 grid place-items-center p-4 text-center text-sm text-slate-600">
                         Cuộn tới để tải bản vẽ…
@@ -1023,13 +1014,8 @@ export default function DrawingMapPanel({
                             </svg>
                             {mapTargets.map((target) => {
                               const { marker, x, y } = target;
-                              let diameter = 18 / view.zoom;
-                              for (const other of mapTargets) {
-                                if (other === target) continue;
-                                const dx = Math.abs(x - other.x) * imageBox.width;
-                                const dy = Math.abs(y - other.y) * imageBox.height;
-                                diameter = Math.min(diameter, Math.max(dx, dy));
-                              }
+                              // Keep a 32px screen-space hit area even at 100%.
+                              const diameter = 32 / view.zoom;
                               const selected = selection
                                 ? selection.selectedIds.includes(marker.component_id)
                                 : detailMarker?.component_id === marker.component_id;
@@ -1079,6 +1065,50 @@ export default function DrawingMapPanel({
                         ) : null}
                       </div>
                     ) : null}
+                  </div>
+
+                  <div
+                    role="group"
+                    aria-label="Thu phóng bản vẽ"
+                    className="flex flex-wrap items-center gap-1 border-t border-slate-200 bg-white px-2 py-1.5"
+                  >
+                    <button
+                      type="button"
+                      aria-label="Thu nhỏ bản vẽ"
+                      className={`${BUTTON} min-w-11 px-0 ${FOCUS_RING}`}
+                      disabled={view.zoom <= MIN_ZOOM}
+                      onClick={() => zoomBy(-0.5)}
+                    >
+                      −
+                    </button>
+                    <span className="min-h-11 rounded-lg border border-slate-300 bg-white px-2 py-3 text-xs font-semibold text-slate-700">
+                      {Math.round(view.zoom * 100)}%
+                    </span>
+                    <button
+                      type="button"
+                      aria-label="Phóng to bản vẽ"
+                      className={`${BUTTON} min-w-11 px-0 ${FOCUS_RING}`}
+                      disabled={view.zoom >= MAX_ZOOM}
+                      onClick={() => zoomBy(0.5)}
+                    >
+                      +
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Vừa khung theo phạm vi cấu kiện"
+                      className={`${BUTTON} ${FOCUS_RING}`}
+                      onClick={resetView}
+                    >
+                      Vừa khung
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Xem toàn tờ bản vẽ"
+                      className={`${BUTTON} ${FOCUS_RING}`}
+                      onClick={showWholeSheet}
+                    >
+                      Toàn tờ
+                    </button>
                   </div>
 
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-slate-200 p-3 text-xs text-slate-600">
