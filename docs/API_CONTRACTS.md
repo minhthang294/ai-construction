@@ -1,86 +1,134 @@
 # API contracts v1
 
-Prefix `/api/v1`. JSON UTF-8. Auth Bearer; mọi request project-scoped kiểm membership. Ngày `YYYY-MM-DD`, timestamp ISO-8601 có múi giờ. Lỗi `{detail, code}`; `403` thiếu quyền, `404` resource không thuộc project, `409` xung đột trạng thái, `422` dữ liệu sai.
+Cập nhật: 24/11/2026. Prefix `/api/v1`. JSON UTF-8. Auth Bearer; mọi request project-scoped kiểm membership. Ngày `YYYY-MM-DD`, timestamp ISO-8601 có múi giờ. Lỗi `{detail, code}`; `403` thiếu quyền, `404` resource không thuộc project, `409` xung đột trạng thái, `422` dữ liệu sai.
 
-`POST /auth/login` cấp bearer token 12 giờ; `POST /auth/logout` thu hồi token hiện tại.
+Đã bỏ 23-24/11/2026: upload/ingest tài liệu, OCR/Tesseract, embedding/sqlite-vec ingest, tìm kiếm tài liệu, cross-reference, checklist tài liệu độc lập, AI report-draft, AI gợi ý caption ảnh. Checklist 7 mục trong BBNT vẫn còn; caption ảnh do người dùng nhập/xác nhận.
+
+## Auth, dự án, danh mục
 
 | Route | Ý nghĩa |
 | --- | --- |
-| `POST/GET /projects` | Tạo và liệt kê công trình được phép; `can_delete` dành cho quản trị viên và quản lý công trình |
-| `DELETE /projects/{p}` | Xóa mềm, trả `{id}`, giữ hồ sơ liên quan và ghi audit. Công trình đã xóa bị ẩn và các API theo công trình trả `404`. |
-| `POST/GET /projects/{p}/work-items` | Danh mục công việc, import có preview trước khi lưu |
-| `GET /projects/{p}/segments?zone=...` | Các phân đoạn đã nhập trong công trình |
-| `GET /projects/{p}/design-groups` | Nhóm thiết kế của công trình (`{id, name, drawing, group_type}`) để gán khi tạo cấu kiện phát sinh |
-| `GET /projects/{p}/components?q=...` | Danh mục theo project; `q` khớp mã chuẩn hoặc alias; lọc `zone`, `segment_id`, `type`, `group_id`, `scope` |
-| `GET /projects/{p}/components/{id}` | Mã gốc/chuẩn, nhóm thiết kế, nguồn seed, phạm vi và các dòng DM liên quan; kèm `design_parameters[]` (`t_cm`, `L1_m`..) và tên bước đã render `t = … cm` khi có số liệu |
-| `POST /projects/{p}/components` | Tạo cấu kiện thủ công: `{segment_id, type, raw_code, canonical_code, scope, design_group_id?, approval_reference?, aliases?}`; chỉ quản lý/kỹ sư, segment cùng project, trả `201` |
-| `POST /projects/{p}/components/import-preview` | Upload seed XLSX; trả candidates, liên kết DM, hash và conflicts; không ghi DB |
-| `POST /projects/{p}/components/import-commit` | JSON `{reviewed: true, idempotency_key, preview, source_file_base64}`; đối chiếu lại file, từ chối xung đột, ghi audit trong transaction |
-| `GET/POST /projects/{p}/stage-definitions?type=` | Định nghĩa bước thi công theo project + loại cấu kiện (`pile`/`beam`); đọc cho member, tạo cho quản lý/kỹ sư |
-| `POST /projects/{p}/components/{id}/repair-scopes` | Đề xuất phạm vi sửa chữa `{kind, approval_reference?}`; `revision` tự tăng theo cặp component + kind, trạng thái `NEEDS_REVIEW` |
-| `POST /projects/{p}/components/{id}/repair-scopes/{scope_id}/review` | Duyệt phạm vi `{decision: VERIFIED\|REJECTED, approval_reference?, note?}`; chỉ `project_manager`; chỉ scope `NEEDS_REVIEW` |
-| `POST /projects/{p}/components/{id}/stages` | Gắn một định nghĩa bước vào cấu kiện và một phạm vi sửa chữa; không tự sinh bước mặc định |
-| `GET/POST /projects/{p}/components/{id}/progress-events` | Nhật ký thi công append-only `{stage_id, event_date, status, quantity?, unit?, note?, evidence_refs?}`; lọc `stage_id` |
-| `GET /projects/{p}/progress` | Tổng hợp tiến độ theo cấu kiện; lọc `q`, `zone`, `segment_id`, `type`, `group_id`, `scope`, `origin`, `stage_definition_id`, `construction_status`, `acceptance_status`; trả hai cột độc lập `construction_status` và `acceptance_status` |
-| `POST /projects/{p}/progress/design-quantities` | Tra khối lượng thiết kế khi mở ghi tiến độ. Nhận `{component_ids: string[]}` với tối đa 500 mã ID duy nhất của công trình. Trả bản đồ theo ID bước thi công. |
-| `POST /projects/{p}/progress/bulk-preview` | Kiểm tra đúng danh sách `component_ids[]` với một `stage_definition_id`; `stage_selections[]` (`{component_id, stage_id}`) bắt buộc khi một cấu kiện có nhiều bước cùng định nghĩa; trả cấu kiện thiếu, bước thiếu, danh sách mơ hồ/không khớp, cảnh báo và `can_commit`; không ghi DB; kiểm `evidence_refs` cùng project |
-| `POST /projects/{p}/progress/bulk` | Ghi hàng loạt sau khi duyệt: `{reviewed: true, idempotency_key, ...bulk-preview}`; kiểm lại đúng danh sách, `stage_selections`, bước và evidence trong transaction; mơ hồ/không khớp trả `409`; ghi `ProgressEvent` và audit; trả `201` |
-| `POST /projects/{p}/progress/daily-preview` | Xem trước nhiều công tác cùng ngày. Nhận `{event_date, lines:[{stage_definition_id, component_ids, stage_selections?, status, group_quantity?, group_unit?}]}`; trả `{can_commit, lines, warnings}`; mỗi dòng có `stage_display_name` đã gắn `t = … cm` (hoặc “chưa có số liệu”). |
-| `POST /projects/{p}/progress/daily` | Ghi toàn bộ công tác trong một giao dịch. Thêm `reviewed: true` và `idempotency_key` vào payload preview. Trả `{created, lines}`. Khối lượng cấp nhóm giữ ở bản ghi nhóm, khối lượng từng cấu kiện để trống. |
-| `GET/POST /projects/{p}/construction-batches` | Danh sách đợt thi công (mặc định bỏ đợt đã lưu trữ) và tạo đợt `{name, note?}`; trả kèm `component_count`, `primary_zone`; cần quyền biên tập để tạo |
-| `GET/PATCH /projects/{p}/construction-batches/{id}` | Chi tiết đợt kèm cấu kiện (mã, khu, phân đoạn, lý do) hoặc đổi tên/ghi chú/lưu trữ; ghi audit |
-| `POST /projects/{p}/construction-batches/{id}/components/preview` | Xem trước mã trên **toàn bộ** khu/phân đoạn: `{codes:[...]}` trả `matched[]`, `ambiguous[]` (nhiều ứng viên), `missing[]`, `already_in_batch[]`; không tự chọn khi mã mơ hồ |
-| `POST /projects/{p}/construction-batches/{id}/components` | Thêm cấu kiện đã chọn tay `{component_ids:[...], reason?}`, bỏ qua mục đã có; ghi audit từng cấu kiện |
-| `DELETE /projects/{p}/construction-batches/{id}/components/{component_id}?reason=` | Bỏ cấu kiện khỏi đợt; ghi audit |
-| `POST /projects/{p}/progress/batches/{id}/undo` | Hoàn tác đợt trong cùng ngày bởi người tạo hoặc `project_manager`: `{reason}`; đánh dấu toàn bộ sự kiện `voided_at/by/reason`, ghi audit |
-| `POST /projects/{p}/progress/events/{id}/correct` | Sửa trạng thái một sự kiện kèm lý do bắt buộc `{status, reason}`: void sự kiện cũ + tạo sự kiện mới; audit cả hai |
-| `GET /projects/{p}/components/{id}/progress-events` | Lịch sử tiến độ còn hiệu lực (bỏ sự kiện đã void); mỗi sự kiện có `batch_id` |
-| `GET /projects/{p}/components?batch_id=` | Lọc danh mục theo đợt thi công; `progress`, `progress/summary`, `drawing-map`, `overview/latest-day`, `overview/segments` nhận cùng `batch_id` |
-| `GET /projects/{p}/drawing-map` | Mặt bằng theo project, gộp mọi `data/storage/dap-maps/<key>/manifest.json` (bỏ qua `expansion`). Lọc `batch_id`, `zone`, `segment`; `sheet_id` công khai dạng `<key>-<sheet.id>` và duy nhất toàn cục. Marker trả `design_group`, `current_work`/`current_work_definition_id` (bước mới nhất đang IN_PROGRESS), `location_review`, `origin` (`DESIGN_SCOPE`/`ADDITIONAL_SCOPE`), `position_id`, `position_status`, `position_note`. Tọa độ DB thắng manifest khi cùng component + sheet. Phản hồi có `review_count` (mã chưa đặt được) và `position_review_count` (tọa độ đang chờ duyệt). |
-| `PUT /projects/{p}/components/{id}/map-position` | Lưu/ghi đè vị trí nháp `{sheet_id, points:[[x,y],...], note?}`; tọa độ chuẩn hóa 0..1; cọc đúng 1 điểm, dầm tối thiểu 2 điểm; chỉ quản lý/kỹ sư; ghi audit kèm giá trị trước |
-| `POST /projects/{p}/components/{id}/map-position/review?sheet_id=` | Duyệt vị trí nháp (hoặc vị trí mới nhất nếu bỏ `sheet_id`); chỉ `project_manager`; ghi audit |
-| `GET /projects/{p}/drawing-map/{sheet_id}/image` | Trả ảnh riêng cho thành viên dự án; đường dẫn được resolve trong đúng thư mục `<key>` của manifest, chặn path traversal. |
-| `GET /projects/{p}/progress/summary` | Tổng hợp project-scoped trên cấu kiện đã duyệt: tổng/đã duyệt/chờ duyệt, số có phạm vi phát sinh, 4 trạng thái thi công + tỷ lệ, liên kết/xác nhận nghiệm thu + tỷ lệ; hai tỷ lệ độc lập |
-| `GET /projects/{p}/overview/latest-day` | Ngày gần nhất có sự kiện tiến độ hoặc báo cáo ngày: trả `{date, works:[{stage_name, zone, segment, component_type, status, count, codes[]}], manpower_total|null, photo_count, daily_report_exists, acceptance_today[]}`; `stage_name` gắn `t = … cm`/dải `t = a–b cm`; nếu các cọc khác t, `codes[]` kèm giá trị từng mã. Chỉ đọc bản ghi thật, nghiệm thu không suy ra từ tiến độ |
-| `GET /projects/{p}/overview/segments` | Tiến độ theo zone + segment: số cấu kiện và đã xác minh, đếm thi công hoàn thành/đang thi công/chưa bắt đầu và nghiệm thu đã xác nhận; hai tỷ lệ độc lập trên cùng mẫu số đã xác minh |
+| `POST /auth/login` | Cấp bearer token 12 giờ |
+| `POST /auth/logout` | Thu hồi token hiện tại |
+| `POST /auth/change-password` | Đổi mật khẩu người dùng hiện tại |
+| `POST /users` | Tạo người dùng (admin) |
+| `POST/GET /projects` | Tạo/liệt kê công trình được phép; `can_delete` cho admin/quản lý |
+| `PATCH/DELETE /projects/{p}` | Sửa/xóa mềm; audit; project đã xóa trả `404` |
+| `POST /projects/{p}/members` | Thêm thành viên và role |
+| `POST/GET /projects/{p}/work-items` | Danh mục công việc |
+| `PATCH /projects/{p}/work-items/{id}` | Sửa công việc; ghi audit |
+| `POST /projects/{p}/work-items/import-preview` | Preview import Excel công việc |
+| `POST /projects/{p}/work-items/import` | Ghi import đã duyệt |
+| `POST/GET /projects/{p}/organizations` | Đơn vị theo công trình |
+| `POST/GET /projects/{p}/personnel` | Nhân sự; chỉ tham chiếu đơn vị cùng công trình |
+
+## Cấu kiện, tiến độ, đợt thi công, bản đồ
+
+| Route | Ý nghĩa |
+| --- | --- |
+| `GET /projects/{p}/segments?zone=` | Phân đoạn đã nhập |
+| `GET /projects/{p}/design-groups` | Nhóm thiết kế (`id, name, drawing, group_type`) |
+| `GET /projects/{p}/components?q=&...` | Danh mục; `q` khớp mã/alias; lọc `zone`, `segment_id`, `type`, `group_id`, `scope`, `batch_id` |
+| `GET /projects/{p}/components/{id}` | Chi tiết, phạm vi, DM liên quan, `design_parameters[]`, tên bước render `t = … cm` |
+| `POST /projects/{p}/components` | Tạo thủ công; `201`; segment cùng project |
+| `POST /projects/{p}/components/import-preview` | Upload seed XLSX; preview; không ghi DB |
+| `POST /projects/{p}/components/import-commit` | Commit đã duyệt; idempotency; audit |
+| `GET/POST /projects/{p}/stage-definitions?type=` | Định nghĩa bước theo project + `pile/beam` |
+| `POST /projects/{p}/components/{id}/repair-scopes` | Đề xuất scope `NEEDS_REVIEW` |
+| `POST /projects/{p}/components/{id}/repair-scopes/{scope_id}/review` | Duyệt/từ chối scope |
+| `POST /projects/{p}/components/{id}/stages` | Gắn bước vào cấu kiện + scope |
+| `GET/POST /projects/{p}/components/{id}/progress-events` | Lịch sử/ghi tiến độ append-only |
+| `GET /projects/{p}/progress` | Tổng hợp tiến độ; lọc `q`, `zone`, `segment_id`, `type`, `group_id`, `scope`, `origin`, `stage_definition_id`, `construction_status`, `acceptance_status`, `batch_id` |
+| `POST /projects/{p}/progress/design-quantities` | Tra khối lượng thiết kế; tối đa 500 component id |
+| `POST /projects/{p}/progress/bulk-preview` | Preview ghi hàng loạt; trả matched/ambiguous/missing/warnings/`can_commit` |
+| `POST /projects/{p}/progress/bulk` | Commit hàng loạt; `reviewed: true`, `idempotency_key`; ghi event + audit |
+| `POST /projects/{p}/progress/daily-preview` | Preview nhiều công tác cùng ngày |
+| `POST /projects/{p}/progress/daily` | Ghi nhiều công tác cùng ngày trong một transaction |
+| `POST /projects/{p}/progress/batches/{id}/undo` | Void cả đợt trong ngày; `{reason}`; audit |
+| `POST /projects/{p}/progress/events/{id}/correct` | Void sự kiện cũ + tạo sự kiện mới; `{status, reason}` |
+| `GET /projects/{p}/progress/summary` | Tổng hợp project-scoped trên cấu kiện đã duyệt |
+| `GET /projects/{p}/reconciliation/issues` | Đối soát read-only; `issues[]` + `counts` |
+| `GET/POST /projects/{p}/construction-batches` | Danh sách/tạo đợt thi công; `component_count`, `primary_zone` |
+| `GET/PATCH /projects/{p}/construction-batches/{id}` | Chi tiết/sửa đợt; audit |
+| `POST /projects/{p}/construction-batches/{id}/components/preview` | Preview mã; matched/ambiguous/missing/already_in_batch |
+| `POST /projects/{p}/construction-batches/{id}/components` | Thêm cấu kiện đã chọn; audit từng cấu kiện |
+| `DELETE /projects/{p}/construction-batches/{id}/components/{component_id}?reason=` | Bỏ cấu kiện khỏi đợt |
+| `GET /projects/{p}/drawing-map` | Gộp mọi `data/storage/dap-maps/<key>/manifest.json` (bỏ `expansion`); lọc `batch_id`, `zone`, `segment`; marker trả `design_group`, `current_work`, `origin`, `position_*`, `review_count` |
+| `PUT /projects/{p}/components/{id}/map-position` | Lưu vị trí nháp; tọa độ 0..1; cọc 1 điểm, dầm ≥2 điểm |
+| `POST /projects/{p}/components/{id}/map-position/review?sheet_id=` | Duyệt vị trí; `project_manager` |
+| `GET /projects/{p}/drawing-map/{sheet_id}/image` | Ảnh sheet private; chặn path traversal |
+| `GET /projects/{p}/overview/latest-day` | Ngày gần nhất có tiến độ/báo cáo; works, manpower, photo_count, acceptance_today |
+| `GET /projects/{p}/overview/in-progress` | Cấu kiện có event mới nhất còn `IN_PROGRESS`/`BLOCKED` |
+| `GET /projects/{p}/overview/segments` | Tiến độ + nghiệm thu theo zone/segment |
 
 Mỗi giá trị trả về từ `progress/design-quantities` gồm `quantity` (số hoặc `null`), `unit`, `scope` (`COMPONENT`, `SHARED` hoặc `SUBGROUP`), `scope_label`, `drawing`, `page` và `note`. Khối lượng dùng chung cho cụm hoặc phân nhóm được tra theo phạm vi đã ghi. API yêu cầu quyền thành viên công trình và chỉ đọc số liệu thiết kế.
-| `GET /projects/{p}/reconciliation/issues` | Đối soát chỉ đọc: nghiệm thu không có thi công, thi công xong chưa nghiệm thu, thiếu nguồn, cấu kiện chưa duyệt, mã trùng/mơ hồ, BBNT xác nhận trước ngày thi công; trả `issues[]` và `counts` theo loại |
-| `GET /projects/{p}/journals/{date}/preview` | Xem trước nhật ký ngày từ báo cáo ngày, sự kiện tiến độ và BBNT đã xác nhận; trả `preview_sha256`, `snapshot_eligible`, chứng cứ đã xác nhận và mục trống; chỉ đọc, không tự điền |
-| `POST /projects/{p}/journals/{date}/snapshots` | Tạo snapshot bất biến từ đúng preview đã duyệt: `{reviewed: true, preview_sha256}`; lưu JSON + ảnh chứng cứ đã xác nhận, từ chối nếu preview đổi hoặc báo cáo ngày còn nháp |
-| `GET /projects/{p}/journals/{date}/snapshots` | Danh sách snapshot đã duyệt của ngày, kèm hash, người/giờ duyệt, số chứng cứ/BBNT và URL tải JSON |
-| `POST /projects/{p}/journals/{date}/exports` | `{snapshot_id, format: pdf\|docx\|zip}`; chỉ render từ snapshot đã duyệt, ZIP kèm ảnh chứng cứ đã lưu trong snapshot; trả `201` |
-| `GET /projects/{p}/journals/{date}/exports` | Lịch sử file nhật ký đã xuất từ snapshot |
-| `PATCH /projects/{p}/work-items/{id}` | Sửa tên/vị trí/cấu kiện/trạng thái công việc; ghi audit |
-| `POST/GET /projects/{p}/organizations` và `/personnel` | Danh sách đơn vị và nhân sự theo công trình; nhân sự chỉ tham chiếu đơn vị cùng công trình |
-| `PUT/GET /projects/{p}/daily-reports/{date}` | Bản nháp báo cáo, gồm `manpower[]`, `work_logs[]` (`work_item_id?`, `work_name?`, `location`, `component`, số lượng/trạng thái/ghi chú), `next_day_plans[]`, `notes`, `site_notes`; không còn giờ bắt đầu/kết thúc trên UI; upsert idempotent |
-| `GET/POST /projects/{p}/manpower-presets` và `PUT/DELETE /projects/{p}/manpower-presets/{id}` | Preset nhóm nhân lực theo công trình, chỉ dùng khi người dùng chọn |
-| `POST/GET /projects/{p}/photos` | Multipart upload nhiều ảnh; metadata location/component/stage và lọc `date`, `location`, `component`, `stage` |
-| `GET /projects/{p}/photos/{id}/original` | Stream file sau kiểm quyền |
-| `DELETE /projects/{p}/photos/{id}` | Xóa ảnh cùng công trình với quyền biên tập, trả `204`. Ảnh đang làm bằng chứng trả `409`. |
-| `POST /projects/{p}/daily-reports/{date}/exports` | `format=zalo|pdf|docx|zip`, bản chụp nội dung và history |
-| `GET /projects/{p}/documents` | Liệt kê hồ sơ nguồn đã có, chỉ đọc (không còn upload/ingest) |
-| `GET /projects/{p}/documents/{id}/pages/{n}` | Metadata trang và URL ảnh render, yêu cầu quyền; không trả text OCR |
-| `GET /projects/{p}/documents/{id}/versions` | Danh sách version, is_current/is_effective, change_note |
-| `POST /projects/{p}/documents/{id}/effective` | Người quản lý hồ sơ xác nhận revision hiệu lực; lưu effective_at/by |
-| `POST /projects/{p}/ai/chat` | Trả `{answer,citations[],confidence}`; chỉ từ dữ kiện AI trích xuất và database cấu kiện; thiếu citation/nguồn dùng câu từ chối chuẩn; `scope=effective\|history` |
-| `POST /projects/{p}/ai/progress-parse` | Chỉ đọc: `{text, default_date?, batch_id?}` -> ngày thi công, dòng công tác, mã cấu kiện, công đoạn ứng viên, câu hỏi cần xác nhận và `batch_id` echo; thành viên đợt thi công không bị hỏi ngoài phạm vi; không ghi DB |
-| `GET /projects/{p}/ai/question-suggestions` | Gợi ý 1-5 câu hỏi từ cấu kiện/công đoạn/tiến độ thật của công trình |
-| `POST/GET /projects/{p}/ai/conversations` | Tạo mới/liệt kê; tìm kiếm `q` |
-| `PATCH/DELETE /projects/{p}/ai/conversations/{id}` | Đổi tên/xóa hội thoại |
-| `POST/GET /projects/{p}/documents/{id}/extractions` | Lưu/liệt kê dữ liệu AI trích xuất theo trang (đề xuất) |
-| `GET/PATCH /projects/{p}/page-extractions/{id}` | Đọc hoặc xác nhận/từ chối một extraction; không ghi đè bản đã xác nhận |
-| `POST/GET /projects/{p}/acceptance-requests` | PYC nháp và lịch sử, liên kết work item/daily report cùng công trình |
-| `DELETE /projects/{p}/acceptance-requests/{id}` | Xoá PYC; PYC có BBNT yêu cầu `?force=true` và xoá kèm BBNT/lịch sử export |
-| `GET/PUT /projects/{p}/acceptance-numbering` | Cấu hình prefix/start/width/reset policy cho PYC/BBNT |
-| `POST /projects/{p}/acceptance-requests/{id}/preview` | Preview dữ liệu điền template trước khi xuất |
-| `GET /projects/{p}/acceptance-requests/{id}/preview-image` | Ảnh PNG của trang PYC đã điền, không tạo lịch sử export |
-| `POST/GET /projects/{p}/acceptance-records` | BBNT nháp và checklist |
-| `POST /projects/{p}/acceptance-records/{id}/revisions` | Tạo revision BBNT mới, giữ bản cũ |
+
+## Báo cáo ngày, ảnh, nhật ký
+
+| Route | Ý nghĩa |
+| --- | --- |
+| `GET/PUT /projects/{p}/daily-reports/{date}` | Bản nháp báo cáo ngày; manpower/work_logs/next_day_plans/notes; upsert idempotent |
+| `GET/POST /projects/{p}/manpower-presets` | Preset nhóm nhân lực |
+| `PUT/DELETE /projects/{p}/manpower-presets/{id}` | Sửa/xóa preset |
+| `POST/GET /projects/{p}/photos` | Upload/liệt kê ảnh; metadata location/component/stage; `component_ids`, `work_item_ids`; lọc `date`, `location`, `component`, `component_id`, `stage`, `work_item_id`, `report_id`, `category` |
+| `GET /projects/{p}/photos/{id}/original` | Stream ảnh sau kiểm quyền |
+| `PATCH /projects/{p}/photos/{id}` | Sửa metadata/caption/liên kết |
+| `DELETE /projects/{p}/photos/{id}` | Xóa ảnh; `409` nếu đang là bằng chứng |
+| `POST/GET /projects/{p}/daily-reports/{date}/exports` | Export `zalo/pdf/docx/zip` |
+| `GET /projects/{p}/generated-documents/{doc_id}/download` | Tải file đã sinh |
+| `GET /projects/{p}/journals/{date}/preview` | Preview nhật ký; `preview_sha256`, `snapshot_eligible` |
+| `POST/GET /projects/{p}/journals/{date}/snapshots` | Tạo/liệt kê snapshot bất biến |
+| `POST/GET /projects/{p}/journals/{date}/exports` | Export từ snapshot đã duyệt |
+
+## Engineering AI
+
+| Route | Ý nghĩa |
+| --- | --- |
+| `GET /projects/{p}/documents` | Danh sách hồ sơ nguồn; chỉ đọc, không upload/ingest |
+| `GET /projects/{p}/documents/{id}` | Chi tiết hồ sơ + pages |
+| `POST /projects/{p}/documents/{id}/effective` | Xác nhận revision hiệu lực; lưu effective_at/by |
+| `GET /projects/{p}/documents/{id}/versions` | Danh sách version, is_current/is_effective |
+| `GET /projects/{p}/documents/{id}/original` | Tải file gốc private |
+| `GET /projects/{p}/documents/{id}/pages/{n}` | Metadata trang, `text`/`ocr_text` legacy nếu có và URL render; không có pipeline OCR mới |
+| `GET /projects/{p}/documents/{id}/pages/{n}/render` | Ảnh render trang |
+| `POST /projects/{p}/documents/{id}/pages/{n}/extractions` | Lưu dữ liệu AI trích xuất theo trang |
+| `GET /projects/{p}/documents/{id}/extractions` | Liệt kê extraction; lọc `page`, `status` |
+| `GET/PATCH /projects/{p}/page-extractions/{id}` | Đọc/duyệt hoặc từ chối extraction |
+| `POST /projects/{p}/ai/chat` | Chat + citation; `scope=effective/history`; thiếu nguồn trả câu từ chối |
+| `POST /projects/{p}/ai/progress-parse` | Parser Zalo read-only; không gọi LLM, không ghi DB |
+| `GET /projects/{p}/ai/question-suggestions` | Gợi ý 1-5 câu hỏi từ dữ liệu thật |
+| `GET/POST /projects/{p}/ai/conversations` | Liệt kê/tạo; `q` chỉ lọc tiêu đề |
+| `GET/PATCH/DELETE /projects/{p}/ai/conversations/{id}` | Đọc/đổi tên/xóa hội thoại |
+
+## Acceptance
+
+| Route | Ý nghĩa |
+| --- | --- |
+| `GET /projects/{p}/acceptance-numbering` | Cấu hình numbering PYC/BBNT |
+| `PUT /projects/{p}/acceptance-numbering/{kind}` | Sửa numbering `pyc` hoặc `bbnt` |
+| `GET/POST /projects/{p}/acceptance-participants` | Danh mục người tham gia |
+| `GET/PATCH/DELETE /projects/{p}/acceptance-participants/{id}` | Chi tiết/sửa/xóa |
+| `POST/GET /projects/{p}/acceptance-requests` | Tạo/liệt kê PYC |
+| `GET /projects/{p}/acceptance/pending` | Hàng chờ nghiệm thu |
+| `POST /projects/{p}/acceptance/requests/from-components` | Tạo PYC nháp từ cấu kiện |
+| `GET/PATCH/DELETE /projects/{p}/acceptance-requests/{id}` | Chi tiết/sửa/xóa PYC |
+| `GET /projects/{p}/acceptance-requests/{id}/daily-report` | Báo cáo ngày liên kết |
+| `GET/PUT /projects/{p}/acceptance-requests/{id}/component-links` | Liên kết cấu kiện |
+| `POST/GET /projects/{p}/acceptance-requests/{id}/exports` | Export PYC |
+| `GET /projects/{p}/acceptance-requests/{id}/preview` | Preview template PYC |
+| `GET /projects/{p}/acceptance-requests/{id}/preview-image` | Ảnh preview PYC |
+| `POST/GET /projects/{p}/acceptance-records` | Tạo/liệt kê BBNT |
+| `GET/PATCH /projects/{p}/acceptance-records/{id}` | Chi tiết/sửa BBNT |
+| `GET/PUT /projects/{p}/acceptance-records/{id}/component-links` | Liên kết cấu kiện |
+| `GET /projects/{p}/acceptance-records/{id}/preview` | Preview BBNT |
+| `POST /projects/{p}/acceptance-records/{id}/revisions` | Tạo revision BBNT mới |
+| `POST /projects/{p}/acceptance-records/{id}/confirm` | Xác nhận BBNT; audit |
+| `POST/GET /projects/{p}/acceptance-records/{id}/exports` | Export BBNT |
+| `GET /projects/{p}/acceptance-exports` | Lịch sử export |
+| `GET /projects/{p}/acceptance-exports/{id}/download` | Tải export |
 | `GET /projects/{p}/work-items/{id}/acceptance-history` | Lịch sử PYC/BBNT theo work item |
-| `POST /projects/{p}/acceptance-records/{id}/confirm` | Người có quyền xác nhận, ghi audit |
-| `POST /projects/{p}/acceptance-records/{id}/exports` | Excel sao chép template PYC/BBNT; PDF PYC chỉ giữ trang PYC, PDF BBNT chỉ giữ trang BBNT; tên tải PYC dạng `YC-<số phiếu>.pdf` |
-| `GET/POST /projects/{p}/acceptance-participants` | Danh mục người tham gia theo vai trò; `PUT/DELETE .../{id}` |
+
+Import lịch sử PYC/BBNT từ workbook là script `scripts/import_acceptance_workbook.py` (preview mặc định, `--commit`, idempotent, không sửa workbook), không phải route HTTP. Script chỉ xác nhận khi workbook có số/ngày hợp lệ và ghi audit.
 
 ### `POST /projects/{p}/ai/progress-parse` — ví dụ đầy đủ (tin nhắn 22/11)
 
@@ -970,7 +1018,7 @@ Response (read-only; IDs lấy từ dữ liệu seed của test golden):
 }
 ```
 
-`DailyReport.status`: `draft|reviewed`; `AcceptanceChecklist.state`: `yes|no|unconfirmed`; `AcceptanceRecord.result`: `approved|conditional|rejected|null`. `null` là chưa có quyết định. `PhotoEvidence` chỉ dùng ảnh với caption/category đã được người dùng xác nhận. Citation gồm `document_id`, `document_name`, `version`, `page_number`, `drawing_number?`, `revision?`, `quote`, `url`, `ocr_confidence?`.
+`DailyReport.status`: `draft|reviewed`; `AcceptanceChecklist.state`: `yes|no|unconfirmed`; `AcceptanceRecord.result`: `approved|conditional|rejected|null`. `null` là chưa có quyết định. Ảnh chỉ dùng caption/category đã được người dùng xác nhận; không có AI gợi ý caption. Citation gồm `document_id`, `document_name`, `version`, `page_number`, `drawing_number?`, `revision?`, `quote`, `url`; `ocr_confidence?` chỉ còn là trường legacy từ dữ liệu cũ, không có pipeline OCR hiện tại.
 
 Import cấu kiện hiện chỉ hỗ trợ cấu trúc workbook seed. `reviewed` là xác nhận của người gọi API; commit chỉ chấp nhận dữ liệu khớp workbook gửi lại. Giao diện cho phép xem trước, lọc và duyệt, nhưng chưa sửa từng candidate: cần sửa workbook và xem lại. Import chỉ bổ sung và không xóa cấu kiện thiếu trong file. Không tạo tiến độ hay nghiệm thu từ ngày có trong seed.
 
@@ -988,4 +1036,4 @@ Bulk progress: mỗi dòng preview trả `stage_options` (các bước cùng đ�
 
 Tổng hợp tiến độ của site trả `construction_status` (`NOT_STARTED|IN_PROGRESS|COMPLETED|BLOCKED`) và `acceptance_status` riêng. `acceptance_status` chỉ lấy từ liên kết tường minh `component_acceptance_links`: không có liên kết `NOT_LINKED`; có PYC/BBNT nhưng chưa xác nhận `PENDING`; BBNT đã xác nhận theo `result` thành `APPROVED|CONDITIONAL|REJECTED|CONFIRMED`. `acceptance_count` là số BBNT đã xác nhận. Không suy ra nghiệm thu từ tiến độ. Bulk progress bắt buộc `reviewed: true`, giữ nguyên đúng `component_ids[]` đã xem trước và một `stage_definition_id`; cấu kiện chưa gắn bước bị từ chối, không tự gắn bước. `component_progress_batches` chỉ lưu idempotency/result của bulk; event vẫn append-only trong `component_progress_events`. Nhật ký ngày: preview trả `blank_sections`, `warnings`, `preview_sha256`, `snapshot_eligible`, chứng cứ ảnh đã xác nhận và chỉ lấy BBNT `confirmed` đúng ngày xác nhận; không tạo sự kiện thi công/nghiệm thu giả. Snapshot yêu cầu `reviewed: true` + đúng `preview_sha256`; báo cáo ngày nháp chặn snapshot (`409`). Snapshot lưu JSON bất biến cùng bản sao ảnh chứng cứ đã xác nhận; tham chiếu ảnh chưa xác nhận/không phân giải bị bỏ và ghi cảnh báo, không tự liên kết. Export chỉ đọc snapshot đã duyệt, kiểm hash file/tham chiếu; PDF/DOCX nêu danh mục chứng cứ, ZIP kèm bytes; không đọc lại dữ liệu live và không tạo nghiệm thu.
 
-Checklist `evidence_refs[]` chấp nhận ID ảnh cùng công trình (hoặc `photo:<id>`), `document:<id>`, `page:<page_id>` hay `page:<document_id>:<page_number>`. Ref không phân giải được hoặc trỏ sang công trình khác bị từ chối; trạng thái checklist chỉ do người dùng nhập.
+Checklist BBNT `evidence_refs[]` chấp nhận ID ảnh cùng công trình (hoặc `photo:<id>`), `document:<id>`, `page:<page_id>` hay `page:<document_id>:<page_number>`. Ref không phân giải được hoặc trỏ sang công trình khác bị từ chối; trạng thái checklist chỉ do người dùng nhập. Không còn checklist tài liệu độc lập (bỏ 23-24/11/2026).
