@@ -397,6 +397,7 @@ def drawing_map(
         )
     current_work: dict[str, tuple[datetime, str, str, str]] = {}
     latest_stage: dict[str, tuple[datetime, str, str, str, str]] = {}
+    next_stage: dict[str, tuple[str, str]] = {}
     if component_meta:
         stage_events = db.execute(
             select(ComponentStage.component_id, ComponentStage.id, ComponentStage.stage_definition_id, StageDefinition.name,
@@ -411,6 +412,18 @@ def drawing_map(
         for component_id, stage_id, definition_id, name, status, created_at, event_id in stage_events:
             latest_by_stage[(component_id, stage_id)] = (definition_id, name, status, created_at, event_id)
         t_values = load_t_values(db, list(component_meta))
+        stage_rows = db.execute(
+            select(ComponentStage.component_id, StageDefinition.name)
+            .join(StageDefinition, StageDefinition.id == ComponentStage.stage_definition_id)
+            .where(ComponentStage.component_id.in_(list(component_meta)))
+            .order_by(StageDefinition.position, StageDefinition.code)
+        ).all()
+        for component_id, name in stage_rows:
+            if component_id not in next_stage:
+                next_stage[component_id] = (
+                    display_stage_name(name, [t_values.get(component_id)]),
+                    "NOT_STARTED",
+                )
         for (component_id, _), (definition_id, name, status, created_at, event_id) in latest_by_stage.items():
             display_name = display_stage_name(name, [t_values.get(component_id)])
             current = current_work.get(component_id)
@@ -451,6 +464,12 @@ def drawing_map(
         location_review: bool = False,
     ) -> dict:
         event = latest.get(component.id)
+        work_stage = latest_stage.get(component.id)
+        work_name, work_status = (
+            (work_stage[2], work_stage[4])
+            if work_stage
+            else next_stage.get(component.id, (None, "NOT_STARTED"))
+        )
         return {
             "code": component.canonical_code,
             "type": component.type,
@@ -462,6 +481,8 @@ def drawing_map(
             "design_group": group_name,
             "current_work": current_work.get(component.id, (None, None, None))[2],
             "current_work_definition_id": current_work.get(component.id, (None, None, None, None))[3],
+            "current_work_name": work_name,
+            "current_work_status": work_status,
             "current_stage_name": latest_stage.get(component.id, (None, None, None))[2],
             "current_stage_definition_id": latest_stage.get(component.id, (None, None, None, None))[3],
             "last_event_date": event.event_date.isoformat() if event else None,

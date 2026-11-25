@@ -10,8 +10,11 @@ import {
   countMarkers,
   filterDrawingSheets,
   pickPrimarySheet,
+  pinchView,
   pinchZoom,
   sanitizePoints,
+  sheetToClient,
+  zoomAroundPoint,
   fitViewToBounds,
   markerBounds,
   type DrawingSheet,
@@ -311,5 +314,46 @@ describe("placement point mapping", () => {
         view,
       ),
     ).toBeNull();
+  });
+});
+
+describe("gesture view helpers", () => {
+  const rect = { left: 0, top: 0, width: 400, height: 300 };
+  const imageBox = { left: 0, top: 0, width: 400, height: 300 };
+
+  it("round-trips normalized points through the forward transform", () => {
+    const view = { zoom: 2, pan: { x: 31, y: -18 } };
+    const client = sheetToClient([0.25, 0.75], rect, imageBox, view);
+    const point = clientToSheetPoint(
+      { x: client[0], y: client[1] },
+      rect,
+      imageBox,
+      view,
+    );
+    expect(point?.[0]).toBeCloseTo(0.25);
+    expect(point?.[1]).toBeCloseTo(0.75);
+  });
+
+  it("zooms around the tapped point without moving it", () => {
+    const start = { zoom: 1, pan: { x: 0, y: 0 } };
+    const tap = { x: 280, y: 90 };
+    const before = clientToSheetPoint(tap, rect, imageBox, start);
+    const next = zoomAroundPoint(start, tap, 2, rect);
+    const after = clientToSheetPoint(tap, rect, imageBox, next);
+    expect(after?.[0]).toBeCloseTo(before?.[0] ?? 0);
+    expect(after?.[1]).toBeCloseTo(before?.[1] ?? 0);
+    expect(next.zoom).toBe(2);
+  });
+
+  it("keeps the sheet point under the pinch midpoint", () => {
+    const start = { zoom: 1, pan: { x: 0, y: 0 } };
+    const startMid = { x: 200, y: 150 };
+    const currentMid = { x: 230, y: 165 };
+    const before = clientToSheetPoint(startMid, rect, imageBox, start);
+    const next = pinchView(start, startMid, currentMid, 2, rect);
+    const after = sheetToClient(before!, rect, imageBox, next);
+    expect(after[0]).toBeCloseTo(currentMid.x);
+    expect(after[1]).toBeCloseTo(currentMid.y);
+    expect(next.zoom).toBe(2);
   });
 });

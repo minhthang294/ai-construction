@@ -1,22 +1,29 @@
 import { describe, expect, it } from "vitest";
 import {
+  abbreviateWorkName,
   buildMapTargets,
   contentAspectRatio,
   errorMessage,
   formatShortMapDate,
   hasActiveFilters,
+  hitTestMarkers,
   isPending,
+  labelModeForZoom,
+  layoutMarkerLabels,
   markerAriaLabel,
   markerDashArray,
   markerLabel,
   markerStrokeColor,
   nextPlacementPoints,
   placementSaveError,
+  pointToSegmentDistance,
   recordOriginLabel,
   shortSha,
   statusChipClass,
   verificationLabel,
+  type MapTarget,
   type Placement,
+  type ScreenTarget,
 } from "./drawingMapPanel";
 import { ApiError } from "./api";
 import { EMPTY_DRAWING_FILTERS, type DrawingMarker } from "./drawingMap";
@@ -237,5 +244,118 @@ describe("drawingMapPanel helpers", () => {
         1.5,
       ),
     ).toBe(3);
+  });
+});
+
+describe("work labels and hit testing", () => {
+  function mapTarget(
+    overrides: Partial<DrawingMarker> = {},
+    points: Array<[number, number]> = [[0.5, 0.5]],
+    x = points[0][0],
+    y = points[0][1],
+  ): MapTarget {
+    return { marker: marker(overrides), points, x, y };
+  }
+
+  it("abbreviates common work names and falls back to three words", () => {
+    expect(
+      abbreviateWorkName("Đục bê tông om vỡ dày trung bình t = 3 cm"),
+    ).toBe("Đục BT");
+    expect(abbreviateWorkName("Tẩy gỉ")).toBe("Tẩy gỉ");
+    expect(abbreviateWorkName("Vệ sinh")).toBe("Vệ sinh");
+    expect(abbreviateWorkName("Epoxy")).toBe("Epoxy");
+    expect(abbreviateWorkName("Cát nhám")).toBe("Cát nhám");
+    expect(abbreviateWorkName("Ván khuôn")).toBe("Ván khuôn");
+    expect(abbreviateWorkName("Vữa KCN")).toBe("Vữa KCN");
+    expect(abbreviateWorkName("Sợi TT L1")).toBe("Sợi TT L1");
+    expect(abbreviateWorkName("Sơn UV")).toBe("Sơn UV");
+    expect(abbreviateWorkName("Đổ thải")).toBe("Đổ thải");
+    expect(abbreviateWorkName("Gia công cốt thép chờ")).toBe(
+      "Gia công cốt",
+    );
+    expect(abbreviateWorkName("")).toBeNull();
+  });
+
+  it("switches label density by zoom", () => {
+    expect(labelModeForZoom(1)).toBe("none");
+    expect(labelModeForZoom(1.04)).toBe("none");
+    expect(labelModeForZoom(1.05)).toBe("code");
+    expect(labelModeForZoom(1.29)).toBe("code");
+    expect(labelModeForZoom(1.3)).toBe("full");
+  });
+
+  it("shows short work under the code and skips colliding labels", () => {
+    const first = mapTarget(
+      {
+        code: "A1",
+        current_work_name: "Đục BT om vỡ t=3cm",
+        current_work_status: "IN_PROGRESS",
+      },
+      [[0.5, 0.5]],
+    );
+    const second = mapTarget(
+      { code: "A2", current_work_name: "Vệ sinh" },
+      [[0.5, 0.5]],
+    );
+    const labels = layoutMarkerLabels(
+      [first, second],
+      "full",
+      1.3,
+      { width: 1000, height: 1000 },
+    );
+    expect(labels).toHaveLength(1);
+    expect(labels[0].text).toBe("A1 · Đục BT");
+    expect(labels[0].status).toBe("IN_PROGRESS");
+    const codeLabels = layoutMarkerLabels(
+      [second],
+      "code",
+      1.1,
+      { width: 1000, height: 1000 },
+    );
+    expect(codeLabels[0].text).toBe("A2");
+  });
+
+  it("measures point-to-segment distance", () => {
+    expect(
+      pointToSegmentDistance([5, 5], [0, 0], [10, 0]),
+    ).toBeCloseTo(5);
+    expect(
+      pointToSegmentDistance([-2, 0], [0, 0], [10, 0]),
+    ).toBeCloseTo(2);
+    expect(
+      pointToSegmentDistance([1, 1], [2, 2], [2, 2]),
+    ).toBeCloseTo(Math.SQRT2);
+  });
+
+  it("prefers a beam when the tap is closer to its line than a pile center", () => {
+    const pile: ScreenTarget = {
+      marker: marker({ code: "P1", type: "pile" }),
+      points: [[100, 100]],
+    };
+    const beam: ScreenTarget = {
+      marker: marker({ code: "D1", type: "beam" }),
+      points: [
+        [0, 120],
+        [200, 120],
+      ],
+    };
+    const hits = hitTestMarkers([pile, beam], [100, 118]);
+    expect(hits.map((hit) => hit.marker.code)).toEqual(["D1"]);
+    expect(hitTestMarkers([pile, beam], [103, 101])[0].marker.code).toBe("P1");
+  });
+
+  it("returns both candidates when their distances are nearly equal", () => {
+    const left: ScreenTarget = {
+      marker: marker({ code: "P1", type: "pile" }),
+      points: [[100, 100]],
+    };
+    const right: ScreenTarget = {
+      marker: marker({ code: "P2", type: "pile" }),
+      points: [[102, 100]],
+    };
+    expect(
+      hitTestMarkers([left, right], [101, 100]).map((hit) => hit.marker.code),
+    ).toEqual(["P1", "P2"]);
+    expect(hitTestMarkers([left, right], [300, 300])).toEqual([]);
   });
 });

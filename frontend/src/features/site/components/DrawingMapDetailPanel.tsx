@@ -64,7 +64,8 @@ export function DrawingMapCompactDetail({
       <dl className="mt-2 grid grid-cols-[7rem_minmax(0,1fr)] gap-x-2 gap-y-1 text-sm">
         <dt className="text-slate-600">Công đoạn</dt>
         <dd className="break-words text-slate-900">
-          {detailMarker.current_stage_name ||
+          {detailMarker.current_work_name ||
+            detailMarker.current_stage_name ||
             detailMarker.current_work ||
             "Chưa có công đoạn"}
         </dd>

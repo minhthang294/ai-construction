@@ -179,8 +179,45 @@ def test_markers_expose_terminal_stage_last_event_and_acceptance(monkeypatch):
         result = drawing.drawing_map("p", db)
     marker = result["sheets"][0]["markers"][0]
     assert marker["current_stage_name"].endswith("t = 3 cm")
+    assert marker["current_work_name"].endswith("t = 3 cm")
+    assert marker["current_work_status"] == "IN_PROGRESS"
     assert marker["last_event_date"] == "2026-11-20"
     assert marker["accepted"] is True
+
+
+def test_marker_uses_next_not_started_stage_when_no_events(monkeypatch):
+    monkeypatch.setattr(drawing, "require_project_member", lambda project: None)
+    manifest = drawing.Manifest.model_validate({
+        "project_id": "p",
+        "sheets": [{
+            "id": "sheet", "title": "Test", "drawing": "TK-32", "page": 1,
+            "image": "sheet.jpg",
+            "markers": [{"code": "A1", "type": "pile", "points": [[0.5, 0.5]]}],
+        }],
+    })
+    monkeypatch.setattr(drawing, "_manifest_entries", lambda project: [("pd2", manifest)])
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        db.add(StructureZone(id="z", project_id="p", name="Cầu chính", name_key="cau chinh"))
+        db.add(Segment(id="s", zone_id="z", number=2, source_code="2"))
+        db.add(StructuralComponent(id="c", project_id="p", segment_id="s", type="pile",
+                                   raw_code="A1", canonical_code="A1",
+                                   verification="VERIFIED", created_by="u"))
+        db.add(StageDefinition(id="late", project_id="p", component_type="pile",
+                               code="VC", name="Vệ sinh", position=2))
+        db.add(StageDefinition(id="early", project_id="p", component_type="pile",
+                               code="EP", name="Epoxy", position=1))
+        db.add(ComponentStage(id="st2", component_id="c", stage_definition_id="late",
+                              repair_scope_id="scope", created_by="u"))
+        db.add(ComponentStage(id="st1", component_id="c", stage_definition_id="early",
+                              repair_scope_id="scope", created_by="u"))
+        db.commit()
+        result = drawing.drawing_map("p", db)
+    marker = result["sheets"][0]["markers"][0]
+    assert marker["current_stage_name"] is None
+    assert marker["current_work_name"] == "Epoxy"
+    assert marker["current_work_status"] == "NOT_STARTED"
 
 
 def test_multi_manifest_filters_by_batch_zone_and_segment(tmp_path, monkeypatch):

@@ -1509,3 +1509,43 @@ npm run build   # OK; main 312,70 kB; DrawingMapPanel chunk 47,96 kB
 Test backend mới: header immutable/ETag/Last-Modified, 304 theo `If-None-Match`, derivative JPEG/WebP tạo và tái sử dụng (1 lần generate), `full=1` trả gốc, version đổi khi mtime đổi và `image_url` đổi theo, dọn derivative cũ. Test frontend: key versioned, ghi/đọc blob qua memory + Cache Storage, chỉ giữ version mới nhất, bỏ qua network khi blob đã cache, clear khi logout.
 
 **Chưa kiểm**: chưa có browser/E2E đo thời gian mở lại bản đồ hoặc kiểm tra WebP thực tế trên thiết bị; chưa đo dung lượng các sheet còn lại (chỉ pd2 theo yêu cầu). File derivative sẽ nằm trong `.cache` cạnh ảnh gốc trên máy chủ sau lần request đầu.
+
+## Mặt bằng: gesture mượt, hit-test và nhãn công việc - 2026-11-25
+
+Phạm vi: `frontend/src/features/site/*`, `frontend/src/app/*` (không cần sửa), `backend/app/core/drawing_map_router.py` (chỉ thêm field đọc), test, báo cáo. Không migration, không commit/stash/reset/push, không sửa dữ liệu `data/storage/dap-maps`.
+
+### Gesture
+
+- Một wrapper duy nhất giữ ảnh + SVG marker + nhãn + điểm đặt; transform dùng `translate3d(...) scale(...)`, `will-change: transform`. Pointer move chỉ cập nhật qua `requestAnimationFrame`, ghi trực tiếp `style.transform` và `viewRef`; React state chỉ commit khi gesture kết thúc (hoặc nút zoom/wheel).
+- Pinch neo theo trung điểm hai ngón (`pinchView`): zoom + pan hai ngón trong cùng một transform. Pan thả tay có quán tính giảm dần, dừng ở biên ảnh. Double-tap zoom 2× quanh điểm chạm, nếu đang ở zoom tối đa thì về 1×. `touch-action: none` giữ nguyên trên canvas.
+- Bỏ hàng trăm nút DOM trong suốt; marker/label nằm trong một lớp SVG + lớp nhãn, nên vẫn dính vào ảnh khi pan/pinch.
+
+### Hit-test
+
+- Chạm: đổi toạ độ màn hình -> px, tính khoảng cách tới từng điểm cọc (sai số 22 px) và từng đoạn polyline dầm (14 px). Chọn hình gần nhất; hoà thì ưu tiên dầm.
+- Nếu nhiều ứng viên trong 4 px của ứng viên gần nhất, hiện menu nhỏ “Chọn cấu kiện” liệt kê mã thay vì đoán. Marker không thuộc selection bị bỏ khỏi hit-test.
+- Marker SVG vẫn có `role="button"`/`tabIndex` và Enter/Space cho bàn phím.
+
+### Nhãn công việc
+
+- Backend thêm `current_work_name` + `current_work_status`: lấy stage của event không void mới nhất; nếu chưa có event, lấy stage chưa làm đầu tiên theo `position` (`NOT_STARTED`). `current_stage_name` cũ giữ nguyên.
+- Nhãn dưới cọc / giữa dầm: `mã · tên viết tắt`. Helper `abbreviateWorkName` map `Đục BT`, `Tẩy gỉ`, `Vệ sinh`, `Epoxy`, `Cát nhám`, `Ván khuôn`, `Vữa KCN`, `Sợi TT L1`, `Sơn UV`, `Đổ thải`; fallback 3 từ đầu.
+- Màu theo `current_work_status`: xám/amber/lục/đỏ; marker đã nghiệm thu vẫn có viền nghiệm thu. Text có halo trắng, không bắt pointer.
+- Mật độ: đầy đủ khi zoom ≥1.3, chỉ mã khi ≥1.05, ẩn dưới 1.05; collision skip đơn giản theo hình chữ nhật screen px. Legend compact đổi sang “Chưa làm / Đang làm / Hoàn thành / Tạm dừng” và ghi rõ nhãn theo công đoạn hiện tại.
+
+### Kiểm tra
+
+```bash
+cd backend
+$env:DATABASE_URL="sqlite:///C:/Users/Thang Minh Pham/AppData/Local/Temp/opencode/full-test-gestures.db"
+..\.venv\Scripts\python.exe -m pytest -q
+# 403 passed, 6 skipped
+
+cd ../frontend
+npm test        # 41 files, 306 tests passed
+npm run build   # OK; DrawingMapPanel chunk 55,27 kB
+```
+
+Test mới: khoảng cách điểm-đoạn, hit-test gần cọc/dầm, ưu tiên dầm, trả nhiều ứng viên khi gần nhau; viết tắt 10 công đoạn + fallback; ngưỡng mật độ nhãn và collision; round-trip toạ độ, zoom quanh điểm chạm, pinch giữ trung điểm; backend fallback stage chưa có event.
+
+**Chưa kiểm**: chưa đo 60 fps trên điện thoại thật với 500 marker; chưa có browser/E2E cho double-tap, quán tính và menu chọn. Nhãn vẫn scale theo wrapper trong lúc gesture, chỉ đổi mật độ sau khi thả tay.

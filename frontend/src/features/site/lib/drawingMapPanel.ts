@@ -193,6 +193,214 @@ export function nextPlacementPoints(
   return [...placement.points, point];
 }
 
+const WORK_ALIASES: Array<[RegExp, string]> = [
+  [/đục\s*(bt|bê\s*tông)/i, "Đục BT"],
+  [/tẩy\s*gỉ/i, "Tẩy gỉ"],
+  [/vệ\s*sinh/i, "Vệ sinh"],
+  [/epoxy/i, "Epoxy"],
+  [/cát\s*nhám/i, "Cát nhám"],
+  [/ván\s*khuôn/i, "Ván khuôn"],
+  [/vữa\s*kcn/i, "Vữa KCN"],
+  [/sợi\s*tt/i, "Sợi TT L1"],
+  [/sơn\s*uv/i, "Sơn UV"],
+  [/đổ\s*thải/i, "Đổ thải"],
+];
+
+/** Short Vietnamese work label; fallback is the first three meaningful words. */
+export function abbreviateWorkName(value: string | null | undefined): string | null {
+  const normalized = (value ?? "").replace(/\s+/g, " ").trim();
+  if (!normalized) return null;
+  for (const [pattern, label] of WORK_ALIASES) {
+    if (pattern.test(normalized)) return label;
+  }
+  const words = normalized
+    .split(" ")
+    .filter((word) => !/^t\s*=/i.test(word))
+    .filter(Boolean);
+  return words.length ? words.slice(0, 3).join(" ") : null;
+}
+
+export type LabelMode = "none" | "code" | "full";
+
+/** Full labels at close zoom, codes at medium zoom, nothing when zoomed out. */
+export function labelModeForZoom(zoom: number): LabelMode {
+  if (zoom >= 1.3) return "full";
+  if (zoom >= 1.05) return "code";
+  return "none";
+}
+
+export type VisibleLabel = {
+  target: MapTarget;
+  text: string;
+  fontPx: number;
+  status: string;
+};
+
+type LabelRect = { left: number; top: number; right: number; bottom: number };
+
+function labelsOverlap(a: LabelRect, b: LabelRect, gap = 2): boolean {
+  return !(
+    a.right + gap < b.left ||
+    b.right + gap < a.left ||
+    a.bottom + gap < b.top ||
+    b.bottom + gap < a.top
+  );
+}
+
+/**
+ * Greedy screen-space collision skip. Positions are screen px relative to the
+ * image; pan is common to all labels so it cannot change overlaps.
+ */
+export function layoutMarkerLabels(
+  targets: ReadonlyArray<MapTarget>,
+  mode: LabelMode,
+  zoom: number,
+  imageBox: { width: number; height: number },
+): VisibleLabel[] {
+  if (
+    mode === "none" ||
+    !Number.isFinite(imageBox.width) ||
+    !Number.isFinite(imageBox.height) ||
+    imageBox.width <= 0 ||
+    imageBox.height <= 0
+  ) {
+    return [];
+  }
+  const fontPx = mode === "full" ? 12 : 11;
+  const placed: LabelRect[] = [];
+  const visible: VisibleLabel[] = [];
+  for (const target of targets) {
+    const short = abbreviateWorkName(
+      target.marker.current_work_name ??
+        target.marker.current_work ??
+        target.marker.current_stage_name,
+    );
+    const text =
+      mode === "full" && short
+        ? `${target.marker.code} · ${short}`
+        : target.marker.code;
+    const width = Math.max(24, text.length * fontPx * 0.58);
+    const height = fontPx + 4;
+    const centerX = target.x * imageBox.width * zoom;
+    const top = target.y * imageBox.height * zoom + 8;
+    const rect = {
+      left: centerX - width / 2,
+      top,
+      right: centerX + width / 2,
+      bottom: top + height,
+    };
+    if (placed.some((existing) => labelsOverlap(existing, rect))) continue;
+    placed.push(rect);
+    visible.push({
+      target,
+      text,
+      fontPx,
+      status:
+        target.marker.current_work_status ??
+        target.marker.construction_status,
+    });
+  }
+  return visible;
+}
+
+export type ScreenTarget = {
+  marker: DrawingMarker;
+  points: Array<[number, number]>;
+};
+
+export type MarkerHit = {
+  marker: DrawingMarker;
+  distance: number;
+};
+
+export const PILE_HIT_PX = 22;
+export const BEAM_HIT_PX = 14;
+export const HIT_AMBIGUITY_PX = 4;
+
+export function pointToSegmentDistance(
+  point: [number, number],
+  start: [number, number],
+  end: [number, number],
+): number {
+  const dx = end[0] - start[0];
+  const dy = end[1] - start[1];
+  if (dx === 0 && dy === 0) {
+    return Math.hypot(point[0] - start[0], point[1] - start[1]);
+  }
+  const t = Math.max(
+    0,
+    Math.min(
+      1,
+      ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) /
+        (dx * dx + dy * dy),
+    ),
+  );
+  return Math.hypot(
+    point[0] - (start[0] + t * dx),
+    point[1] - (start[1] + t * dy),
+  );
+}
+
+function distanceToMarker(
+  point: [number, number],
+  target: ScreenTarget,
+): number {
+  if (target.points.length <= 1) {
+    const only = target.points[0];
+    return only
+      ? Math.hypot(point[0] - only[0], point[1] - only[1])
+      : Number.POSITIVE_INFINITY;
+  }
+  if (target.marker.type === "pile") {
+    return Math.min(
+      ...target.points.map(([x, y]) =>
+        Math.hypot(point[0] - x, point[1] - y),
+      ),
+    );
+  }
+  let best = Number.POSITIVE_INFINITY;
+  for (let index = 1; index < target.points.length; index += 1) {
+    best = Math.min(
+      best,
+      pointToSegmentDistance(
+        point,
+        target.points[index - 1],
+        target.points[index],
+      ),
+    );
+  }
+  return best;
+}
+
+/**
+ * Nearest drawable geometry in screen px. Returns every candidate within a few
+ * pixels of the winner so the UI can ask instead of guessing.
+ */
+export function hitTestMarkers(
+  targets: ReadonlyArray<ScreenTarget>,
+  tap: [number, number],
+  options: { pileTolerance?: number; beamTolerance?: number; ambiguity?: number } = {},
+): MarkerHit[] {
+  const pileTolerance = options.pileTolerance ?? PILE_HIT_PX;
+  const beamTolerance = options.beamTolerance ?? BEAM_HIT_PX;
+  const ambiguity = options.ambiguity ?? HIT_AMBIGUITY_PX;
+  const candidates = targets
+    .flatMap((target) => {
+      const distance = distanceToMarker(tap, target);
+      const tolerance =
+        target.marker.type === "pile" ? pileTolerance : beamTolerance;
+      return distance <= tolerance ? [{ marker: target.marker, distance }] : [];
+    })
+    .sort(
+      (a, b) =>
+        a.distance - b.distance ||
+        Number(b.marker.type === "beam") - Number(a.marker.type === "beam"),
+    );
+  if (!candidates.length) return [];
+  const best = candidates[0].distance;
+  return candidates.filter((candidate) => candidate.distance <= best + ambiguity);
+}
+
 /**
  * Viewport aspect (width / height) for the compact overview card. Match the
  * marker bounding box so fitting the map does not leave a large empty band

@@ -6,6 +6,7 @@ import {
   clampZoom,
   fitViewToBounds,
   markerBounds,
+  zoomAroundPoint,
   type DrawingSheet,
   type ImageBox,
   type View,
@@ -77,15 +78,14 @@ export function useDrawingMapViewport({
       if (!element) return;
       event.preventDefault();
       const next = clampZoom(viewRef.current.zoom + (event.deltaY < 0 ? 0.25 : -0.25));
-      setView((current) => ({
-        zoom: next,
-        pan: clampPan(
-          current.pan,
+      setView(
+        zoomAroundPoint(
+          viewRef.current,
+          { x: event.clientX, y: event.clientY },
           next,
-          element.clientWidth,
-          element.clientHeight,
+          element.getBoundingClientRect(),
         ),
-      }));
+      );
     }
     element.addEventListener("wheel", handleWheel, { passive: false });
     return () => element.removeEventListener("wheel", handleWheel);

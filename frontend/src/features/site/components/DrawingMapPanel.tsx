@@ -1,14 +1,23 @@
-import { useMemo, useRef } from "react";
-import { containBox, markerBounds, type DrawingMarker } from "../lib/drawingMap";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  containBox,
+  markerBounds,
+  sheetToClient,
+  type DrawingMarker,
+} from "../lib/drawingMap";
 import {
   BUTTON,
   FOCUS_RING,
   buildMapTargets,
   contentAspectRatio,
+  hitTestMarkers,
+  labelModeForZoom,
+  layoutMarkerLabels,
   type PlacementTarget,
+  type ScreenTarget,
   type Selection,
 } from "../lib/drawingMapPanel";
-import DrawingMapCanvas from "./DrawingMapCanvas";
+import DrawingMapCanvas, { type HitChoices } from "./DrawingMapCanvas";
 import DrawingMapComponentList from "./DrawingMapComponentList";
 import DrawingMapDetailPanel, {
   DrawingMapCompactDetail,
@@ -60,7 +69,9 @@ export default function DrawingMapPanel({
   const compact = variant === "compact";
   const rootRef = useRef<HTMLElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
+  const [hitChoices, setHitChoices] = useState<HitChoices | null>(null);
 
   const {
     map,
@@ -155,13 +166,15 @@ export default function DrawingMapPanel({
     viewRef,
   });
 
-  const { handlePointerDown, handlePointerMove, endPointer } =
+  const { handlePointerDown, handlePointerMove, endPointer, cancelPointer } =
     useDrawingMapGestures({
       viewRef,
       viewportRef,
+      contentRef,
       setView,
       placementActive: Boolean(placement),
       addPlacementPoint,
+      onTap: handleMapTap,
     });
 
   const mapTargets = useMemo(
@@ -176,7 +189,23 @@ export default function DrawingMapPanel({
       ),
     [activeSheet, imageBox],
   );
+  const labels = useMemo(
+    () =>
+      imageBox
+        ? layoutMarkerLabels(
+            mapTargets,
+            labelModeForZoom(view.zoom),
+            view.zoom,
+            imageBox,
+          )
+        : [],
+    [imageBox, mapTargets, view.zoom],
+  );
   const reviewCount = map?.review_count ?? 0;
+
+  useEffect(() => {
+    setHitChoices(null);
+  }, [activeSheetKey, imageBox, placement]);
 
   function handleImageLoad() {
     const image = imageRef.current;
@@ -192,11 +221,59 @@ export default function DrawingMapPanel({
   }
 
   function handleMarkerActivate(marker: DrawingMarker) {
+    setHitChoices(null);
     if (selection) {
+      if (
+        selection.disabled ||
+        !selection.selectableIds.includes(marker.component_id)
+      ) {
+        return;
+      }
       selection.onToggle(marker.component_id);
       return;
     }
     void openDetail(marker);
+  }
+
+  function handleMapTap(clientX: number, clientY: number) {
+    const viewport = viewportRef.current;
+    if (!viewport || !imageBox) return;
+    const rect = viewport.getBoundingClientRect();
+    const current = viewRef.current;
+    const availableTargets =
+      selection && !selection.disabled
+        ? mapTargets.filter((target) =>
+            selection.selectableIds.includes(target.marker.component_id),
+          )
+        : selection
+          ? []
+          : mapTargets;
+    const targets: ScreenTarget[] = availableTargets.map((target) => ({
+      marker: target.marker,
+      points: target.points.map((point) =>
+        sheetToClient(point, rect, imageBox, current),
+      ),
+    }));
+    const hits = hitTestMarkers(targets, [clientX, clientY]);
+    if (!hits.length) {
+      setHitChoices(null);
+      return;
+    }
+    if (hits.length === 1) {
+      handleMarkerActivate(hits[0].marker);
+      return;
+    }
+    const x = Math.min(
+      Math.max(clientX - rect.left, 112),
+      Math.max(112, rect.width - 112),
+    );
+    const y = clientY - rect.top;
+    setHitChoices({
+      x,
+      y,
+      markers: hits.map((hit) => hit.marker),
+      flip: y > rect.height * 0.55,
+    });
   }
 
   return (
@@ -384,10 +461,12 @@ export default function DrawingMapPanel({
                   retryImage={retryImage}
                   imageUrl={imageUrl}
                   viewportRef={viewportRef}
+                  contentRef={contentRef}
                   imageRef={imageRef}
                   view={view}
                   imageBox={imageBox}
                   mapTargets={mapTargets}
+                  labels={labels}
                   selection={selection}
                   detailMarker={detailMarker}
                   placement={placement}
@@ -396,10 +475,13 @@ export default function DrawingMapPanel({
                   updatePlacementPoint={updatePlacementPoint}
                   onImageLoad={handleImageLoad}
                   onMarkerActivate={handleMarkerActivate}
+                  hitChoices={hitChoices}
+                  onChooseHit={handleMarkerActivate}
+                  onDismissHit={() => setHitChoices(null)}
                   onPointerDown={handlePointerDown}
                   onPointerMove={handlePointerMove}
                   onPointerUp={endPointer}
-                  onPointerCancel={endPointer}
+                  onPointerCancel={cancelPointer}
                   zoomBy={zoomBy}
                   resetView={resetView}
                   showWholeSheet={showWholeSheet}

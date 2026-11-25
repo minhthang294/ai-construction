@@ -1,8 +1,10 @@
 /** Interactive drawing sheet canvas: image, marker overlay and placement points. */
 
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import {
   ACCEPTANCE_OUTLINE_COLOR,
+  constructionStatusColor,
+  viewTransform,
   type DrawingMarker,
   type DrawingSheet,
   type ImageBox,
@@ -17,9 +19,17 @@ import {
   type MapTarget,
   type Placement,
   type Selection,
+  type VisibleLabel,
 } from "../lib/drawingMapPanel";
 import DrawingMapViewControls from "./DrawingMapViewControls";
 import type { ImageState } from "./useDrawingMapResources";
+
+export type HitChoices = {
+  x: number;
+  y: number;
+  markers: DrawingMarker[];
+  flip: boolean;
+};
 
 type Props = {
   activeSheet: DrawingSheet;
@@ -32,10 +42,12 @@ type Props = {
   retryImage: () => void;
   imageUrl: string | null;
   viewportRef: React.RefObject<HTMLDivElement | null>;
+  contentRef: React.RefObject<HTMLDivElement | null>;
   imageRef: React.RefObject<HTMLImageElement | null>;
   view: View;
   imageBox: ImageBox | null;
   mapTargets: MapTarget[];
+  labels: VisibleLabel[];
   selection?: Selection;
   detailMarker: DrawingMarker | null;
   placement: Placement | null;
@@ -47,6 +59,9 @@ type Props = {
   ) => void;
   onImageLoad: () => void;
   onMarkerActivate: (marker: DrawingMarker) => void;
+  hitChoices: HitChoices | null;
+  onChooseHit: (marker: DrawingMarker) => void;
+  onDismissHit: () => void;
   onPointerDown: (event: React.PointerEvent<HTMLDivElement>) => void;
   onPointerMove: (event: React.PointerEvent<HTMLDivElement>) => void;
   onPointerUp: (event: React.PointerEvent<HTMLDivElement>) => void;
@@ -67,10 +82,12 @@ export default function DrawingMapCanvas({
   retryImage,
   imageUrl,
   viewportRef,
+  contentRef,
   imageRef,
   view,
   imageBox,
   mapTargets,
+  labels,
   selection,
   detailMarker,
   placement,
@@ -79,6 +96,9 @@ export default function DrawingMapCanvas({
   updatePlacementPoint,
   onImageLoad,
   onMarkerActivate,
+  hitChoices,
+  onChooseHit,
+  onDismissHit,
   onPointerDown,
   onPointerMove,
   onPointerUp,
@@ -88,6 +108,12 @@ export default function DrawingMapCanvas({
   showWholeSheet,
   children,
 }: Props) {
+  useEffect(() => {
+    const element = contentRef.current;
+    if (!element) return;
+    element.style.transform = viewTransform(view);
+  }, [contentRef, view]);
+
   return (
     <div className="relative overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
       {!compact ? (
@@ -150,10 +176,8 @@ export default function DrawingMapCanvas({
 
         {imageState === "ready" && imageUrl ? (
           <div
+            ref={contentRef}
             className="absolute inset-0 will-change-transform"
-            style={{
-              transform: `translate(${view.pan.x}px, ${view.pan.y}px) scale(${view.zoom})`,
-            }}
           >
             <img
               ref={imageRef}
@@ -174,7 +198,8 @@ export default function DrawingMapCanvas({
                 }}
               >
                 <svg
-                  aria-hidden="true"
+                  role="group"
+                  aria-label="Cấu kiện trên bản vẽ"
                   focusable="false"
                   viewBox="0 0 1 1"
                   preserveAspectRatio="none"
@@ -184,13 +209,33 @@ export default function DrawingMapCanvas({
                     const selected = selection
                       ? selection.selectedIds.includes(marker.component_id)
                       : detailMarker?.component_id === marker.component_id;
-                    const selectable = !selection || selection.selectableIds.includes(marker.component_id);
+                    const selectable =
+                      !selection ||
+                      selection.selectableIds.includes(marker.component_id);
                     const opacity = selection && !selectable ? 0.2 : 1;
                     const color = markerStrokeColor(marker, compact);
                     const accepted = Boolean(marker.accepted);
                     const path = points.map(([px, py]) => `${px},${py}`).join(" ");
                     return (
-                      <g key={`${marker.component_id}-${marker.code}`}>
+                      <g
+                        key={`${marker.component_id}-${marker.code}`}
+                        role="button"
+                        tabIndex={0}
+                        focusable="true"
+                        aria-label={markerAriaLabel(marker, {
+                          selecting: Boolean(selection),
+                          selected,
+                          selectable,
+                        })}
+                        aria-pressed={selected}
+                        className="outline-none"
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            onMarkerActivate(marker);
+                          }
+                        }}
+                      >
                         {points.length > 1 ? (
                           <>
                             {accepted ? (
@@ -247,9 +292,10 @@ export default function DrawingMapCanvas({
                     );
                   })}
                 </svg>
+
                 {placement &&
                 placement.sheetId === activeSheet?.id &&
-                placement.points.length > 0 ? (
+                placement.points.length > 1 ? (
                   <svg
                     aria-hidden="true"
                     focusable="false"
@@ -257,71 +303,42 @@ export default function DrawingMapCanvas({
                     preserveAspectRatio="none"
                     className="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
                   >
-                    {placement.points.length > 1 ? (
-                      <polyline
-                        points={placement.points
-                          .map(([x, y]) => `${x},${y}`)
-                          .join(" ")}
-                        fill="none"
-                        stroke="#b45309"
-                        strokeWidth={2}
-                        strokeDasharray="5 3"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        vectorEffect="non-scaling-stroke"
-                      />
-                    ) : null}
+                    <polyline
+                      points={placement.points
+                        .map(([x, y]) => `${x},${y}`)
+                        .join(" ")}
+                      fill="none"
+                      stroke="#b45309"
+                      strokeWidth={2}
+                      strokeDasharray="5 3"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      vectorEffect="non-scaling-stroke"
+                    />
                   </svg>
                 ) : null}
-                {mapTargets.map((target) => {
-                  const { marker, x, y } = target;
-                  // Keep a 32px screen-space hit area even at 100%.
-                  const diameter = 32 / view.zoom;
-                  const selected = selection
-                    ? selection.selectedIds.includes(marker.component_id)
-                    : detailMarker?.component_id === marker.component_id;
-                  const selectable = !selection || selection.selectableIds.includes(marker.component_id);
-                  return (
-                    <button
-                      key={`${marker.component_id}-${marker.code}`}
-                      type="button"
-                      aria-label={markerAriaLabel(marker, {
-                        selecting: Boolean(selection),
-                        selected,
-                        selectable,
-                      })}
-                      aria-pressed={selected}
-                      className={`absolute z-10 -translate-x-1/2 -translate-y-1/2 rounded-full bg-transparent ${FOCUS_RING}`}
-                      disabled={Boolean(placement) || Boolean(selection && (selection.disabled || !selectable))}
-                      style={{
-                        left: `${x * 100}%`,
-                        top: `${y * 100}%`,
-                        width: diameter,
-                        height: diameter,
-                      }}
-                      onPointerDown={(event) =>
-                        event.stopPropagation()
-                      }
-                      onClick={() => onMarkerActivate(marker)}
-                    >
-                      {view.zoom >= 3 && marker.current_work ? (
-                        <span
-                          aria-hidden="true"
-                          className="pointer-events-none absolute left-1/2 top-full z-20 -translate-x-1/2 whitespace-normal rounded border border-slate-300 bg-white/95 px-1 py-0.5 text-center font-sans font-medium text-slate-800 shadow-sm"
-                          style={{
-                            width: `${132 / view.zoom}px`,
-                            marginTop: `${3 / view.zoom}px`,
-                            fontSize: `${10 / view.zoom}px`,
-                            lineHeight: `${12 / view.zoom}px`,
-                          }}
-                        >
-                          <span className="block font-bold">{marker.code}</span>
-                          <span className="block">Đang làm: {marker.current_work}</span>
-                        </span>
-                      ) : null}
-                    </button>
-                  );
-                })}
+
+                {labels.map(({ target, text, fontPx, status }) => (
+                  <span
+                    key={`label-${target.marker.component_id}-${target.marker.code}`}
+                    aria-hidden="true"
+                    className="pointer-events-none absolute z-[5] whitespace-nowrap font-semibold"
+                    style={{
+                      left: `${target.x * 100}%`,
+                      top: `${target.y * 100}%`,
+                      transform: "translateX(-50%)",
+                      marginTop: (fontPx + 4) / view.zoom,
+                      fontSize: fontPx / view.zoom,
+                      lineHeight: 1.1,
+                      color: constructionStatusColor(status),
+                      textShadow:
+                        "0 0 2px #fff, 0 0 2px #fff, 0 0 3px #fff, 0 0 4px #fff",
+                    }}
+                  >
+                    {text}
+                  </span>
+                ))}
+
                 {placement &&
                 placement.sheetId === activeSheet?.id &&
                 placement.points.map(([x, y], index) => (
@@ -367,6 +384,51 @@ export default function DrawingMapCanvas({
                 ))}
               </div>
             ) : null}
+          </div>
+        ) : null}
+
+        {hitChoices ? (
+          <div
+            role="listbox"
+            aria-label="Chọn cấu kiện tại điểm chạm"
+            className="absolute z-30 w-56 max-w-[85%] rounded-xl border border-slate-300 bg-white p-1.5 shadow-xl"
+            style={{
+              left: hitChoices.x,
+              top: hitChoices.y + (hitChoices.flip ? -12 : 12),
+              transform: hitChoices.flip
+                ? "translate(-50%, -100%)"
+                : "translate(-50%, 0)",
+            }}
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            <p className="px-2 py-1 text-xs font-semibold text-slate-500">
+              Chọn cấu kiện
+            </p>
+            <ul className="max-h-52 overflow-y-auto">
+              {hitChoices.markers.map((marker) => (
+                <li key={marker.component_id}>
+                  <button
+                    type="button"
+                    className={`flex min-h-10 w-full items-center justify-between gap-2 rounded-lg px-2 text-left text-sm text-slate-800 active:bg-slate-100 ${FOCUS_RING}`}
+                    onClick={() => onChooseHit(marker)}
+                  >
+                    <span className="font-mono font-semibold">
+                      {marker.code}
+                    </span>
+                    <span className="text-xs text-slate-500">
+                      {marker.type === "pile" ? "Cọc" : "Dầm"}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <button
+              type="button"
+              className="mt-1 min-h-9 w-full rounded-lg px-2 text-xs font-medium text-slate-500 active:bg-slate-100"
+              onClick={onDismissHit}
+            >
+              Đóng
+            </button>
           </div>
         ) : null}
       </div>

@@ -1,7 +1,18 @@
 /** Pointer drag/pinch handling for the drawing map viewport. */
 
-import { useRef } from "react";
-import { clampPan, pinchZoom, type Pan } from "../lib/drawingMap";
+import { useEffect, useRef } from "react";
+import {
+  MAX_ZOOM,
+  MIN_ZOOM,
+  clampPan,
+  clampZoom,
+  pinchView,
+  pinchZoom,
+  viewTransform,
+  zoomAroundPoint,
+  type Pan,
+  type View,
+} from "../lib/drawingMap";
 import { pointerDistance } from "../lib/drawingMapPanel";
 import type { SetView } from "./useDrawingMapViewport";
 
@@ -9,54 +20,188 @@ type GestureState = {
   mode: "none" | "drag" | "pinch";
   pointers: Map<number, Pan>;
   start: Pan;
-  startPan: Pan;
-  moved: boolean;
+  startView: View;
   pinchDistance: number;
-  pinchStartZoom: number;
+  pinchStartMid: Pan;
+  moved: boolean;
+  lastMove: Pan;
+  lastMoveAt: number;
+  velocity: Pan;
+  pendingView: View | null;
+  frame: number | null;
+  inertiaFrame: number | null;
+  lastTap: { time: number; point: Pan } | null;
 };
 
+const TAP_SLOP_PX = 6;
+const DOUBLE_TAP_MS = 300;
+const DOUBLE_TAP_PX = 24;
+const INERTIA_STOP = 0.02;
+
 type Params = {
-  viewRef: React.RefObject<{ zoom: number; pan: Pan }>;
+  viewRef: React.RefObject<View>;
   viewportRef: React.RefObject<HTMLDivElement | null>;
+  contentRef: React.RefObject<HTMLDivElement | null>;
   setView: SetView;
   placementActive: boolean;
   addPlacementPoint: (event: { clientX: number; clientY: number }) => void;
+  onTap: (clientX: number, clientY: number) => void;
 };
 
 export function useDrawingMapGestures({
   viewRef,
   viewportRef,
+  contentRef,
   setView,
   placementActive,
   addPlacementPoint,
+  onTap,
 }: Params) {
   const gesture = useRef<GestureState>({
     mode: "none",
     pointers: new Map(),
     start: { x: 0, y: 0 },
-    startPan: { x: 0, y: 0 },
-    moved: false,
+    startView: { zoom: 1, pan: { x: 0, y: 0 } },
     pinchDistance: 0,
-    pinchStartZoom: 1,
+    pinchStartMid: { x: 0, y: 0 },
+    moved: false,
+    lastMove: { x: 0, y: 0 },
+    lastMoveAt: 0,
+    velocity: { x: 0, y: 0 },
+    pendingView: null,
+    frame: null,
+    inertiaFrame: null,
+    lastTap: null,
   });
 
-  function viewportSize(): { width: number; height: number } {
-    const element = viewportRef.current;
-    return {
-      width: element?.clientWidth ?? 0,
-      height: element?.clientHeight ?? 0,
-    };
+  function viewportRect(): DOMRect | null {
+    return viewportRef.current?.getBoundingClientRect() ?? null;
+  }
+
+  function applyView(next: View) {
+    viewRef.current = next;
+    const element = contentRef.current;
+    if (element) element.style.transform = viewTransform(next);
+  }
+
+  function flushPending() {
+    const state = gesture.current;
+    if (state.frame !== null) {
+      cancelAnimationFrame(state.frame);
+      state.frame = null;
+    }
+    if (state.pendingView) {
+      applyView(state.pendingView);
+      state.pendingView = null;
+    }
+  }
+
+  function commitView() {
+    flushPending();
+    setView(viewRef.current);
+  }
+
+  function scheduleView(next: View) {
+    const state = gesture.current;
+    state.pendingView = next;
+    if (state.frame !== null) return;
+    state.frame = requestAnimationFrame(() => {
+      state.frame = null;
+      const pending = state.pendingView;
+      state.pendingView = null;
+      if (pending) applyView(pending);
+    });
+  }
+
+  function stopInertia() {
+    const state = gesture.current;
+    if (state.inertiaFrame !== null) {
+      cancelAnimationFrame(state.inertiaFrame);
+      state.inertiaFrame = null;
+    }
   }
 
   function beginDrag(point: Pan) {
-    gesture.current.mode = "drag";
-    gesture.current.start = point;
-    gesture.current.startPan = viewRef.current.pan;
-    gesture.current.moved = false;
+    const state = gesture.current;
+    state.mode = "drag";
+    state.start = point;
+    state.startView = viewRef.current;
+    state.moved = false;
+    state.lastMove = point;
+    state.lastMoveAt = performance.now();
+    state.velocity = { x: 0, y: 0 };
+  }
+
+  function handleTap(clientX: number, clientY: number) {
+    const state = gesture.current;
+    const now = performance.now();
+    const last = state.lastTap;
+    if (
+      last &&
+      now - last.time <= DOUBLE_TAP_MS &&
+      Math.hypot(clientX - last.point.x, clientY - last.point.y) <=
+        DOUBLE_TAP_PX
+    ) {
+      state.lastTap = null;
+      const rect = viewportRect();
+      if (!rect) return;
+      const current = viewRef.current;
+      const target =
+        current.zoom >= MAX_ZOOM - 0.05
+          ? MIN_ZOOM
+          : clampZoom(current.zoom * 2);
+      applyView(
+        zoomAroundPoint(current, { x: clientX, y: clientY }, target, rect),
+      );
+      setView(viewRef.current);
+      return;
+    }
+    state.lastTap = { time: now, point: { x: clientX, y: clientY } };
+    onTap(clientX, clientY);
+  }
+
+  function startInertia() {
+    const state = gesture.current;
+    const rect = viewportRect();
+    if (!rect || Math.hypot(state.velocity.x, state.velocity.y) < 0.08) {
+      commitView();
+      return;
+    }
+    let last = performance.now();
+    const velocity = { ...state.velocity };
+    const step = (now: number) => {
+      const dt = Math.min(48, Math.max(1, now - last));
+      last = now;
+      const decay = Math.pow(0.92, dt / 16.667);
+      velocity.x *= decay;
+      velocity.y *= decay;
+      const current = viewRef.current;
+      const nextPan = clampPan(
+        {
+          x: current.pan.x + velocity.x * dt,
+          y: current.pan.y + velocity.y * dt,
+        },
+        current.zoom,
+        rect.width,
+        rect.height,
+      );
+      const moved =
+        nextPan.x !== current.pan.x || nextPan.y !== current.pan.y;
+      applyView({ zoom: current.zoom, pan: nextPan });
+      if (!moved || Math.hypot(velocity.x, velocity.y) < INERTIA_STOP) {
+        state.inertiaFrame = null;
+        commitView();
+        return;
+      }
+      state.inertiaFrame = requestAnimationFrame(step);
+    };
+    state.inertiaFrame = requestAnimationFrame(step);
   }
 
   function handlePointerDown(event: React.PointerEvent<HTMLDivElement>) {
     if (event.pointerType === "mouse" && event.button !== 0) return;
+    stopInertia();
+    flushPending();
     const element = event.currentTarget;
     element.setPointerCapture?.(event.pointerId);
     const state = gesture.current;
@@ -69,8 +214,13 @@ export function useDrawingMapGestures({
     if (state.pointers.size === 2) {
       const [first, second] = Array.from(state.pointers.values());
       state.mode = "pinch";
+      state.moved = true;
+      state.startView = viewRef.current;
       state.pinchDistance = pointerDistance(first, second);
-      state.pinchStartZoom = viewRef.current.zoom;
+      state.pinchStartMid = {
+        x: (first.x + second.x) / 2,
+        y: (first.y + second.y) / 2,
+      };
     }
   }
 
@@ -81,41 +231,60 @@ export function useDrawingMapGestures({
       x: event.clientX,
       y: event.clientY,
     });
-    const { width, height } = viewportSize();
+    const rect = viewportRect();
+    if (!rect) return;
+
     if (state.mode === "pinch" && state.pointers.size >= 2) {
       const [first, second] = Array.from(state.pointers.values());
-      const next = pinchZoom(
-        state.pinchStartZoom,
-        state.pinchDistance,
-        pointerDistance(first, second),
+      const midpoint = {
+        x: (first.x + second.x) / 2,
+        y: (first.y + second.y) / 2,
+      };
+      scheduleView(
+        pinchView(
+          state.startView,
+          state.pinchStartMid,
+          midpoint,
+          pinchZoom(
+            state.startView.zoom,
+            state.pinchDistance,
+            pointerDistance(first, second),
+          ),
+          rect,
+        ),
       );
-      setView((current) => ({
-        zoom: next,
-        pan: clampPan(current.pan, next, width, height),
-      }));
       return;
     }
+
     if (state.mode === "drag" && state.pointers.size === 1) {
-      if (
-        Math.hypot(
-          event.clientX - state.start.x,
-          event.clientY - state.start.y,
-        ) > 6
-      ) {
+      const dx = event.clientX - state.start.x;
+      const dy = event.clientY - state.start.y;
+      if (!state.moved && Math.hypot(dx, dy) > TAP_SLOP_PX) {
         state.moved = true;
+        state.lastTap = null;
       }
-      setView((current) => ({
-        zoom: current.zoom,
+      const now = performance.now();
+      const elapsed = now - state.lastMoveAt;
+      if (state.moved && elapsed > 0) {
+        state.velocity = {
+          x: (event.clientX - state.lastMove.x) / elapsed,
+          y: (event.clientY - state.lastMove.y) / elapsed,
+        };
+      }
+      state.lastMove = { x: event.clientX, y: event.clientY };
+      state.lastMoveAt = now;
+      scheduleView({
+        zoom: state.startView.zoom,
         pan: clampPan(
           {
-            x: state.startPan.x + (event.clientX - state.start.x),
-            y: state.startPan.y + (event.clientY - state.start.y),
+            x: state.startView.pan.x + dx,
+            y: state.startView.pan.y + dy,
           },
-          current.zoom,
-          width,
-          height,
+          state.startView.zoom,
+          rect.width,
+          rect.height,
         ),
-      }));
+      });
     }
   }
 
@@ -127,16 +296,62 @@ export function useDrawingMapGestures({
     if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
-    if (wasSingleTap && placementActive) {
-      addPlacementPoint(event);
+
+    if (wasSingleTap) {
+      if (placementActive) addPlacementPoint(event);
+      else handleTap(event.clientX, event.clientY);
     }
+
     if (state.pointers.size === 1) {
+      flushPending();
       beginDrag(Array.from(state.pointers.values())[0]);
       state.moved = true;
-    } else if (state.pointers.size === 0) {
-      state.mode = "none";
+      return;
+    }
+    if (state.pointers.size > 1) return;
+
+    const finishedMode = state.mode;
+    state.mode = "none";
+    flushPending();
+    if (finishedMode === "drag" && state.moved) {
+      if (performance.now() - state.lastMoveAt > 80) {
+        state.velocity = { x: 0, y: 0 };
+      }
+      startInertia();
+    } else {
+      commitView();
     }
   }
 
-  return { handlePointerDown, handlePointerMove, endPointer };
+  function cancelPointer(event: React.PointerEvent<HTMLDivElement>) {
+    const state = gesture.current;
+    state.pointers.delete(event.pointerId);
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    if (state.pointers.size === 1) {
+      flushPending();
+      beginDrag(Array.from(state.pointers.values())[0]);
+      state.moved = true;
+      return;
+    }
+    if (state.pointers.size > 1) return;
+    state.mode = "none";
+    commitView();
+  }
+
+  useEffect(() => {
+    const state = gesture.current;
+    return () => {
+      if (state.frame !== null) cancelAnimationFrame(state.frame);
+      if (state.inertiaFrame !== null) cancelAnimationFrame(state.inertiaFrame);
+    };
+  }, []);
+
+  return {
+    handlePointerDown,
+    handlePointerMove,
+    endPointer,
+    cancelPointer,
+  };
 }

@@ -125,9 +125,10 @@ export default function DrawingMapViewControls({
         {compact ? (
           <>
             <span>Kéo để di chuyển, chụm hai ngón hoặc dùng +/−.</span>
+            <span className="font-medium text-slate-700">Nhãn: công đoạn hiện tại</span>
             {[
-              ["NOT_STARTED", "Chưa bắt đầu"],
-              ["IN_PROGRESS", "Đang thi công"],
+              ["NOT_STARTED", "Chưa làm"],
+              ["IN_PROGRESS", "Đang làm"],
               ["COMPLETED", "Hoàn thành"],
               ["BLOCKED", "Tạm dừng"],
             ].map(([status, label]) => (
@@ -153,6 +154,8 @@ export default function DrawingMapViewControls({
           <>
             <span>Kéo để di chuyển.</span>
             <span>Chụm hai ngón hoặc dùng nút +/− để thu phóng.</span>
+            <span>Nhãn theo công đoạn hiện tại; chạm để chọn khi có nhiều cấu kiện sát nhau.</span>
+            <span>xám: chưa làm · amber: đang làm · lục: hoàn thành · đỏ: tạm dừng</span>
             <span className="inline-flex items-center gap-1"><span className="h-0.5 w-3 bg-teal-700" /> Dầm · nét mảnh</span>
             <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full border border-teal-700" /> Nhóm 1</span>
             <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full border border-amber-700" /> Nhóm 2</span>

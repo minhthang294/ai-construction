@@ -13,6 +13,8 @@ export type DrawingMarker = {
   location_review?: boolean;
   current_work?: string | null;
   current_work_definition_id?: string | null;
+  current_work_name?: string | null;
+  current_work_status?: string | null;
   current_stage_name?: string | null;
   current_stage_definition_id?: string | null;
   last_event_date?: string | null;
@@ -436,6 +438,95 @@ export function clientToSheetPoint(
   if (!Number.isFinite(u) || !Number.isFinite(v)) return null;
   if (u < 0 || u > 1 || v < 0 || v > 1) return null;
   return [u, v];
+}
+
+/** Forward transform: normalised sheet point -> client coordinates. */
+export function sheetToClient(
+  point: [number, number],
+  rect: ViewportRect,
+  imageBox: ImageBox,
+  view: View,
+): [number, number] {
+  const zoom = clampZoom(view.zoom);
+  const x =
+    rect.left +
+    rect.width / 2 +
+    (imageBox.left + point[0] * imageBox.width - rect.width / 2) * zoom +
+    view.pan.x;
+  const y =
+    rect.top +
+    rect.height / 2 +
+    (imageBox.top + point[1] * imageBox.height - rect.height / 2) * zoom +
+    view.pan.y;
+  return [x, y];
+}
+
+/** Zoom around a client point while keeping that sheet point under the finger. */
+export function zoomAroundPoint(
+  view: View,
+  clientPoint: { x: number; y: number },
+  targetZoom: number,
+  rect: ViewportRect,
+): View {
+  const startZoom = clampZoom(view.zoom);
+  const zoom = clampZoom(targetZoom);
+  const centerX = rect.left + rect.width / 2;
+  const centerY = rect.top + rect.height / 2;
+  const imageX =
+    centerX + (clientPoint.x - centerX - view.pan.x) / startZoom;
+  const imageY =
+    centerY + (clientPoint.y - centerY - view.pan.y) / startZoom;
+  return {
+    zoom,
+    pan: clampPan(
+      {
+        x: clientPoint.x - centerX - (imageX - centerX) * zoom,
+        y: clientPoint.y - centerY - (imageY - centerY) * zoom,
+      },
+      zoom,
+      rect.width,
+      rect.height,
+    ),
+  };
+}
+
+/**
+ * Pinch around the midpoint between both fingers. The sheet point under the
+ * initial midpoint follows the current midpoint while the distance controls
+ * zoom, so zoom and two-finger pan happen in one transform.
+ */
+export function pinchView(
+  startView: View,
+  startMidpoint: { x: number; y: number },
+  currentMidpoint: { x: number; y: number },
+  targetZoom: number,
+  rect: ViewportRect,
+): View {
+  const startZoom = clampZoom(startView.zoom);
+  const zoom = clampZoom(targetZoom);
+  const centerX = rect.left + rect.width / 2;
+  const centerY = rect.top + rect.height / 2;
+  const imageX =
+    centerX + (startMidpoint.x - centerX - startView.pan.x) / startZoom;
+  const imageY =
+    centerY + (startMidpoint.y - centerY - startView.pan.y) / startZoom;
+  return {
+    zoom,
+    pan: clampPan(
+      {
+        x: currentMidpoint.x - centerX - (imageX - centerX) * zoom,
+        y: currentMidpoint.y - centerY - (imageY - centerY) * zoom,
+      },
+      zoom,
+      rect.width,
+      rect.height,
+    ),
+  };
+}
+
+/** CSS transform for one wrapper; keep the marker/label layer in the same node. */
+export function viewTransform(view: View): string {
+  return `translate3d(${view.pan.x}px, ${view.pan.y}px, 0) scale(${view.zoom})`;
 }
 
 /** Accept both `/projects/...` and `/api/v1/projects/...` from the server. */
