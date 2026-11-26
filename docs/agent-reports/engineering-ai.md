@@ -1,5 +1,66 @@
 # Engineering AI Agent Report
 
+## 2026-11-25 — corner stages, fender panels, PD1/PD3/Bunke TK sheets
+
+**Scope:** fresh copy `acc5` from `data/storage/demo-live/app.db`; all data files are under gitignored `data/storage`. No migration, no commit, no frontend/router edit, no real DB write.
+
+### 1. Corner-beam stages — `scripts/setup_corner_stages.py`
+
+- Preview is read-only; `--commit` is idempotent and writes one `AuditLog` (`component_corner_stages_setup`).
+- Design group **`Góc dầm`** (`BEAM_REPAIR_CLASS`, TK-98) assigned to all **36** `Q-xxx` components. Components stay `type=beam`; no new type.
+- Exactly **8** workbook work items in order, codes `DAP-GOC-01`…`08`: đục 70 mm (m³), vệ sinh (m²), tẩy gỉ 50% (m²), epoxy 0,8 (m²), phủ cát (m²), ván khuôn (m²), vữa (m³), vận chuyển (m³).
+- **288** `component_stages` (36 × 8); no stage outside `Q-` components. Per-code quantity stays `null` because the workbook says `XEM TỔNG CỘT PHÂN NHÓM`; the JSON keeps unit, `scope=SUBGROUP`, `scope_label=Nhóm III` and the group-III total (1,423 / 21,013 / 10,507 / 21,013 / 21,013 / 24,371 / 1,423 / 1,423).
+- Rerun: `stages_added=0`, `stages_existing=288`.
+
+### 2. Fender panels — `scripts/add_fender_panels.py`
+
+- **K-111-112**, **K-135-136**, **K-1** created as `type=beam`, group **`Tấm tựa tàu`** (`BEAM_REPAIR_CLASS`, TK-109-113), `NEEDS_REVIEW`, `MANUAL_ENTRY`, alias + `DESIGN_SCOPE`.
+- Workbook `Tấm tựa tàu`: 30 + 30 + 5 = **65** stages, **35** definitions (`DAP-TAM-01…30`, `DAP-TAM-K1-01…05`). K-111-112 rows stay flagged `SOURCE_CODE_CONFLICT` because the quantity column prints K-135-136; the table-title code is used.
+- Two DRAFT/`ai_extracted` positions on `cau-chinh-pd3-plan` (hatched panels of TK-33). **K-1 has no position**: only detail TK-113 tr.119; no label on PD1/PD2/PD3 or overview pages 1–5. Component/stages exist.
+- Rerun: `stages_added=0`, `positions_added=0`.
+
+### 3. PD1/PD3/Bunke TK sheets — `scripts/add_tk_sheets.py` + `tk-sheets.json`
+
+- Six live sheets added to the existing manifests, cropped from the private scan (4× visual reading; marker at the center of the pile symbol the label leader points to, not a survey coordinate):
+
+| Map | Sheet | Drawing/page | Markers | Max error after snap |
+|---|---|---|---:|---:|
+| `cau-chinh-pd1` | `tk02-pd1` | TK-02/8 | 10 | 20 px |
+| `cau-chinh-pd1` | `tk09-pd1` | TK-09/15 | 17 | 20 px |
+| `cau-chinh-pd3` | `tk03-pd3` | TK-03/9 | 3 | 10 px |
+| `cau-chinh-pd3` | `tk10-pd3` | TK-10/16 | 7 | 10 px |
+| `bunke` | `tk02-pd2` | TK-02/8 | 1 | 3 px |
+| `bunke` | `tk09-pd2` | TK-09/15 | 6 | 6 px |
+
+- Error is measured on the 3800 px crop; 20 px = 0.53% width (13 px at the 2400 px preview). The Bunke markers were re-snapped to the thick pile-circle centers after the review: D152/B152/A152 now sit at x≈1218-1221 instead of the left frame (previous ~95 px offset); E156/D156/D157 at x≈3270-3485. E152 was checked too.
+- TK-10, TK-03, TK-09 and TK-02 markers were re-checked: TK-10 A161/D161 moved to the 1650 column and D162/B162/A162-A164 to the 3000/3200/3400 columns on the D/B/A rows; TK-03 D160/B164 moved to their leader-pointed piles; TK-09 C5/C8/C11/A11 and E2/E8/E11/E145 moved to the leader columns/rows; TK-02 E146/C146/D147/D148/A148/D150/D151 snapped into the pile squares.
+- 44/44 markers resolve to existing `(zone, segment, type, code)` components. Bunke markers resolve to existing Cầu chính PD2 components; no duplicates.
+- Overlays: `data/storage/dap-maps/expansion/placements/{map}-{sheet}.png` (6 files) and `tk-sheets-report.md`.
+
+### 4. PD1 additional scope — `scripts/place_pd1_additional.py`
+
+- **22 cọc** rows F-I/axes 1-48 and **8 dầm** placed on the live `cau-chinh-pd1-plan` (TK-31) by an affine fit from **57 reviewed pile markers**:
+  - `x = 0.018949879 × axis + 0.077509080`
+  - `y = -0.145213900 × row + 1.522744062` (A=0 … I=8)
+  - Residual: **max x 0.013508** (~54 px at 4000 width), **max y 0.004245** (~7 px at 1650), combined 0.01377.
+- 22 piles: F13, F18, F24, F25, F46, G5, G17, G20, G23, G44, G47, H8, H10, H17, H20, H23, H29, H38, H41, H44, I21, I39.
+- 8 beams: F-16-18, F-18-19, F-19-21, F-19-25, F-31-33, I-16-18, I-18-21, I-19-21; two-point polyline from axis a to axis b on the F/I row.
+- **4 piles** C2/E5/A149/A151 placed on `cau-chinh-pd1-tk02-pd1` (TK-02 annex) because rows C/E and axes 149/151 are not on TK-31; unlabeled grid cells, note flags DRAFT review.
+- 34 DRAFT/`ai_extracted` positions; audit `component_pd1_additional_positions_placed`; rerun `positions_added=0`, `positions_existing=34`.
+- Overlays: `cau-chinh-pd1-plan-additional.png` (red = new, blue = existing manifest) and `cau-chinh-pd1-tk02-pd1-additional.png`.
+
+### 5. Result
+
+- Project components **553 → 556** (+3 fenders); corner stages **0 → 288**; fender stages **0 → 65**; DB positions **221 → 257** (+2 fenders + 34 additional PD1); manifest markers **266 → 310**; manifest+DB markers **487 → 567**; unique components with a marker **475 → 555**.
+- Sheet totals: `cau-chinh-pd1-plan` 99 (69 manifest + 30 DB), `cau-chinh-pd1-tk02-pd1` 14 (10 + 4), `cau-chinh-pd1-tk09-pd1` 17, `cau-chinh-pd3-plan` 73 (61 + 2 DB + 10), `bunke` 19, `pd2-beam` 81; Cầu dẫn 264 (221 DB + 43 manifest).
+- **1 unresolved:** K-1 (detail TK-113 only; component + 5 stages, no plan position). The previous 26 PD1 piles and 8 PD1 beams are now placed as above. Reasons are in `expansion/placements/report.md`.
+
+### 6. Tests
+
+- New: `backend/tests/engineering_ai/test_setup_corner_stages.py` (2), `test_add_fender_panels.py` (2). They use a synthetic DB, synthetic workbook and a tiny live manifest; preview leaves no rows, commit creates the expected groups/definitions/stages/positions, and rerun is idempotent.
+- Full backend with temporary `DATABASE_URL`/storage: **405 passed, 6 skipped** (1 third-party Starlette/httpx warning, 137 s).
+- Manual copy `acc5`: 556 project components, 288 corner stages, 65 fender stages, **257 positions**, 0 duplicate `(component, stage, scope)` / `(component, sheet)` / `(project, segment, type, code)`; 1 unresolved (K-1).
+
 ## 2026-11-24 — place missing drawing-map markers and add Cầu dẫn corner catalog
 
 ### 1. Placement script and data
