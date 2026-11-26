@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-import numpy as np
+from statistics import linear_regression
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
@@ -133,11 +133,12 @@ def _calibration(maps_root: Path, project_id: str) -> Tuple[float, float, float,
         ys.append(float(y))
     if len(axes) < 6:
         raise SystemExit(f"Need >=6 calibration markers, found {len(axes)}")
-    ax_a, ax_b = np.polyfit(np.array(axes), np.array(xs), 1)
-    row_a, row_b = np.polyfit(np.array(row_idx), np.array(ys), 1)
-    res_x = np.array(xs) - (ax_a * np.array(axes) + ax_b)
-    res_y = np.array(ys) - (row_a * np.array(row_idx) + row_b)
-    return float(ax_a), float(ax_b), float(row_a), float(row_b), len(axes), float(np.max(np.abs(res_x))), float(np.max(np.abs(res_y)))
+    # stdlib least squares: the VM venv has no numpy.
+    ax_a, ax_b = linear_regression(axes, xs)
+    row_a, row_b = linear_regression(row_idx, ys)
+    res_x = max(abs(x - (ax_a * a + ax_b)) for a, x in zip(axes, xs))
+    res_y = max(abs(y - (row_a * r + row_b)) for r, y in zip(row_idx, ys))
+    return ax_a, ax_b, row_a, row_b, len(axes), res_x, res_y
 
 
 def _point(axis: float, row: str, ax_a: float, ax_b: float, row_a: float, row_b: float) -> List[float]:
