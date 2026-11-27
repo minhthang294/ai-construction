@@ -23,7 +23,6 @@ import {
 } from "../lib/drawingMapPanel";
 import DrawingMapViewControls from "./DrawingMapViewControls";
 import SchematicPlanSurface from "./SchematicPlanSurface";
-import { SCHEMATIC_AXIS_GAP } from "../lib/schematicMap";
 import type { ImageState } from "./useDrawingMapResources";
 
 export type HitChoices = {
@@ -213,6 +212,7 @@ export default function DrawingMapCanvas({
                       width: imageBox.width,
                       height: imageBox.height,
                     }}
+                    zoom={view.zoom}
                   />
                 ) : null}
                 <svg
@@ -242,6 +242,10 @@ export default function DrawingMapCanvas({
                     const statusColor = constructionStatusColor(
                       marker.construction_status,
                     );
+                    // Schematic: beam width in plan units so it scales with zoom.
+                    const planPx = activeSheet.schematic
+                      ? (imageBox.width * view.zoom) / activeSheet.schematic.width
+                      : 0;
                     const path = points.map(([px, py]) => `${px},${py}`).join(" ");
                     return (
                       <g
@@ -268,26 +272,28 @@ export default function DrawingMapCanvas({
                             {accepted ? (
                               <polyline points={path} fill="none"
                                 stroke={ACCEPTANCE_OUTLINE_COLOR}
-                                strokeWidth={selected ? 4.5 : 3.25}
+                                strokeWidth={planPx && marker.type === "beam" ? (selected ? 5 : 3.5) * planPx + 4 : selected ? 4.5 : 3.25}
                                 strokeLinecap="round" strokeLinejoin="round"
                                 opacity={opacity}
                                 vectorEffect="non-scaling-stroke" />
                             ) : null}
                             <polyline points={path} fill="none" stroke="white"
-                              strokeWidth={selected ? 3.5 : 2.25}
+                              strokeWidth={planPx && marker.type === "beam" ? (selected ? 5 : 3.5) * planPx + 2 : selected ? 3.5 : 2.25}
                               strokeLinecap="round" strokeLinejoin="round"
                               opacity={opacity}
                               vectorEffect="non-scaling-stroke" />
                             <polyline points={path} fill="none"
                               stroke={selected ? "#111827" : color}
                               strokeWidth={
-                                selected
-                                  ? marker.type === "beam"
-                                    ? 5
-                                    : 2.5
-                                  : marker.type === "beam"
-                                    ? 3.5
-                                    : 1.5
+                                planPx && marker.type === "beam"
+                                  ? (selected ? 5 : 3.5) * planPx
+                                  : selected
+                                    ? marker.type === "beam"
+                                      ? 5
+                                      : 2.5
+                                    : marker.type === "beam"
+                                      ? 3.5
+                                      : 1.5
                               }
                               strokeLinecap="round" strokeLinejoin="round"
                               strokeDasharray={markerDashArray(marker, "line")}
@@ -345,18 +351,22 @@ export default function DrawingMapCanvas({
                         ) : activeSheet.schematic ? (
                           // Schematic piles are squares sized to the axis spacing on screen.
                           (() => {
-                            const gapPx =
-                              (SCHEMATIC_AXIS_GAP * imageBox.width * view.zoom) /
-                              activeSheet.schematic.width;
-                            const half = Math.min(6, Math.max(2, gapPx * 0.28));
+                            // Same plan size as the hollow squares (9 units), so piles
+                            // grow with zoom like a drawing instead of staying a fixed px.
+                            // Normalised plan units (same as the 9-unit hollow squares):
+                            // the square scales exactly with the drawing on zoom.
+                            const hx = 4.5 / activeSheet.schematic.width;
+                            const hy = 4.5 / activeSheet.schematic.height;
+                            const ox = 2.5 / activeSheet.schematic.width;
+                            const oy = 2.5 / activeSheet.schematic.height;
                             return (
                           <>
                             {accepted ? (
                               <rect
-                                x={x - unitX(half + 3)}
-                                y={y - unitY(half + 3)}
-                                width={unitX(2 * half + 6)}
-                                height={unitY(2 * half + 6)}
+                                x={x - hx - ox}
+                                y={y - hy - oy}
+                                width={2 * (hx + ox)}
+                                height={2 * (hy + oy)}
                                 fill="none"
                                 stroke={ACCEPTANCE_OUTLINE_COLOR}
                                 strokeWidth={selected ? 3 : 2}
@@ -365,13 +375,13 @@ export default function DrawingMapCanvas({
                               />
                             ) : null}
                             <rect
-                              x={x - unitX(half)}
-                              y={y - unitY(half)}
-                              width={unitX(2 * half)}
-                              height={unitY(2 * half)}
+                              x={x - hx}
+                              y={y - hy}
+                              width={2 * hx}
+                              height={2 * hy}
                               fill={selected ? "#111827" : statusColor}
                               stroke="#ffffff"
-                              strokeWidth={half > 3 ? 1 : 0}
+                              strokeWidth={1}
                               vectorEffect="non-scaling-stroke"
                               opacity={opacity}
                             />

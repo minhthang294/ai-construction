@@ -1,15 +1,22 @@
 /** Static schematic grid behind the interactive marker layer. */
 
 import type { ImageBox } from "../lib/drawingMap";
+import { labelModeForZoom } from "../lib/drawingMapPanel";
 import type { SchematicPlan } from "../lib/schematicMap";
 
 export default function SchematicPlanSurface({
   plan,
   box,
+  zoom = 1,
 }: {
   plan: SchematicPlan;
   box: ImageBox;
+  zoom?: number;
 }) {
+  // Unrecorded piles get their code at the same zoom where marker codes appear;
+  // font is sized in screen px so it stays readable while zooming.
+  const showGridCodes = labelModeForZoom(zoom) !== "none";
+  const gridFont = 6.5; // plan units: grows with zoom like a drawing
   const firstX = plan.axes[0]?.x ?? 0;
   const lastX = plan.axes[plan.axes.length - 1]?.x ?? 0;
   const firstY = plan.rows[0]?.y ?? 0;
@@ -175,16 +182,31 @@ export default function SchematicPlanSurface({
           />
         ))}
         {plan.gridPiles.map((pile) => (
-          <rect
-            key={`grid-${pile.code}`}
-            x={pile.x - 4.5}
-            y={pile.y - 4.5}
-            width={9}
-            height={9}
-            fill="#ffffff"
-            stroke="#475569"
-            strokeWidth={0.9}
-          />
+          <g key={`grid-${pile.code}`}>
+            <rect
+              x={pile.x - 4.5}
+              y={pile.y - 4.5}
+              width={9}
+              height={9}
+              fill="#ffffff"
+              stroke="#475569"
+              strokeWidth={0.9}
+            />
+            {showGridCodes ? (
+              <text
+                x={pile.x}
+                y={pile.y + 4.5 + gridFont * 1.1}
+                fontSize={gridFont}
+                textAnchor="middle"
+                fill="#64748b"
+                stroke="#ffffff"
+                strokeWidth={gridFont * 0.25}
+                paintOrder="stroke"
+              >
+                {pile.code}
+              </text>
+            ) : null}
+          </g>
         ))}
       </svg>
     </div>
