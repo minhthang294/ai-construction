@@ -71,16 +71,14 @@ describe("schematic code parsing", () => {
 });
 
 describe("schematic plan layout", () => {
-  it("compresses unused axis gaps into even columns", () => {
+  it("draws every axis between the first and last, evenly spaced", () => {
     const [plan] = buildSchematicPlans([
       item({ id: "a", code: "I5" }),
-      item({ id: "b", code: "I20" }),
-      item({ id: "c", code: "I100" }),
+      item({ id: "b", code: "I8" }),
     ]);
-    expect(plan.axes.map((axis) => axis.value)).toEqual([5, 20, 100]);
-    const gapOne = plan.axes[1].x - plan.axes[0].x;
-    const gapTwo = plan.axes[2].x - plan.axes[1].x;
-    expect(gapOne).toBe(gapTwo);
+    expect(plan.axes.map((axis) => axis.value)).toEqual([5, 6, 7, 8]);
+    const gaps = plan.axes.slice(1).map((axis, i) => axis.x - plan.axes[i].x);
+    expect(new Set(gaps).size).toBe(1);
   });
 
   it("draws a horizontal beam between its two axes", () => {
@@ -112,7 +110,7 @@ describe("schematic plan layout", () => {
       "F",
     ]);
     const bunkeRows = plan.rows.filter((row) => !row.main);
-    expect(bunkeRows.map((row) => row.key)).toEqual(["E", "D"]);
+    expect(bunkeRows.map((row) => row.key)).toEqual(["E", "D", "C", "B", "A"]);
     expect(bunkeRows[0].y).toBeGreaterThan(
       plan.rows.filter((row) => row.main).at(-1)?.y ?? 0,
     );
@@ -138,14 +136,17 @@ describe("schematic plan layout", () => {
     ])[0];
     const x = new Map(plan.axes.map((axis) => [axis.value, axis.x]));
     const bx = new Map(plan.bunkeAxes.map((axis) => [axis.value, axis.x]));
-    expect(bx.get(152)).toBe(x.get(49));
-    expect(bx.get(153)).toBe(x.get(66));
-    expect(bx.get(154)).toBe(x.get(67));
-    expect(bx.get(155)).toBe(x.get(68));
-    expect(bx.get(156)).toBe(x.get(76));
-    expect(bx.get(157)).toBe(x.get(81));
-    expect(plan.bunke?.x0).toBeLessThan(x.get(49) ?? 0);
-    expect(plan.bunke?.x1).toBeGreaterThan(x.get(81) ?? 0);
+    // Fractional anchors from the owner-approved PD2 sketch.
+    const gap = (x.get(50) ?? 0) - (x.get(49) ?? 0);
+    const at = (axis: number) => (x.get(49) ?? 0) + (axis - 49) * gap;
+    expect(bx.get(152)).toBeCloseTo(at(49.75));
+    expect(bx.get(153)).toBeCloseTo(at(64.3));
+    expect(bx.get(154)).toBeCloseTo(at(66.9));
+    expect(bx.get(155)).toBeCloseTo(at(69.6));
+    expect(bx.get(156)).toBeCloseTo(at(77.1));
+    expect(bx.get(157)).toBeCloseTo(at(79.7));
+    expect(plan.bunke?.x0).toBeLessThan(x.get(50) ?? 0);
+    expect(plan.bunke?.x1).toBeGreaterThan(at(79.7));
     expect(
       plan.bunkeBlocks.map((block) => block.axes.map((axis) => axis.value)),
     ).toEqual([[152], [153, 154, 155], [156, 157]]);

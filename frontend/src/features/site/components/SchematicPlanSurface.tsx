@@ -17,6 +17,8 @@ export default function SchematicPlanSurface({
     .filter((row) => row.main)
     .reduce((max, row) => Math.max(max, row.y), firstY);
   const bubbleY = Math.max(16, firstY - 26);
+  // Like the drawings: every axis gets a small number, every third a big one.
+  const major = (value: number) => (value - 50) % 3 === 0;
   return (
     <div
       className="absolute"
@@ -52,7 +54,7 @@ export default function SchematicPlanSurface({
               <text
                 x={block.x0 + 6}
                 y={block.y0 - 5}
-                fontSize={11}
+                fontSize={15}
                 fontWeight={700}
                 fill="#475569"
               >
@@ -65,24 +67,29 @@ export default function SchematicPlanSurface({
           <g key={`axis-${axis.value}`}>
             <line
               x1={axis.x}
-              y1={bubbleY}
+              y1={bubbleY + 6}
               x2={axis.x}
               y2={mainLastY + 14}
-              stroke="#eef2f7"
+              stroke="#e5e9f0"
               strokeWidth={0.6}
+              strokeDasharray="3 3"
             />
-            <circle
-              cx={axis.x}
-              cy={bubbleY}
-              r={8}
-              fill="#ffffff"
-              stroke="#cbd5e1"
-              strokeWidth={0.7}
-            />
+            {major(axis.value) ? (
+              <text
+                x={axis.x}
+                y={bubbleY - 12}
+                fontSize={15}
+                fontWeight={700}
+                textAnchor="middle"
+                fill="#0f172a"
+              >
+                {axis.value}
+              </text>
+            ) : null}
             <text
               x={axis.x}
-              y={bubbleY + 2.5}
-              fontSize={6.5}
+              y={bubbleY + 2}
+              fontSize={8}
               textAnchor="middle"
               fill="#64748b"
             >
@@ -98,23 +105,17 @@ export default function SchematicPlanSurface({
                 y1={block.y0}
                 x2={axis.x}
                 y2={block.y1}
-                stroke="#eef2f7"
+                stroke="#e5e9f0"
                 strokeWidth={0.6}
-              />
-              <circle
-                cx={axis.x}
-                cy={block.y0 + 10}
-                r={6}
-                fill="#ffffff"
-                stroke="#cbd5e1"
-                strokeWidth={0.6}
+                strokeDasharray="3 3"
               />
               <text
                 x={axis.x}
-                y={block.y0 + 11}
-                fontSize={5}
+                y={block.y1 + 20}
+                fontSize={15}
+                fontWeight={700}
                 textAnchor="middle"
-                fill="#64748b"
+                fill="#0f172a"
               >
                 {axis.value}
               </text>
@@ -129,8 +130,9 @@ export default function SchematicPlanSurface({
                 y1={row.y}
                 x2={lastX + 10}
                 y2={row.y}
-                stroke="#e2e8f0"
-                strokeWidth={0.9}
+                stroke="#94a3b8"
+                strokeWidth={0.8}
+                strokeDasharray="6 4"
               />
             ) : (
               plan.bunkeBlocks
@@ -148,21 +150,13 @@ export default function SchematicPlanSurface({
                   />
                 ))
             )}
-            <circle
-              cx={26}
-              cy={row.y}
-              r={13}
-              fill={row.main ? "#0f172a" : "#e2e8f0"}
-              stroke="#94a3b8"
-              strokeWidth={1}
-            />
             <text
               x={26}
-              y={row.y + 4}
-              fontSize={11}
-              fontWeight={700}
+              y={row.y + 7}
+              fontSize={20}
+              fontWeight={800}
               textAnchor="middle"
-              fill={row.main ? "#ffffff" : "#334155"}
+              fill="#0f172a"
             >
               {row.key}
             </text>

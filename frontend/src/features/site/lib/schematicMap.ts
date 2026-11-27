@@ -60,26 +60,27 @@ const BUNKE_ROWS = ["E", "D", "C", "B", "A"];
 const BUNKE_ROW_SET = new Set(BUNKE_ROWS);
 
 const LEFT = 66;
-const TOP = 56;
-const AXIS_GAP = 46;
+const TOP = 70;
+export const SCHEMATIC_AXIS_GAP = 30;
+const AXIS_GAP = SCHEMATIC_AXIS_GAP;
 const ROW_GAP = 64;
-const BLOCK_GAP = 16;
+const BUNKE_ROW_GAP = 46;
+const BLOCK_GAP = 30;
 const RIGHT = 44;
-const BOTTOM = 44;
-const AXIS_BUBBLE_Y = 28;
+const BOTTOM = 56;
 
 /**
- * Reviewed TK-09 anchor: Bunke axes 152 / 153-155 / 156-157 sit under
- * main-deck axes ~49-50 / ~66-68 / ~76-81.
+ * Owner-approved PD2 sketch (Mat_bang_PD2_va_bunke_phat_sinh_26-11): each Bunke
+ * axis sits under a fractional main-deck axis. Approximate by design.
  */
 const BUNKE_ATTACHMENTS: Record<
   string,
   Array<{ axes: number[]; anchors: number[] }>
 > = {
   "Cầu chính": [
-    { axes: [152], anchors: [49] },
-    { axes: [153, 154, 155], anchors: [66, 67, 68] },
-    { axes: [156, 157], anchors: [76, 81] },
+    { axes: [152], anchors: [49.75] },
+    { axes: [153, 154, 155], anchors: [64.3, 66.9, 69.6] },
+    { axes: [156, 157, 158], anchors: [77.1, 79.7, 82.3] },
   ],
 };
 
@@ -198,9 +199,16 @@ function buildPlan(key: string, items: ReadonlyArray<SchematicInput>): Schematic
     if (code.kind === "vertical") return [code.axis];
     return [];
   };
-  const mainAxes = [
+  const usedMainAxes = [
     ...new Set(mainCodes.flatMap(({ code }) => axisOf(code))),
   ].sort((a, b) => a - b);
+  // Continuous, evenly spaced axes like the drawings (no gap compression).
+  const mainAxes = usedMainAxes.length
+    ? Array.from(
+        { length: usedMainAxes[usedMainAxes.length - 1] - usedMainAxes[0] + 1 },
+        (_, index) => usedMainAxes[0] + index,
+      )
+    : [];
   const bunkeAxes = [
     ...new Set(bunkeCodes.flatMap(({ code }) => axisOf(code))),
   ].sort((a, b) => a - b);
@@ -266,7 +274,8 @@ function buildPlan(key: string, items: ReadonlyArray<SchematicInput>): Schematic
     ...new Set(bunkeCodes.map(({ code }) => ("row" in code ? code.row : ""))),
   ].filter(Boolean);
   const bunkeRowOrder = [
-    ...BUNKE_ROWS.filter((row) => presentBunkeRows.includes(row)),
+    // Keep the full E..A ladder (row C has no piles but is part of the frame).
+    ...(presentBunkeRows.some((row) => BUNKE_ROW_SET.has(row)) ? BUNKE_ROWS : []),
     ...presentBunkeRows
       .filter((row) => !BUNKE_ROWS.includes(row))
       .sort((a, b) => a.localeCompare(b)),
@@ -284,14 +293,14 @@ function buildPlan(key: string, items: ReadonlyArray<SchematicInput>): Schematic
   const bunkeStart =
     TOP + (mainRowOrder.length ? mainRowOrder.length * ROW_GAP + BLOCK_GAP : 0);
   bunkeRowOrder.forEach((row, index) => {
-    const y = bunkeStart + index * ROW_GAP;
+    const y = bunkeStart + index * BUNKE_ROW_GAP;
     rowY.set(row, y);
     rows.push({ key: row, y, main: false });
   });
   if (unknownRow) {
     const y =
       (bunkeRowOrder.length
-        ? bunkeStart + bunkeRowOrder.length * ROW_GAP
+        ? bunkeStart + bunkeRowOrder.length * BUNKE_ROW_GAP
         : TOP + mainRowOrder.length * ROW_GAP) + BLOCK_GAP;
     rowY.set(unknownRow, y);
     rows.push({ key: unknownRow, y, main: false });
@@ -305,16 +314,14 @@ function buildPlan(key: string, items: ReadonlyArray<SchematicInput>): Schematic
   const addBunkeBlock = (axes: number[], groupItems: typeof bunkeCodes) => {
     if (!axes.length || !groupItems.length) return;
     const positions = axes.map((value) => ({ value, x: bunkeXFor(value) }));
-    const rowKeys = [
-      ...new Set(groupItems.flatMap(({ code }) => rowKeysForCode(code))),
-    ].filter((row) => rowY.has(row));
+    const rowKeys = bunkeRowOrder.filter((row) => rowY.has(row));
     if (!rowKeys.length) return;
     axes.forEach((axis) => coveredBunkeAxes.add(axis));
     bunkeBlocks.push({
       x0: Math.min(...positions.map((axis) => axis.x)) - 22,
-      y0: Math.min(...rowKeys.map((row) => rowY.get(row) ?? TOP)) - 26,
+      y0: Math.min(...rowKeys.map((row) => rowY.get(row) ?? TOP)) - 22,
       x1: Math.max(...positions.map((axis) => axis.x)) + 22,
-      y1: Math.max(...rowKeys.map((row) => rowY.get(row) ?? TOP)) + 22,
+      y1: Math.max(...rowKeys.map((row) => rowY.get(row) ?? TOP)) + 18,
       axes: positions,
       rows: rowKeys,
     });
@@ -403,6 +410,8 @@ function buildPlan(key: string, items: ReadonlyArray<SchematicInput>): Schematic
   const height = Math.max(
     TOP + ROW_GAP,
     ...rows.map((row) => row.y + BOTTOM),
+    // room for the Bunke axis numbers drawn under each block
+    ...bunkeBlocks.map((block) => block.y1 + 30),
   );
   const normalized = markers.map((marker) => ({
     ...marker,

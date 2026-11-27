@@ -23,6 +23,7 @@ import {
 } from "../lib/drawingMapPanel";
 import DrawingMapViewControls from "./DrawingMapViewControls";
 import SchematicPlanSurface from "./SchematicPlanSurface";
+import { SCHEMATIC_AXIS_GAP } from "../lib/schematicMap";
 import type { ImageState } from "./useDrawingMapResources";
 
 export type HitChoices = {
@@ -136,14 +137,12 @@ export default function DrawingMapCanvas({
         ref={viewportRef}
         className={`relative w-full touch-none select-none overflow-hidden bg-slate-100 ${
           compact
-            ? "min-h-[45vh] max-h-[65vh]"
+            ? activeSheet.schematic
+              ? "min-h-[22vh] max-h-[65vh]"
+              : "min-h-[45vh] max-h-[65vh]"
             : "h-[62vh] min-h-64 max-h-[38rem]"
         }`}
-        style={
-          compact && !activeSheet.schematic
-            ? { aspectRatio: compactAspect }
-            : undefined
-        }
+        style={compact ? { aspectRatio: compactAspect } : undefined}
         role="group"
         aria-label="Bản đồ bản vẽ tương tác"
         onPointerDown={onPointerDown}
@@ -343,6 +342,42 @@ export default function DrawingMapCanvas({
                               opacity={opacity}
                             />
                           </>
+                        ) : activeSheet.schematic ? (
+                          // Schematic piles are squares sized to the axis spacing on screen.
+                          (() => {
+                            const gapPx =
+                              (SCHEMATIC_AXIS_GAP * imageBox.width * view.zoom) /
+                              activeSheet.schematic.width;
+                            const half = Math.min(6, Math.max(2, gapPx * 0.28));
+                            return (
+                          <>
+                            {accepted ? (
+                              <rect
+                                x={x - unitX(half + 3)}
+                                y={y - unitY(half + 3)}
+                                width={unitX(2 * half + 6)}
+                                height={unitY(2 * half + 6)}
+                                fill="none"
+                                stroke={ACCEPTANCE_OUTLINE_COLOR}
+                                strokeWidth={selected ? 3 : 2}
+                                opacity={opacity}
+                                vectorEffect="non-scaling-stroke"
+                              />
+                            ) : null}
+                            <rect
+                              x={x - unitX(half)}
+                              y={y - unitY(half)}
+                              width={unitX(2 * half)}
+                              height={unitY(2 * half)}
+                              fill={selected ? "#111827" : statusColor}
+                              stroke="#ffffff"
+                              strokeWidth={half > 3 ? 1 : 0}
+                              vectorEffect="non-scaling-stroke"
+                              opacity={opacity}
+                            />
+                          </>
+                            );
+                          })()
                         ) : (
                           <>
                             {accepted ? (
