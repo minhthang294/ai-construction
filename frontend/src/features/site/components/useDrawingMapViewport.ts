@@ -14,6 +14,7 @@ import {
   type ViewportFitState,
 } from "../lib/drawingMap";
 import type { ImageState } from "./useDrawingMapResources";
+import { SCHEMATIC_BOUNDS } from "../lib/schematicMap";
 
 export type SetView = (next: View | ((current: View) => View)) => void;
 
@@ -71,7 +72,7 @@ export function useDrawingMapViewport({
     if (!viewport) return;
     const fitted = fitViewToBounds(
       activeSheet.schematic
-        ? { minX: 0, minY: 0, maxX: 1, maxY: 1 }
+        ? SCHEMATIC_BOUNDS
         : markerBounds(activeSheet.markers),
       imageBox,
       viewport.clientWidth,
@@ -133,7 +134,7 @@ export function useDrawingMapViewport({
     const { width, height } = viewportSize();
     const fitted = fitViewToBounds(
       activeSheet.schematic
-        ? { minX: 0, minY: 0, maxX: 1, maxY: 1 }
+        ? SCHEMATIC_BOUNDS
         : markerBounds(activeSheet.markers),
       imageBox,
       width,

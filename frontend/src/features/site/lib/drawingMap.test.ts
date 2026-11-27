@@ -21,6 +21,7 @@ import {
   type DrawingSheet,
   type ImageBox,
 } from "./drawingMap";
+import { SCHEMATIC_BOUNDS } from "./schematicMap";
 
 function sheet(overrides: Partial<DrawingSheet> = {}): DrawingSheet {
   return {
@@ -154,8 +155,9 @@ describe("normalised overlay geometry", () => {
 });
 
 describe("zoom and pan limits", () => {
-  it("keeps zoom between one and four", () => {
-    expect(clampZoom(0.2)).toBe(1);
+  it("keeps zoom between the fit-out floor and four", () => {
+    expect(clampZoom(0.01)).toBe(0.05);
+    expect(clampZoom(0.2)).toBe(0.2);
     expect(clampZoom(2.5)).toBe(2.5);
     expect(clampZoom(9)).toBe(4);
     expect(clampZoom(Number.NaN)).toBe(1);
@@ -238,6 +240,21 @@ describe("fit the view to the batch marker bounding box", () => {
       0.08,
     );
     expect(view?.zoom).toBe(4);
+    expect(view?.pan).toEqual({ x: 0, y: 0 });
+  });
+});
+
+describe("schematic fit bounds", () => {
+  it("fits the whole wide plan below 100% zoom", () => {
+    const view = fitViewToBounds(
+      SCHEMATIC_BOUNDS,
+      { left: 0, top: 0, width: 390, height: 120 },
+      390,
+      800,
+      0.02,
+    );
+    expect(view?.zoom).toBeLessThan(1);
+    expect(view?.zoom).toBeGreaterThanOrEqual(0.05);
     expect(view?.pan).toEqual({ x: 0, y: 0 });
   });
 });

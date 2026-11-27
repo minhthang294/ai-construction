@@ -134,12 +134,16 @@ export default function DrawingMapCanvas({
 
       <div
         ref={viewportRef}
-        className={`relative touch-none select-none overflow-hidden bg-slate-100 ${
+        className={`relative w-full touch-none select-none overflow-hidden bg-slate-100 ${
           compact
             ? "min-h-[45vh] max-h-[65vh]"
             : "h-[62vh] min-h-64 max-h-[38rem]"
         }`}
-        style={compact ? { aspectRatio: compactAspect } : undefined}
+        style={
+          compact && !activeSheet.schematic
+            ? { aspectRatio: compactAspect }
+            : undefined
+        }
         role="group"
         aria-label="Bản đồ bản vẽ tương tác"
         onPointerDown={onPointerDown}
@@ -232,6 +236,13 @@ export default function DrawingMapCanvas({
                     const accepted = Boolean(marker.accepted);
                     const isCorner = /^Q-\d+$/i.test(marker.code);
                     const isFender = /^K-/i.test(marker.code);
+                    const unitX = (pixels: number) =>
+                      pixels / Math.max(1, imageBox.width * view.zoom);
+                    const unitY = (pixels: number) =>
+                      pixels / Math.max(1, imageBox.height * view.zoom);
+                    const statusColor = constructionStatusColor(
+                      marker.construction_status,
+                    );
                     const path = points.map(([px, py]) => `${px},${py}`).join(" ");
                     return (
                       <g
@@ -288,10 +299,10 @@ export default function DrawingMapCanvas({
                           <g transform={`rotate(45 ${x} ${y})`}>
                             {accepted ? (
                               <rect
-                                x={x - 0.008}
-                                y={y - 0.008 * imageBox.width / imageBox.height}
-                                width={0.016}
-                                height={0.016 * imageBox.width / imageBox.height}
+                                x={x - unitX(8)}
+                                y={y - unitY(8)}
+                                width={unitX(16)}
+                                height={unitY(16)}
                                 fill="none"
                                 stroke={ACCEPTANCE_OUTLINE_COLOR}
                                 strokeWidth={selected ? 3 : 2}
@@ -300,25 +311,22 @@ export default function DrawingMapCanvas({
                               />
                             ) : null}
                             <rect
-                              x={x - 0.005}
-                              y={y - 0.005 * imageBox.width / imageBox.height}
-                              width={0.01}
-                              height={0.01 * imageBox.width / imageBox.height}
-                              fill="none"
-                              stroke={selected ? "#111827" : color}
-                              strokeWidth={selected ? 2 : 1.5}
+                              x={x - unitX(5)}
+                              y={y - unitY(5)}
+                              width={unitX(10)}
+                              height={unitY(10)}
+                              fill={selected ? "#111827" : statusColor}
                               opacity={opacity}
-                              vectorEffect="non-scaling-stroke"
                             />
                           </g>
                         ) : isFender ? (
                           <>
                             {accepted ? (
                               <rect
-                                x={x - 0.007}
-                                y={y - 0.006 * imageBox.width / imageBox.height}
-                                width={0.014}
-                                height={0.012 * imageBox.width / imageBox.height}
+                                x={x - unitX(7)}
+                                y={y - unitY(5)}
+                                width={unitX(14)}
+                                height={unitY(10)}
                                 fill="none"
                                 stroke={ACCEPTANCE_OUTLINE_COLOR}
                                 strokeWidth={selected ? 3 : 2}
@@ -327,11 +335,11 @@ export default function DrawingMapCanvas({
                               />
                             ) : null}
                             <rect
-                              x={x - 0.004}
-                              y={y - 0.0035 * imageBox.width / imageBox.height}
-                              width={0.008}
-                              height={0.007 * imageBox.width / imageBox.height}
-                              fill={color}
+                              x={x - unitX(5)}
+                              y={y - unitY(3)}
+                              width={unitX(10)}
+                              height={unitY(6)}
+                              fill={selected ? "#111827" : statusColor}
                               opacity={opacity}
                             />
                           </>
@@ -341,8 +349,8 @@ export default function DrawingMapCanvas({
                               <ellipse
                                 cx={x}
                                 cy={y}
-                                rx={0.006}
-                                ry={0.006 * imageBox.width / imageBox.height}
+                                rx={unitX(7.5)}
+                                ry={unitY(7.5)}
                                 fill="none"
                                 stroke={ACCEPTANCE_OUTLINE_COLOR}
                                 strokeWidth={selected ? 3 : 2}
@@ -353,14 +361,10 @@ export default function DrawingMapCanvas({
                             <ellipse
                               cx={x}
                               cy={y}
-                              rx={0.004}
-                              ry={0.004 * imageBox.width / imageBox.height}
-                              fill="none"
-                              stroke={selected ? "#111827" : color}
-                              strokeWidth={selected ? 2 : 1.25}
-                              strokeDasharray={markerDashArray(marker, "point")}
+                              rx={unitX(5)}
+                              ry={unitY(5)}
+                              fill={selected ? "#111827" : statusColor}
                               opacity={opacity}
-                              vectorEffect="non-scaling-stroke"
                             />
                           </>
                         )}

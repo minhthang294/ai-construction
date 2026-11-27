@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  containBox,
   fetchDrawingMap,
   fetchDrawingSheetImageUrl,
   markerBounds,
@@ -184,13 +183,12 @@ export default function DrawingMapPanel({
     const viewport = viewportRef.current;
     if (!plan || !viewport) return;
     const update = () => {
+      const width = viewport.clientWidth;
+      const height = viewport.clientHeight;
       setImageBox(
-        containBox(
-          plan.width,
-          plan.height,
-          viewport.clientWidth,
-          viewport.clientHeight,
-        ),
+        width > 0 && height > 0
+          ? { left: 0, top: 0, width, height }
+          : null,
       );
     };
     update();

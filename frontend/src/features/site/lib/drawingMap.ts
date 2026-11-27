@@ -295,11 +295,11 @@ export type MarkerBounds = {
   maxY: number;
 };
 
-export const MIN_ZOOM = 1;
+export const MIN_ZOOM = 0.05;
 export const MAX_ZOOM = 4;
 
 export function clampZoom(value: number): number {
-  if (!Number.isFinite(value)) return MIN_ZOOM;
+  if (!Number.isFinite(value)) return 1;
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
 }
 
@@ -311,7 +311,7 @@ export function clampPan(
   viewportHeight: number,
 ): Pan {
   const z = clampZoom(zoom);
-  if (z === MIN_ZOOM) return { x: 0, y: 0 };
+  if (z <= 1) return { x: 0, y: 0 };
   const maxX = Math.max(0, ((z - 1) * viewportWidth) / 2);
   const maxY = Math.max(0, ((z - 1) * viewportHeight) / 2);
   const x = Number.isFinite(pan.x) ? pan.x : 0;

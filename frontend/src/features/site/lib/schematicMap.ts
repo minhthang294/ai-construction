@@ -37,11 +37,19 @@ export type SchematicPlan = {
   width: number;
   height: number;
   axes: Array<{ value: number; x: number }>;
+  /** Bunke axes shown as a compact secondary axis row above the block. */
+  bunkeAxes: Array<{ value: number; x: number }>;
   rows: Array<{ key: string; y: number; main: boolean }>;
   bunke: { x0: number; y0: number; x1: number; y1: number } | null;
+  bunkeBlocks: Array<{
+    x0: number;
+    y0: number;
+    x1: number;
+    y1: number;
+    axes: Array<{ value: number; x: number }>;
+    rows: string[];
+  }>;
   markers: SchematicMarker[];
-  /** Set when the plan deliberately separates a disjoint Bunke axis block. */
-  bunkeGap: boolean;
 };
 
 const MAIN_ROWS: Record<string, string[]> = {
@@ -55,11 +63,32 @@ const LEFT = 66;
 const TOP = 56;
 const AXIS_GAP = 46;
 const ROW_GAP = 64;
-const BLOCK_GAP = 42;
+const BLOCK_GAP = 16;
 const RIGHT = 44;
 const BOTTOM = 44;
 const AXIS_BUBBLE_Y = 28;
-const GAP_SLOTS = 4;
+
+/**
+ * Reviewed TK-09 anchor: Bunke axes 152 / 153-155 / 156-157 sit under
+ * main-deck axes ~49-50 / ~66-68 / ~76-81.
+ */
+const BUNKE_ATTACHMENTS: Record<
+  string,
+  Array<{ axes: number[]; anchors: number[] }>
+> = {
+  "Cầu chính": [
+    { axes: [152], anchors: [49] },
+    { axes: [153, 154, 155], anchors: [66, 67, 68] },
+    { axes: [156, 157], anchors: [76, 81] },
+  ],
+};
+
+export const SCHEMATIC_BOUNDS = {
+  minX: 0,
+  minY: 0,
+  maxX: 1,
+  maxY: 1,
+};
 
 export function parseSchematicCode(
   code: string,
@@ -175,31 +204,52 @@ function buildPlan(key: string, items: ReadonlyArray<SchematicInput>): Schematic
   const bunkeAxes = [
     ...new Set(bunkeCodes.flatMap(({ code }) => axisOf(code))),
   ].sort((a, b) => a - b);
-  const sharedAxes = bunkeAxes.filter((axis) => mainAxes.includes(axis));
-
-  let axisValues: number[] = [];
-  let bunkeOffset = 0;
-  let bunkeGap = false;
-  if (!bunkeAxes.length || sharedAxes.length) {
-    axisValues = [...new Set([...mainAxes, ...bunkeAxes])].sort(
-      (a, b) => a - b,
-    );
-  } else {
-    bunkeGap = true;
-    bunkeOffset = mainAxes.length + GAP_SLOTS;
-    axisValues = [...mainAxes, ...bunkeAxes];
-  }
-  const axisX = new Map<number, number>();
-  axisValues.forEach((axis, index) => {
-    const xIndex =
-      bunkeGap && !mainAxes.includes(axis)
-        ? bunkeOffset + bunkeAxes.indexOf(axis)
-        : index;
-    axisX.set(axis, LEFT + xIndex * AXIS_GAP);
-  });
-  const axes = axisValues.map((value) => ({
+  const mainAxisX = new Map(mainAxes.map((axis, index) => [axis, LEFT + index * AXIS_GAP]));
+  const axes = mainAxes.map((value) => ({
     value,
-    x: axisX.get(value) ?? LEFT,
+    x: mainAxisX.get(value) ?? LEFT,
+  }));
+
+  function mainXFor(axis: number): number {
+    const exact = mainAxisX.get(axis);
+    if (exact !== undefined) return exact;
+    if (!mainAxes.length) return LEFT;
+    const lower =
+      [...mainAxes].reverse().find((value) => value <= axis) ?? mainAxes[0];
+    const upper =
+      mainAxes.find((value) => value >= axis) ?? mainAxes[mainAxes.length - 1];
+    const lowerX = mainAxisX.get(lower) ?? LEFT;
+    const upperX = mainAxisX.get(upper) ?? lowerX;
+    if (lower === upper) return lowerX;
+    const ratio = (axis - lower) / (upper - lower);
+    return lowerX + ratio * (upperX - lowerX);
+  }
+
+  function bunkeXFor(axis: number): number {
+    const attachment = BUNKE_ATTACHMENTS[zone]?.find((group) =>
+      group.axes.includes(axis),
+    );
+    if (attachment) {
+      const index = attachment.axes.indexOf(axis);
+      return mainXFor(
+        attachment.anchors[Math.min(index, attachment.anchors.length - 1)],
+      );
+    }
+    if (mainAxisX.has(axis)) return mainAxisX.get(axis) ?? LEFT;
+    // Unknown Bunke axes stay under the right end of the main grid, never in
+    // a separate block to the right.
+    if (mainAxes.length) {
+      const index = bunkeAxes.indexOf(axis);
+      const span = Math.min(bunkeAxes.length, mainAxes.length);
+      const anchorIndex = Math.max(0, mainAxes.length - span + index);
+      return LEFT + Math.min(anchorIndex, mainAxes.length - 1) * AXIS_GAP;
+    }
+    return LEFT + bunkeAxes.indexOf(axis) * AXIS_GAP;
+  }
+
+  const bunkeAxisPositions = bunkeAxes.map((value) => ({
+    value,
+    x: bunkeXFor(value),
   }));
 
   const preferred = MAIN_ROWS[zone] ?? [];
@@ -247,7 +297,49 @@ function buildPlan(key: string, items: ReadonlyArray<SchematicInput>): Schematic
     rows.push({ key: unknownRow, y, main: false });
   }
 
+  const rowKeysForCode = (code: ParsedCode): string[] =>
+    code.kind === "vertical" ? [code.row, code.rowEnd] : "row" in code ? [code.row] : [];
+
+  const bunkeBlocks: SchematicPlan["bunkeBlocks"] = [];
+  const coveredBunkeAxes = new Set<number>();
+  const addBunkeBlock = (axes: number[], groupItems: typeof bunkeCodes) => {
+    if (!axes.length || !groupItems.length) return;
+    const positions = axes.map((value) => ({ value, x: bunkeXFor(value) }));
+    const rowKeys = [
+      ...new Set(groupItems.flatMap(({ code }) => rowKeysForCode(code))),
+    ].filter((row) => rowY.has(row));
+    if (!rowKeys.length) return;
+    axes.forEach((axis) => coveredBunkeAxes.add(axis));
+    bunkeBlocks.push({
+      x0: Math.min(...positions.map((axis) => axis.x)) - 22,
+      y0: Math.min(...rowKeys.map((row) => rowY.get(row) ?? TOP)) - 26,
+      x1: Math.max(...positions.map((axis) => axis.x)) + 22,
+      y1: Math.max(...rowKeys.map((row) => rowY.get(row) ?? TOP)) + 22,
+      axes: positions,
+      rows: rowKeys,
+    });
+  };
+  for (const group of BUNKE_ATTACHMENTS[zone] ?? []) {
+    const axes = group.axes.filter((axis) => bunkeAxes.includes(axis));
+    const groupItems = bunkeCodes.filter(({ code }) =>
+      axisOf(code).some((axis) => group.axes.includes(axis)),
+    );
+    addBunkeBlock(axes, groupItems);
+  }
+  const looseAxes = bunkeAxes.filter((axis) => !coveredBunkeAxes.has(axis));
+  addBunkeBlock(
+    looseAxes,
+    bunkeCodes.filter(({ code }) =>
+      axisOf(code).some((axis) => looseAxes.includes(axis)),
+    ),
+  );
+
   const markers: SchematicMarker[] = [];
+  const bunkeIds = new Set(bunkeCodes.map(({ item }) => item.id));
+  const axisXFor = (item: SchematicInput, axis: number) =>
+    bunkeIds.has(item.id)
+      ? bunkeXFor(axis)
+      : mainAxisX.get(axis) ?? mainXFor(axis);
   const push = (
     item: SchematicInput,
     kind: ParsedCode["kind"],
@@ -265,12 +357,12 @@ function buildPlan(key: string, items: ReadonlyArray<SchematicInput>): Schematic
   };
   for (const { item, code } of parsed) {
     if (code.kind === "pile") {
-      const x = axisX.get(code.axis) ?? LEFT;
+      const x = axisXFor(item, code.axis);
       const y = rowY.get(code.row) ?? TOP;
       push(item, "pile", code.row, [[x, y]]);
     } else if (code.kind === "beam") {
-      const x1 = axisX.get(code.axis) ?? LEFT;
-      const x2 = axisX.get(code.axisEnd) ?? x1;
+      const x1 = axisXFor(item, code.axis);
+      const x2 = axisXFor(item, code.axisEnd);
       const y = rowY.get(code.row) ?? TOP;
       push(
         item,
@@ -283,15 +375,15 @@ function buildPlan(key: string, items: ReadonlyArray<SchematicInput>): Schematic
     } else if (code.kind === "vertical") {
       const y1 = rowY.get(code.row) ?? TOP;
       const y2 = rowY.get(code.rowEnd) ?? y1;
-      const x = axisX.get(code.axis) ?? LEFT;
+      const x = axisXFor(item, code.axis);
       push(item, "vertical", code.row, [[x, y1], [x, y2]]);
     } else if (code.kind === "corner") {
-      const x = axisX.get(code.axis) ?? LEFT;
+      const x = axisXFor(item, code.axis);
       const y = rowY.get(code.row) ?? TOP;
       push(item, "corner", code.row, [[x, y]]);
     } else if (code.kind === "fender") {
-      const x1 = axisX.get(code.axis) ?? LEFT;
-      const x2 = axisX.get(code.axisEnd) ?? x1;
+      const x1 = axisXFor(item, code.axis);
+      const x2 = axisXFor(item, code.axisEnd);
       const y = rowY.get(code.row) ?? TOP;
       push(item, "fender", code.row, [[x1, y], [x2, y]]);
     } else {
@@ -318,25 +410,15 @@ function buildPlan(key: string, items: ReadonlyArray<SchematicInput>): Schematic
       ([x, y]) => [x / width, y / height] as [number, number],
     ),
   }));
-  const bunkeRows = rows.filter((row) => !row.main && row.key !== "?");
-  const bunke = bunkeRows.length
-    ? {
-        x0:
-          Math.min(...bunkeRows.flatMap((row) =>
-            markers
-              .filter((marker) => marker.row === row.key)
-              .flatMap((marker) => marker.points.map(([x]) => x)),
-          )) - 24,
-        y0: Math.min(...bunkeRows.map((row) => row.y)) - 22,
-        x1:
-          Math.max(...bunkeRows.flatMap((row) =>
-            markers
-              .filter((marker) => marker.row === row.key)
-              .flatMap((marker) => marker.points.map(([x]) => x)),
-          )) + 24,
-        y1: Math.max(...bunkeRows.map((row) => row.y)) + 22,
-      }
-    : null;
+  const bunke =
+    bunkeBlocks.length
+      ? {
+          x0: Math.min(...bunkeBlocks.map((block) => block.x0)),
+          y0: Math.min(...bunkeBlocks.map((block) => block.y0)),
+          x1: Math.max(...bunkeBlocks.map((block) => block.x1)),
+          y1: Math.max(...bunkeBlocks.map((block) => block.y1)),
+        }
+      : null;
 
   return {
     key,
@@ -349,9 +431,10 @@ function buildPlan(key: string, items: ReadonlyArray<SchematicInput>): Schematic
     width,
     height,
     axes,
+    bunkeAxes: bunkeAxisPositions,
     rows,
     bunke,
+    bunkeBlocks,
     markers: normalized,
-    bunkeGap,
   };
 }

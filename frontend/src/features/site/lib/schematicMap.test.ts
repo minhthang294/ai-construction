@@ -120,29 +120,47 @@ describe("schematic plan layout", () => {
     expect(plan.bunke).not.toBeNull();
   });
 
-  it("aligns a Bunke block with shared axes and separates disjoint axes", () => {
-    const shared = buildSchematicPlans([
-      item({ id: "f", code: "F10" }),
-      item({ id: "e", code: "E10", zone: "Bunke" }),
+  it("uses reviewed anchors for the Bunke sub-grid inside the main width", () => {
+    const plan = buildSchematicPlans([
+      item({ id: "a49", code: "I49" }),
+      item({ id: "a50", code: "I50" }),
+      item({ id: "a66", code: "F66" }),
+      item({ id: "a67", code: "F67" }),
+      item({ id: "a68", code: "F68" }),
+      item({ id: "a76", code: "F76" }),
+      item({ id: "a81", code: "F81" }),
+      item({ id: "b152", code: "A152", zone: "Bunke" }),
+      item({ id: "b153", code: "B153", zone: "Bunke" }),
+      item({ id: "b154", code: "D154", zone: "Bunke" }),
+      item({ id: "b155", code: "E155", zone: "Bunke" }),
+      item({ id: "b156", code: "A156", zone: "Bunke" }),
+      item({ id: "b157", code: "B157", zone: "Bunke" }),
     ])[0];
-    const mainAxis = shared.axes.find((axis) => axis.value === 10);
-    const bunkeRow = shared.rows.find((row) => row.key === "E");
-    const bunkeMarker = shared.markers.find(
-      (marker) => marker.componentId === "e",
-    );
-    expect(bunkeMarker?.points[0][0]).toBeCloseTo(
-      mainAxis?.x ? mainAxis.x / shared.width : 0,
-    );
-    expect(bunkeRow?.y).toBeGreaterThan(0);
+    const x = new Map(plan.axes.map((axis) => [axis.value, axis.x]));
+    const bx = new Map(plan.bunkeAxes.map((axis) => [axis.value, axis.x]));
+    expect(bx.get(152)).toBe(x.get(49));
+    expect(bx.get(153)).toBe(x.get(66));
+    expect(bx.get(154)).toBe(x.get(67));
+    expect(bx.get(155)).toBe(x.get(68));
+    expect(bx.get(156)).toBe(x.get(76));
+    expect(bx.get(157)).toBe(x.get(81));
+    expect(plan.bunke?.x0).toBeLessThan(x.get(49) ?? 0);
+    expect(plan.bunke?.x1).toBeGreaterThan(x.get(81) ?? 0);
+    expect(
+      plan.bunkeBlocks.map((block) => block.axes.map((axis) => axis.value)),
+    ).toEqual([[152], [153, 154, 155], [156, 157]]);
+  });
 
-    const disjoint = buildSchematicPlans([
-      item({ id: "f", code: "F10" }),
-      item({ id: "e", code: "E500", zone: "Bunke" }),
+  it("keeps a Bunke-only plan compact instead of a right-side block", () => {
+    const plan = buildSchematicPlans([
+      item({ id: "b152", code: "A152", zone: "Bunke" }),
+      item({ id: "b153", code: "B153", zone: "Bunke" }),
     ])[0];
-    const mainX = disjoint.axes.find((axis) => axis.value === 10)?.x ?? 0;
-    const bunkeX = disjoint.axes.find((axis) => axis.value === 500)?.x ?? 0;
-    expect(disjoint.bunkeGap).toBe(true);
-    expect(bunkeX).toBeGreaterThan(mainX);
+    expect(plan.bunke).not.toBeNull();
+    const xs = plan.bunkeAxes.map((axis) => axis.x);
+    expect(Math.max(...xs) - Math.min(...xs)).toBeLessThan(
+      (xs.length + 1) * 46,
+    );
   });
 
   it("normalises every point inside the plan bounds", () => {

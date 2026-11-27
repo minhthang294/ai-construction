@@ -1612,3 +1612,11 @@ npm run build   # OK
 ```
 
 **Chưa kiểm**: chưa chạy app local/browser để chụp màn hình sơ đồ thật (không có server đang chạy); chưa đo 60 fps trên điện thoại với 500 marker; chưa có E2E cho pinch/double-tap. Bulk nhiều definition gọi nhiều request preview/save; retry dùng cùng key có hậu tố nhóm nhưng nếu một nhóm lỗi giữa chừng có thể đã ghi các nhóm trước (API bulk hiện tại chỉ một definition mỗi lần).
+
+### Vùng 14b - phản hồi ảnh điện thoại 390px
+
+- Giảm `MIN_ZOOM` xuống 0.05 để fit được toàn bộ sơ đồ rộng; `clampPan` giữ pan 0 khi zoom <= 1. Toàn bộ trục chính 49-96 và ba khối Bunke hiển thị trong lần mở đầu (ảnh `phone-0-map.png`, zoom 96%).
+- Bỏ "Bunke tách trục": Bunke là các khối con compact đặt ngay dưới lưới chính tại các mốc TK-09: trục 152 dưới trục chính 49; 153-155 dưới 66-68; 156-157 dưới 76-81. Mỗi khối có bubble trục riêng (152..157), chỉ vẽ các hàng E/D/B/A có trong khối, không còn đường hàng Bunke full-width.
+- Marker cọc tô đầy màu trạng thái (xám/amber/lục/đỏ); vòng nghiệm thu chỉ vẽ khi `accepted`. Cỡ marker tính theo px màn hình nên vẫn thấy khi zoom overview.
+- Đường trục/hàng nhạt hơn; `BLOCK_GAP` 42 -> 16; ảnh compact không còn tràn ngang do `aspect-ratio` + `min-height` (thêm `w-full`, bỏ aspect-ratio cho sơ đồ).
+- Test mới: anchor Bunke 152/153-155/156-157 và fit bounds rộng cho zoom < 1. `npm test`: 43 files, 323 tests; `npm run build`: OK. Ảnh chụp bằng `shoot3.js` trên app 127.0.0.1:5173/8765, không lỗi trang.
