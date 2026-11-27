@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildSchematicPlans,
+  hasDeckPile,
   parseSchematicCode,
   type SchematicInput,
 } from "./schematicMap";
@@ -149,7 +150,7 @@ describe("schematic plan layout", () => {
     expect(plan.bunke?.x1).toBeGreaterThan(at(79.7));
     expect(
       plan.bunkeBlocks.map((block) => block.axes.map((axis) => axis.value)),
-    ).toEqual([[152], [153, 154, 155], [156, 157]]);
+    ).toEqual([[152], [153, 154, 155], [156, 157, 158]]);
   });
 
   it("keeps a Bunke-only plan compact instead of a right-side block", () => {
@@ -180,5 +181,35 @@ describe("schematic plan layout", () => {
         expect(y).toBeLessThanOrEqual(1);
       }
     }
+  });
+});
+
+describe("full deck grid", () => {
+  it("follows the PD2 pile pattern", () => {
+    expect(hasDeckPile("I", 49)).toBe(true);
+    expect(hasDeckPile("I", 50)).toBe(false);
+    expect(hasDeckPile("H", 50)).toBe(true);
+    expect(hasDeckPile("G", 52)).toBe(false);
+    expect(hasDeckPile("F", 96)).toBe(true);
+    expect(hasDeckPile("C", 153)).toBe(false);
+    expect(hasDeckPile("B", 156)).toBe(true);
+  });
+
+  it("adds hollow piles for unrecorded positions and cross beams", () => {
+    const [plan] = buildSchematicPlans([
+      item({ id: "i", code: "I49" }),
+      item({ id: "h", code: "H50" }),
+      item({ id: "f", code: "F55" }),
+      item({ id: "b", code: "B153", zone: "Bunke" }),
+    ]);
+    const codes = new Set(plan.gridPiles.map((pile) => pile.code));
+    expect(codes.has("I49")).toBe(false);
+    expect(codes.has("I51")).toBe(true);
+    expect(codes.has("H53")).toBe(true);
+    expect(codes.has("A155")).toBe(true);
+    expect(codes.has("C153")).toBe(false);
+    expect(plan.crossBeams.map((beam) => beam.x)).toContain(
+      plan.axes.find((axis) => axis.value === 50)?.x,
+    );
   });
 });

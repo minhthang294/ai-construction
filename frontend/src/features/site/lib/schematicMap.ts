@@ -50,7 +50,23 @@ export type SchematicPlan = {
     rows: string[];
   }>;
   markers: SchematicMarker[];
+  /** Pile positions with no repair record (hollow squares), plan units. */
+  gridPiles: Array<{ x: number; y: number; code: string }>;
+  /** Transverse deck beams (dashed), plan units. */
+  crossBeams: Array<{ x: number; y0: number; y1: number }>;
 };
+
+/**
+ * Cầu chính pile grid read from the owner-approved PD2 sketch: rows I/F carry
+ * piles on every axis except 50,53,56,…; rows H/G only on 50,53,56,…; Bunke rows
+ * E/D/B/A on every Bunke axis (row C has none).
+ */
+export function hasDeckPile(row: string, axis: number): boolean {
+  const onCross = (axis - 50) % 3 === 0;
+  if (row === "I" || row === "F") return !onCross;
+  if (row === "H" || row === "G") return onCross;
+  return ["E", "D", "B", "A"].includes(row);
+}
 
 const MAIN_ROWS: Record<string, string[]> = {
   "Cầu chính": ["I", "H", "G", "F"],
@@ -209,9 +225,14 @@ function buildPlan(key: string, items: ReadonlyArray<SchematicInput>): Schematic
         (_, index) => usedMainAxes[0] + index,
       )
     : [];
-  const bunkeAxes = [
-    ...new Set(bunkeCodes.flatMap(({ code }) => axisOf(code))),
-  ].sort((a, b) => a - b);
+  const presentBunkeAxes = bunkeCodes.flatMap(({ code }) => axisOf(code));
+  // Show every Bunke axis of the attached blocks (e.g. 158) once any is used.
+  const attachmentAxes = (BUNKE_ATTACHMENTS[zone] ?? [])
+    .filter((group) => group.axes.some((axis) => presentBunkeAxes.includes(axis)))
+    .flatMap((group) => group.axes);
+  const bunkeAxes = [...new Set([...presentBunkeAxes, ...attachmentAxes])].sort(
+    (a, b) => a - b,
+  );
   const mainAxisX = new Map(mainAxes.map((axis, index) => [axis, LEFT + index * AXIS_GAP]));
   const axes = mainAxes.map((value) => ({
     value,
@@ -400,6 +421,43 @@ function buildPlan(key: string, items: ReadonlyArray<SchematicInput>): Schematic
     }
   }
 
+  // Full deck: hollow squares for piles without a repair record + cross beams.
+  const gridPiles: SchematicPlan["gridPiles"] = [];
+  const crossBeams: SchematicPlan["crossBeams"] = [];
+  if (zone === "Cầu chính") {
+    const occupied = new Set(
+      parsed.flatMap(({ code }) =>
+        code.kind === "pile" ? [`${code.row}${code.axis}`] : [],
+      ),
+    );
+    for (const row of mainRowOrder) {
+      for (const axis of mainAxes) {
+        if (hasDeckPile(row, axis) && !occupied.has(`${row}${axis}`)) {
+          gridPiles.push({ x: mainAxisX.get(axis) ?? LEFT, y: rowY.get(row) ?? TOP, code: `${row}${axis}` });
+        }
+      }
+    }
+    for (const row of bunkeRowOrder) {
+      for (const axis of bunkeAxes) {
+        if (hasDeckPile(row, axis) && !occupied.has(`${row}${axis}`)) {
+          gridPiles.push({ x: bunkeXFor(axis), y: rowY.get(row) ?? TOP, code: `${row}${axis}` });
+        }
+      }
+    }
+    const mainYs = mainRowOrder.map((row) => rowY.get(row) ?? TOP);
+    if (mainYs.length > 1) {
+      for (const axis of mainAxes) {
+        if ((axis - 50) % 3 === 0) {
+          crossBeams.push({
+            x: mainAxisX.get(axis) ?? LEFT,
+            y0: Math.min(...mainYs),
+            y1: Math.max(...mainYs),
+          });
+        }
+      }
+    }
+  }
+
   const width = Math.max(
     LEFT + AXIS_GAP,
     ...axes.map((axis) => axis.x + RIGHT),
@@ -445,5 +503,7 @@ function buildPlan(key: string, items: ReadonlyArray<SchematicInput>): Schematic
     bunke,
     bunkeBlocks,
     markers: normalized,
+    gridPiles,
+    crossBeams,
   };
 }

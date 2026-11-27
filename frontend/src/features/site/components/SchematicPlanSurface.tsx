@@ -162,6 +162,30 @@ export default function SchematicPlanSurface({
             </text>
           </g>
         ))}
+        {plan.crossBeams.map((beam) => (
+          <line
+            key={`cross-${beam.x}`}
+            x1={beam.x}
+            y1={beam.y0}
+            x2={beam.x}
+            y2={beam.y1}
+            stroke="#94a3b8"
+            strokeWidth={0.8}
+            strokeDasharray="6 4"
+          />
+        ))}
+        {plan.gridPiles.map((pile) => (
+          <rect
+            key={`grid-${pile.code}`}
+            x={pile.x - 4.5}
+            y={pile.y - 4.5}
+            width={9}
+            height={9}
+            fill="#ffffff"
+            stroke="#475569"
+            strokeWidth={0.9}
+          />
+        ))}
       </svg>
     </div>
   );
