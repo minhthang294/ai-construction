@@ -2,6 +2,7 @@
 
 import { ApiError, apiFetch } from "./api";
 import { getDrawingImageBlob } from "./drawingImageCache";
+import type { SchematicPlan } from "./schematicMap";
 
 export type DrawingMarker = {
   component_id: string;
@@ -36,6 +37,8 @@ export type DrawingSheet = {
   zone?: string | null;
   segment?: number | null;
   markers: DrawingMarker[];
+  /** Present when the sheet is a generated schematic, not a scanned image. */
+  schematic?: SchematicPlan;
 };
 
 export type DrawingMap = {
@@ -399,6 +402,53 @@ export function fitViewToBounds(
       viewportHeight,
     ),
   };
+}
+
+export type ViewportFitState = {
+  activeSheetKey: string;
+  fittedSheetKey: string | null;
+};
+
+export type ViewportFitEvent =
+  | { type: "open"; sheetKey: string; imageReady: boolean }
+  | { type: "reset"; imageReady: boolean }
+  | { type: "gesture" }
+  | { type: "metrics" }
+  | { type: "data" }
+  | { type: "selection" };
+
+/**
+ * The viewport fits once per sheet. Metrics, data refreshes, label density,
+ * selection and cache swaps never move it; only a sheet open or an explicit
+ * "fit" request does. A gesture consumes the pending first fit immediately.
+ */
+export function viewportFitStep(
+  state: ViewportFitState,
+  event: ViewportFitEvent,
+): { state: ViewportFitState; fit: boolean } {
+  if (event.type === "open") {
+    const next = { ...state, activeSheetKey: event.sheetKey };
+    const fit =
+      event.imageReady && next.fittedSheetKey !== event.sheetKey;
+    if (fit) next.fittedSheetKey = event.sheetKey;
+    return { state: next, fit };
+  }
+  if (event.type === "reset") {
+    const fit = event.imageReady && Boolean(state.activeSheetKey);
+    return {
+      state: fit ? { ...state, fittedSheetKey: state.activeSheetKey } : state,
+      fit,
+    };
+  }
+  if (event.type === "gesture") {
+    return {
+      state: state.activeSheetKey
+        ? { ...state, fittedSheetKey: state.activeSheetKey }
+        : state,
+      fit: false,
+    };
+  }
+  return { state, fit: false };
 }
 
 export type ViewportRect = {

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ComponentSegment } from "./componentImport";
 import type { ProgressRow, ProgressStage, StageDefinition } from "./componentProgress";
 import type { DailyProgressLineDraft, DailyProgressLinePreview } from "./dailyProgress";
+import type { MainWork } from "./mainWorks";
 import {
   availableWorkFor,
   definitionOptionsFor,
@@ -65,7 +66,7 @@ function definition(overrides: Partial<StageDefinition> = {}): StageDefinition {
 
 function line(overrides: Partial<DailyProgressLineDraft> = {}): DailyProgressLineDraft {
   return {
-    stage_definition_id: "sd1",
+    main_work_key: "pile-clean",
     selected_ids: [],
     stage_selections: {},
     status: "",
@@ -168,40 +169,58 @@ describe("dailyProgressPanel available work", () => {
       stages: [stage({ id: "st3", stage_definition_id: "sd3", code: "C", position: 3 })],
     }),
   ];
-  const definitions = [
-    definition(),
-    definition({ id: "sd2", code: "B", name: "Bước hai", position: 2 }),
-    definition({ id: "sd3", type: "beam", code: "C", name: "Bước ba", position: 3 }),
-    definition({ id: "sd-unused", code: "UNUSED" }),
+  const works: MainWork[] = [
+    {
+      key: "pile-clean",
+      label: "Vệ sinh bề mặt",
+      component_type: "pile",
+      order: 3,
+      stage_definition_ids: ["sd1", "sd2"],
+    },
+    {
+      key: "beam-demolish",
+      label: "Đục bê tông",
+      component_type: "beam",
+      order: 1,
+      stage_definition_ids: ["sd3"],
+    },
+    {
+      key: "pile-sand",
+      label: "Rắc cát tạo nhám",
+      component_type: "pile",
+      order: 6,
+      stage_definition_ids: ["sd-unused"],
+    },
   ];
 
-  it("keeps only stages with coverage inside the zone/segment filters", () => {
-    const all = availableWorkFor(rows, { zone: "", segment_id: "" }, definitions);
-    expect(all.map((item) => item.id)).toEqual(["sd1", "sd2", "sd3"]);
+  it("keeps only main works with coverage inside the zone/segment filters", () => {
+    const all = availableWorkFor(rows, { zone: "", segment_id: "" }, works);
+    expect(all.map((item) => item.key)).toEqual(["pile-clean", "beam-demolish"]);
+    expect(all.map((item) => item.count)).toEqual([2, 1]);
   });
 
-  it("counts a definition once per component and lists distinct design groups", () => {
-    const all = availableWorkFor(rows, { zone: "", segment_id: "" }, definitions);
-    expect(all[0].label).toBe("Cọc · Sửa chữa cọc · Nhóm 2 (2)");
-    expect(all[1].label).toBe("Cọc · Bước hai · Nhóm 2 (1)");
+  it("counts a component once per main work and labels by component type", () => {
+    const all = availableWorkFor(rows, { zone: "", segment_id: "" }, works);
+    expect(all[0].label).toBe("Cọc · Vệ sinh bề mặt (2)");
+    expect(all[1].label).toBe("Dầm · Đục bê tông (1)");
   });
 
   it("narrows by zone and segment", () => {
     expect(
-      availableWorkFor(rows, { zone: "Cầu chính", segment_id: "" }, definitions).map(
-        (item) => item.id,
+      availableWorkFor(rows, { zone: "Cầu chính", segment_id: "" }, works).map(
+        (item) => item.key,
       ),
-    ).toEqual(["sd1", "sd2"]);
+    ).toEqual(["pile-clean"]);
     expect(
-      availableWorkFor(rows, { zone: "", segment_id: "s2" }, definitions).map(
-        (item) => item.id,
-      ),
-    ).toEqual(["sd1"]);
-    expect(
-      availableWorkFor(rows, { zone: "Cầu dẫn", segment_id: "" }, definitions).map(
+      availableWorkFor(rows, { zone: "", segment_id: "s2" }, works).map(
         (item) => item.label,
       ),
-    ).toEqual(["Dầm · Bước ba · Nhóm 1 (1)"]);
+    ).toEqual(["Cọc · Vệ sinh bề mặt (1)"]);
+    expect(
+      availableWorkFor(rows, { zone: "Cầu dẫn", segment_id: "" }, works).map(
+        (item) => item.label,
+      ),
+    ).toEqual(["Dầm · Đục bê tông (1)"]);
   });
 });
 
@@ -282,7 +301,7 @@ describe("dailyProgressPanel preview text", () => {
       "Cọc · Sửa chữa cọc (PILE-REPAIR)",
     );
     expect(previewLineLabel(previewLine(), [definition()], undefined)).toBe(
-      "Dòng không còn trong biểu mẫu",
+      "Cọc · Sửa chữa cọc (PILE-REPAIR)",
     );
   });
 

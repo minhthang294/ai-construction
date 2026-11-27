@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   containBox,
+  fetchDrawingMap,
+  fetchDrawingSheetImageUrl,
   markerBounds,
   sheetToClient,
   type DrawingMarker,
@@ -23,12 +25,10 @@ import DrawingMapDetailPanel, {
   DrawingMapCompactDetail,
 } from "./DrawingMapDetailPanel";
 import DrawingMapFilters from "./DrawingMapFilters";
-import DrawingMapPlacementPanel from "./DrawingMapPlacementPanel";
 import DrawingMapSheetTabs from "./DrawingMapSheetTabs";
 import { useDrawingMapDetail } from "./useDrawingMapDetail";
 import { useDrawingMapGestures } from "./useDrawingMapGestures";
-import { useDrawingMapPlacement } from "./useDrawingMapPlacement";
-import { useDrawingMapResources } from "./useDrawingMapResources";
+import { useSchematicMapResources } from "./useSchematicMapResources";
 import { useDrawingMapViewport } from "./useDrawingMapViewport";
 
 type Props = {
@@ -72,6 +72,10 @@ export default function DrawingMapPanel({
   const contentRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const [hitChoices, setHitChoices] = useState<HitChoices | null>(null);
+  const [originalState, setOriginalState] = useState<
+    "idle" | "loading" | "ready" | "error"
+  >("idle");
+  const [originalUrl, setOriginalUrl] = useState<string | null>(null);
 
   const {
     map,
@@ -88,24 +92,19 @@ export default function DrawingMapPanel({
     visibleMarkerCount,
     allMarkerCount,
     activeSheetKey,
-    activeImageUrl,
     imageInView,
-    imageUrl,
     imageState,
     imageError,
-    imageReloadKey,
     retryImage,
     imageBox,
     setImageBox,
-  } = useDrawingMapResources({
+  } = useSchematicMapResources({
     projectId,
     batchId,
     compact,
     primaryZone,
     refreshKey,
     lazyReady,
-    rootRef,
-    imageRef,
   });
 
   const {
@@ -115,9 +114,8 @@ export default function DrawingMapPanel({
     zoomBy,
     resetView,
     showWholeSheet,
+    markUserInteraction,
   } = useDrawingMapViewport({
-    activeImageUrl,
-    imageReloadKey,
     activeSheetKey,
     activeSheet,
     imageState,
@@ -137,44 +135,16 @@ export default function DrawingMapPanel({
     closeDetail,
   } = useDrawingMapDetail({ projectId, compact });
 
-  const {
-    placement,
-    placementBusy,
-    placementError,
-    positionMessage,
-    positionError,
-    dragPointIndex,
-    setDragPointIndex,
-    reviewBusyId,
-    addPlacementPoint,
-    updatePlacementPoint,
-    removeLastPlacementPoint,
-    savePlacement,
-    cancelPlacement,
-    startOverride,
-    reviewPosition,
-  } = useDrawingMapPlacement({
-    projectId,
-    activeSheetId: activeSheet?.id ?? "",
-    placementRequest,
-    onPlacementDone,
-    closeDetail,
-    setDetailMarker,
-    retryLoad,
-    viewportRef,
-    imageBox,
-    viewRef,
-  });
-
   const { handlePointerDown, handlePointerMove, endPointer, cancelPointer } =
     useDrawingMapGestures({
       viewRef,
       viewportRef,
       contentRef,
       setView,
-      placementActive: Boolean(placement),
-      addPlacementPoint,
+      placementActive: false,
+      addPlacementPoint: () => undefined,
       onTap: handleMapTap,
+      onUserInteraction: markUserInteraction,
     });
 
   const mapTargets = useMemo(
@@ -183,10 +153,12 @@ export default function DrawingMapPanel({
   );
   const compactAspect = useMemo(
     () =>
-      contentAspectRatio(
-        markerBounds(activeSheet?.markers ?? []),
-        imageBox ? imageBox.width / imageBox.height : null,
-      ),
+      activeSheet?.schematic
+        ? activeSheet.schematic.width / activeSheet.schematic.height
+        : contentAspectRatio(
+            markerBounds(activeSheet?.markers ?? []),
+            imageBox ? imageBox.width / imageBox.height : null,
+          ),
     [activeSheet, imageBox],
   );
   const labels = useMemo(
@@ -205,20 +177,28 @@ export default function DrawingMapPanel({
 
   useEffect(() => {
     setHitChoices(null);
-  }, [activeSheetKey, imageBox, placement]);
+  }, [activeSheetKey, imageBox]);
 
-  function handleImageLoad() {
-    const image = imageRef.current;
-    if (!image) return;
-    setImageBox(
-      containBox(
-        image.naturalWidth,
-        image.naturalHeight,
-        image.clientWidth,
-        image.clientHeight,
-      ),
-    );
-  }
+  useEffect(() => {
+    const plan = activeSheet?.schematic;
+    const viewport = viewportRef.current;
+    if (!plan || !viewport) return;
+    const update = () => {
+      setImageBox(
+        containBox(
+          plan.width,
+          plan.height,
+          viewport.clientWidth,
+          viewport.clientHeight,
+        ),
+      );
+    };
+    update();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(update);
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, [activeSheet, setImageBox]);
 
   function handleMarkerActivate(marker: DrawingMarker) {
     setHitChoices(null);
@@ -233,6 +213,31 @@ export default function DrawingMapPanel({
       return;
     }
     void openDetail(marker);
+  }
+
+  async function openOriginal() {
+    setOriginalState("loading");
+    try {
+      const fullMap = await fetchDrawingMap(projectId, batchId);
+      const containing = fullMap.sheets.find((sheet) =>
+        sheet.markers.some(
+          (marker) => marker.component_id === detailMarker?.component_id,
+        ),
+      );
+      const sheet = containing ?? fullMap.sheets[0];
+      if (!sheet) throw new Error("Không có bản vẽ gốc.");
+      const url = await fetchDrawingSheetImageUrl(sheet.image_url);
+      setOriginalUrl(url);
+      setOriginalState("ready");
+    } catch {
+      setOriginalState("error");
+    }
+  }
+
+  function closeOriginal() {
+    if (originalUrl) URL.revokeObjectURL(originalUrl);
+    setOriginalUrl(null);
+    setOriginalState("idle");
   }
 
   function handleMapTap(clientX: number, clientY: number) {
@@ -339,36 +344,6 @@ export default function DrawingMapPanel({
         </div>
       )}
 
-      {positionMessage ? (
-        <p
-          role="status"
-          className="rounded-xl border border-emerald-200 bg-emerald-50 p-2 text-xs leading-5 text-emerald-950"
-        >
-          {positionMessage}
-        </p>
-      ) : null}
-
-      {positionError ? (
-        <p
-          role="alert"
-          className="rounded-xl border border-red-200 bg-red-50 p-2 text-xs leading-5 text-red-900"
-        >
-          {positionError}
-        </p>
-      ) : null}
-
-      {placement ? (
-        <DrawingMapPlacementPanel
-          placement={placement}
-          activeSheet={activeSheet}
-          placementBusy={placementBusy}
-          placementError={placementError}
-          savePlacement={savePlacement}
-          cancelPlacement={cancelPlacement}
-          removeLastPlacementPoint={removeLastPlacementPoint}
-        />
-      ) : null}
-
       {loadState === "loading" ? (
         <p className="rounded-xl border border-slate-200 bg-white p-3 text-sm text-slate-600">
           Đang tải mặt bằng bản vẽ…
@@ -445,7 +420,7 @@ export default function DrawingMapPanel({
                 <DrawingMapSheetTabs
                   filteredSheets={filteredSheets}
                   activeSheet={activeSheet}
-                  placement={placement}
+                  placement={null}
                   setActiveSheetId={setActiveSheetId}
                 />
               ) : null}
@@ -459,7 +434,7 @@ export default function DrawingMapPanel({
                   imageState={imageState}
                   imageError={imageError}
                   retryImage={retryImage}
-                  imageUrl={imageUrl}
+                  imageUrl={null}
                   viewportRef={viewportRef}
                   contentRef={contentRef}
                   imageRef={imageRef}
@@ -469,11 +444,11 @@ export default function DrawingMapPanel({
                   labels={labels}
                   selection={selection}
                   detailMarker={detailMarker}
-                  placement={placement}
-                  dragPointIndex={dragPointIndex}
-                  setDragPointIndex={setDragPointIndex}
-                  updatePlacementPoint={updatePlacementPoint}
-                  onImageLoad={handleImageLoad}
+                  placement={null}
+                  dragPointIndex={null}
+                  setDragPointIndex={() => undefined}
+                  updatePlacementPoint={() => undefined}
+                  onImageLoad={() => undefined}
                   onMarkerActivate={handleMarkerActivate}
                   hitChoices={hitChoices}
                   onChooseHit={handleMarkerActivate}
@@ -491,6 +466,7 @@ export default function DrawingMapPanel({
                       detailMarker={detailMarker}
                       closeDetail={closeDetail}
                       onOpenComponent={onOpenComponent}
+                      onOpenOriginal={() => void openOriginal()}
                       onRequestProgress={onRequestProgress}
                     />
                   ) : null}
@@ -505,10 +481,7 @@ export default function DrawingMapPanel({
                   detailError={detailError}
                   openDetail={openDetail}
                   closeDetail={closeDetail}
-                  startOverride={startOverride}
-                  reviewPosition={reviewPosition}
-                  reviewBusyId={reviewBusyId}
-                  placement={placement}
+                  onOpenOriginal={() => void openOriginal()}
                   onRequestProgress={onRequestProgress}
                   detailHeadingId={detailHeadingId}
                   detailHeadingRef={detailHeadingRef}
@@ -525,6 +498,39 @@ export default function DrawingMapPanel({
             </>
           )}
         </>
+      ) : null}
+      {originalState !== "idle" ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Bản vẽ gốc"
+          className="fixed inset-0 z-50 flex flex-col bg-slate-950/80 p-3"
+        >
+          <div className="mb-2 flex justify-end">
+            <button
+              type="button"
+              className={`${BUTTON} ${FOCUS_RING}`}
+              onClick={closeOriginal}
+            >
+              Đóng bản vẽ gốc
+            </button>
+          </div>
+          <div className="grid min-h-0 flex-1 place-items-center overflow-auto rounded-xl bg-white p-2">
+            {originalState === "loading" ? (
+              <p className="text-sm text-slate-600">Đang tải bản vẽ gốc…</p>
+            ) : originalState === "error" ? (
+              <p role="alert" className="text-sm text-red-800">
+                Không tải được bản vẽ gốc cho cấu kiện này.
+              </p>
+            ) : originalUrl ? (
+              <img
+                src={originalUrl}
+                alt="Bản vẽ gốc"
+                className="max-h-full max-w-full object-contain"
+              />
+            ) : null}
+          </div>
+        </div>
       ) : null}
     </section>
   );

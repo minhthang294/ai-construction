@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from .access import require_project_member, require_project_role
 from .batch_scope import batch_component_ids
 from .design_parameters import display_stage_name, load_t_values
+from .main_works import main_work_label
 from .component_models import (ComponentMapPosition, ComponentStage, DesignGroup,
                                ProgressEvent, RepairScope, Segment, StageDefinition,
                                StructuralComponent, StructureZone)
@@ -412,6 +413,9 @@ def drawing_map(
         for component_id, stage_id, definition_id, name, status, created_at, event_id in stage_events:
             latest_by_stage[(component_id, stage_id)] = (definition_id, name, status, created_at, event_id)
         t_values = load_t_values(db, list(component_meta))
+        type_by_component = {
+            component_id: meta[0].type for component_id, meta in component_meta.items()
+        }
         stage_rows = db.execute(
             select(ComponentStage.component_id, StageDefinition.name)
             .join(StageDefinition, StageDefinition.id == ComponentStage.stage_definition_id)
@@ -421,17 +425,24 @@ def drawing_map(
         for component_id, name in stage_rows:
             if component_id not in next_stage:
                 next_stage[component_id] = (
-                    display_stage_name(name, [t_values.get(component_id)]),
+                    main_work_label(type_by_component[component_id], name)
+                    or display_stage_name(name, [t_values.get(component_id)]),
                     "NOT_STARTED",
                 )
         for (component_id, _), (definition_id, name, status, created_at, event_id) in latest_by_stage.items():
-            display_name = display_stage_name(name, [t_values.get(component_id)])
+            stage_display_name = display_stage_name(
+                name, [t_values.get(component_id)]
+            )
+            work_display_name = (
+                main_work_label(type_by_component[component_id], name)
+                or stage_display_name
+            )
             current = current_work.get(component_id)
             if status == "IN_PROGRESS" and (current is None or (created_at, event_id) > (current[0], current[1])):
-                current_work[component_id] = (created_at, event_id, display_name, definition_id)
+                current_work[component_id] = (created_at, event_id, work_display_name, definition_id)
             previous = latest_stage.get(component_id)
             if previous is None or (created_at, event_id) > (previous[0], previous[1]):
-                latest_stage[component_id] = (created_at, event_id, display_name, definition_id, status)
+                latest_stage[component_id] = (created_at, event_id, stage_display_name, definition_id, status)
 
     positions = list(db.scalars(
         select(ComponentMapPosition)
@@ -466,7 +477,10 @@ def drawing_map(
         event = latest.get(component.id)
         work_stage = latest_stage.get(component.id)
         work_name, work_status = (
-            (work_stage[2], work_stage[4])
+            (
+                main_work_label(component.type, work_stage[2]) or work_stage[2],
+                work_stage[4],
+            )
             if work_stage
             else next_stage.get(component.id, (None, "NOT_STARTED"))
         )

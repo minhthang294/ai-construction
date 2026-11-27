@@ -7,9 +7,7 @@ import { ApiError, apiFetch } from "./api";
 import type { ComponentSegment } from "./componentImport";
 import {
   newProgressIdempotencyKey,
-  selectedStageForRow,
   stageDefinitionLabel,
-  stageOptionsFor,
   todayISO,
   type ConstructionInputStatus,
   type ProgressPreview,
@@ -18,6 +16,12 @@ import {
   type StageDefinition,
   type StageSelection,
 } from "./componentProgress";
+import {
+  mainWorkDefinitionIds,
+  resolveMainWorkStage,
+  splitByDefinition,
+  type MainWork,
+} from "./mainWorks";
 
 export type DailyProgressFilters = {
   zone: string;
@@ -31,7 +35,8 @@ export const EMPTY_DAILY_PROGRESS_FILTERS: DailyProgressFilters = {
 };
 
 export type DailyProgressLineDraft = {
-  stage_definition_id: string;
+  /** Key from the project main-work catalogue; definitions resolve per row. */
+  main_work_key: string;
   selected_ids: string[];
   /** Concrete component stage id for rows with more than one matching stage. */
   stage_selections: Record<string, string>;
@@ -89,7 +94,7 @@ export const MAX_DAILY_PROGRESS_COMPONENTS = 500;
 
 export function newDailyProgressLine(): DailyProgressLineDraft {
   return {
-    stage_definition_id: "",
+    main_work_key: "",
     selected_ids: [],
     stage_selections: {},
     status: "",
@@ -104,30 +109,31 @@ export function createDailyProgressDraft(
   return { event_date: eventDate, lines: [newDailyProgressLine()] };
 }
 
-/** Rows that actually have the chosen stage definition inside the filter. */
+/** Rows that have at least one concrete stage inside the chosen main work. */
 export function eligibleRowsForLine(
   rows: ReadonlyArray<ProgressRow>,
-  stageDefinitionId: string,
+  work: MainWork | null | undefined,
   filters: DailyProgressFilters = EMPTY_DAILY_PROGRESS_FILTERS,
 ): ProgressRow[] {
-  if (!stageDefinitionId) return [];
+  if (!work) return [];
+  const definitionIds = mainWorkDefinitionIds(work);
   return rows.filter(
     (row) =>
       (!filters.zone || row.zone === filters.zone) &&
       (!filters.segment_id || row.segment_id === filters.segment_id) &&
-      stageOptionsFor(row, stageDefinitionId).length > 0,
+      row.stages.some((stage) =>
+        definitionIds.has(stage.stage_definition_id),
+      ),
   );
 }
 
 export function selectedStageForLineRow(
   line: DailyProgressLineDraft,
   row: ProgressRow,
+  work: MainWork | null | undefined,
 ) {
-  return selectedStageForRow(
-    row,
-    line.stage_definition_id,
-    line.stage_selections[row.id],
-  );
+  if (!work) return null;
+  return resolveMainWorkStage(row, work, line.stage_selections[row.id]);
 }
 
 /** Copy the prior line's ids, keeping only ids eligible for this line. */
@@ -135,11 +141,11 @@ export function copySelectionFromPriorLine(
   lines: ReadonlyArray<DailyProgressLineDraft>,
   index: number,
   eligible: ReadonlyArray<ProgressRow>,
+  work: MainWork | null | undefined,
 ): Pick<DailyProgressLineDraft, "selected_ids" | "stage_selections"> {
-  if (index <= 0 || index >= lines.length) {
+  if (index <= 0 || index >= lines.length || !work) {
     return { selected_ids: [], stage_selections: {} };
   }
-  const currentStageDefinition = lines[index].stage_definition_id;
   const prior = lines[index - 1];
   const eligibleById = new Map(eligible.map((row) => [row.id, row]));
   const selectedIds = prior.selected_ids.filter((id) =>
@@ -149,14 +155,13 @@ export function copySelectionFromPriorLine(
   for (const id of selectedIds) {
     const stageId = prior.stage_selections[id];
     const row = eligibleById.get(id);
-    if (
-      stageId &&
-      row &&
-      stageOptionsFor(row, currentStageDefinition).some(
-        (stage) => stage.id === stageId,
-      )
-    ) {
-      stageSelections[id] = stageId;
+    if (stageId && row) {
+      const options = row.stages.filter(
+        (stage) =>
+          stage.id === stageId &&
+          mainWorkDefinitionIds(work).has(stage.stage_definition_id),
+      );
+      if (options.length) stageSelections[id] = stageId;
     }
   }
   return { selected_ids: selectedIds, stage_selections: stageSelections };
@@ -178,19 +183,21 @@ export function pruneLineToEligible(
   return { ...line, selected_ids: selectedIds, stage_selections: stageSelections };
 }
 
-/** Clear a line whose chosen definition has no eligible work left. */
+/** Clear a line whose chosen main work has no eligible component left. */
 export function pruneLinesToFilters(
   lines: ReadonlyArray<DailyProgressLineDraft>,
   rows: ReadonlyArray<ProgressRow>,
   filters: DailyProgressFilters,
+  works: ReadonlyArray<MainWork>,
 ): DailyProgressLineDraft[] {
   return lines.map((line) => {
-    if (!line.stage_definition_id) return line;
-    const eligible = eligibleRowsForLine(rows, line.stage_definition_id, filters);
-    if (!eligible.length) {
+    if (!line.main_work_key) return line;
+    const work = works.find((item) => item.key === line.main_work_key);
+    const eligible = eligibleRowsForLine(rows, work, filters);
+    if (!work || !eligible.length) {
       return {
         ...line,
-        stage_definition_id: "",
+        main_work_key: "",
         selected_ids: [],
         stage_selections: {},
       };
@@ -225,14 +232,14 @@ export function updateDailyProgressLine(
   );
 }
 
-/** Changing the stage definition clears the previous exact selection. */
-export function changeLineStageDefinition(
+/** Changing the main work clears the previous concrete selection. */
+export function changeLineMainWork(
   lines: ReadonlyArray<DailyProgressLineDraft>,
   index: number,
-  stageDefinitionId: string,
+  mainWorkKey: string,
 ): DailyProgressLineDraft[] {
   return updateDailyProgressLine(lines, index, {
-    stage_definition_id: stageDefinitionId,
+    main_work_key: mainWorkKey,
     selected_ids: [],
     stage_selections: {},
   });
@@ -285,48 +292,132 @@ function lineLabel(index: number): string {
   return `Dòng ${index + 1}`;
 }
 
+export type DailyProgressSplit = {
+  payload: DailyProgressPayload;
+  /** Draft line index for each split payload line, in the same order. */
+  origins: number[];
+};
+
+function resolveLineItems(
+  line: DailyProgressLineDraft,
+  rows: ReadonlyArray<ProgressRow>,
+  work: MainWork | null,
+): Array<{ row: ProgressRow; stageId: string }> {
+  if (!work) return [];
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  return line.selected_ids.flatMap((id) => {
+    const row = byId.get(id);
+    const stage = row
+      ? resolveMainWorkStage(row, work, line.stage_selections[id])
+      : null;
+    return row && stage ? [{ row, stageId: stage.id }] : [];
+  });
+}
+
+/**
+ * Resolve each component's own stage and group by definition.  A line with one
+ * resolved definition keeps its group quantity; a split line omits it rather
+ * than copying the same quantity onto several stage lines.
+ */
+export function buildDailyProgressSplit(
+  draft: DailyProgressDraft,
+  rows: ReadonlyArray<ProgressRow>,
+  works: ReadonlyArray<MainWork>,
+): DailyProgressSplit {
+  const payloadLines: DailyProgressPayloadLine[] = [];
+  const origins: number[] = [];
+  const seen = new Set<string>();
+  draft.lines.forEach((line, lineIndex) => {
+    if (!line.status) {
+      throw new Error("Chọn trạng thái thi công trước khi gửi.");
+    }
+    const work =
+      works.find((item) => item.key === line.main_work_key) ?? null;
+    const items = resolveLineItems(line, rows, work);
+    for (const { row, stageId } of items) {
+      const key = `${row.id}|${stageId}`;
+      if (seen.has(key)) {
+        throw new Error("Một cấu kiện và bước thi công bị lặp giữa các dòng.");
+      }
+      seen.add(key);
+    }
+    const groups = splitByDefinition(items);
+    const quantity = line.group_quantity.trim()
+      ? Number(line.group_quantity.trim().replace(",", "."))
+      : null;
+    if (quantity !== null && (!Number.isFinite(quantity) || quantity < 0 || quantity > 1e12)) {
+      throw new Error("Khối lượng phải là số không âm.");
+    }
+    groups.forEach((group) => {
+      const single = groups.length === 1;
+      payloadLines.push({
+        stage_definition_id: group.stageDefinitionId,
+        component_ids: group.componentIds,
+        ...(group.selections.length
+          ? { stage_selections: group.selections }
+          : {}),
+        status: line.status as ConstructionInputStatus,
+        ...(single && quantity !== null ? { group_quantity: quantity } : {}),
+        ...(single && line.group_unit.trim()
+          ? { group_unit: line.group_unit.trim() }
+          : {}),
+      });
+      origins.push(lineIndex);
+    });
+  });
+  return { payload: { event_date: draft.event_date, lines: payloadLines }, origins };
+}
+
 export function dailyProgressLineError(
   line: DailyProgressLineDraft,
   index: number,
   rows: ReadonlyArray<ProgressRow>,
   filters: DailyProgressFilters = EMPTY_DAILY_PROGRESS_FILTERS,
+  works: ReadonlyArray<MainWork> = [],
+  seenStages: Set<string> = new Set(),
 ): string | null {
   const prefix = `${lineLabel(index)}: `;
-  if (!line.stage_definition_id.trim()) {
-    return prefix + "chọn bước thi công.";
+  if (!line.main_work_key.trim()) {
+    return prefix + "chọn công tác.";
+  }
+  const work = works.find((item) => item.key === line.main_work_key);
+  if (!work) {
+    return prefix + "công tác không còn trong danh mục.";
   }
   if (line.selected_ids.length === 0) {
     return prefix + "chọn ít nhất một cấu kiện.";
   }
-  const eligible = eligibleRowsForLine(rows, line.stage_definition_id, filters);
+  const eligible = eligibleRowsForLine(rows, work, filters);
   const eligibleById = new Map(eligible.map((row) => [row.id, row]));
   for (const componentId of line.selected_ids) {
     if (!eligibleById.has(componentId)) {
-      return prefix + "có cấu kiện không thuộc bước đã chọn hoặc ngoài khu/phân đoạn.";
+      return prefix + "có cấu kiện không thuộc công tác đã chọn hoặc ngoài khu/phân đoạn.";
     }
   }
   const missingStage = line.selected_ids.filter((componentId) => {
     const row = eligibleById.get(componentId);
     if (!row) return false;
-    const options = stageOptionsFor(row, line.stage_definition_id);
+    const options = row.stages.filter((stage) =>
+      mainWorkDefinitionIds(work).has(stage.stage_definition_id),
+    );
     return options.length > 1 && !line.stage_selections[componentId];
   });
   if (missingStage.length) {
     return prefix + `chọn bước cụ thể cho ${missingStage.length} cấu kiện.`;
   }
-  const invalidStage = line.selected_ids.filter((componentId) => {
-    const stageId = line.stage_selections[componentId];
-    if (!stageId) return false;
+  for (const componentId of line.selected_ids) {
     const row = eligibleById.get(componentId);
-    return (
-      !row ||
-      !stageOptionsFor(row, line.stage_definition_id).some(
-        (stage) => stage.id === stageId,
-      )
-    );
-  });
-  if (invalidStage.length) {
-    return prefix + "lựa chọn bước không khớp cấu kiện.";
+    if (!row) continue;
+    const chosen = line.stage_selections[componentId];
+    const stage = resolveMainWorkStage(row, work, chosen);
+    if (!stage) {
+      return prefix + "lựa chọn bước không khớp cấu kiện.";
+    }
+    const key = `${row.id}|${stage.id}`;
+    if (seenStages.has(key)) {
+      return prefix + `cấu kiện ${row.canonical_code} bị lặp cùng bước ở dòng khác.`;
+    }
+    seenStages.add(key);
   }
   if (!line.status) {
     return prefix + "chọn trạng thái thi công.";
@@ -347,6 +438,7 @@ export function dailyProgressError(
   draft: DailyProgressDraft,
   rows: ReadonlyArray<ProgressRow>,
   filters: DailyProgressFilters = EMPTY_DAILY_PROGRESS_FILTERS,
+  works: ReadonlyArray<MainWork> = [],
   today: string = todayISO(),
 ): string | null {
   if (!draft.event_date) return "Chọn ngày ghi nhận.";
@@ -360,57 +452,32 @@ export function dailyProgressError(
   if (dailyProgressSelectedCount(draft) > MAX_DAILY_PROGRESS_COMPONENTS) {
     return `Tối đa ${MAX_DAILY_PROGRESS_COMPONENTS} cấu kiện mỗi lần ghi.`;
   }
+  const seenStages = new Set<string>();
   for (let index = 0; index < draft.lines.length; index += 1) {
     const problem = dailyProgressLineError(
       draft.lines[index],
       index,
       rows,
       filters,
+      works,
+      seenStages,
     );
     if (problem) return problem;
+  }
+  const split = buildDailyProgressSplit(draft, rows, works);
+  if (split.payload.lines.length > MAX_DAILY_PROGRESS_LINES) {
+    return `Tối đa ${MAX_DAILY_PROGRESS_LINES} dòng sau khi tách theo đầu việc.`;
   }
   return null;
 }
 
-/** Exact selected ids and stage ids are preserved; blank extras are omitted. */
+/** Split into the exact per-definition lines the existing daily API needs. */
 export function buildDailyProgressPayload(
   draft: DailyProgressDraft,
+  rows: ReadonlyArray<ProgressRow>,
+  works: ReadonlyArray<MainWork>,
 ): DailyProgressPayload {
-  return {
-    event_date: draft.event_date,
-    lines: draft.lines.map((line) => {
-      if (!line.status) {
-        throw new Error("Chọn trạng thái thi công trước khi gửi.");
-      }
-      const selectedIds = new Set(line.selected_ids);
-      const selections = line.selected_ids.flatMap((componentId) =>
-        line.stage_selections[componentId]
-          ? [
-              {
-                component_id: componentId,
-                stage_id: line.stage_selections[componentId],
-              },
-            ]
-          : [],
-      ).filter((item) => selectedIds.has(item.component_id));
-      const quantity = line.group_quantity.trim()
-        ? Number(line.group_quantity.trim().replace(",", "."))
-        : null;
-      if (quantity !== null && (!Number.isFinite(quantity) || quantity < 0 || quantity > 1e12)) {
-        throw new Error("Khối lượng phải là số không âm.");
-      }
-      return {
-        stage_definition_id: line.stage_definition_id.trim(),
-        component_ids: [...line.selected_ids],
-        ...(selections.length ? { stage_selections: selections } : {}),
-        status: line.status,
-        ...(quantity !== null ? { group_quantity: quantity } : {}),
-        ...(line.group_unit.trim()
-          ? { group_unit: line.group_unit.trim() }
-          : {}),
-      };
-    }),
-  };
+  return buildDailyProgressSplit(draft, rows, works).payload;
 }
 
 export function isLinePreviewReady(line: ProgressPreview | undefined): boolean {

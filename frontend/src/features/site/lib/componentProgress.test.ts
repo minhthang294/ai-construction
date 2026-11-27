@@ -4,7 +4,6 @@ import {
   EMPTY_PROGRESS_FILTERS,
   acceptanceStatusLabel,
   ambiguousStageRows,
-  buildBulkProgressPayload,
   buildDesignQuantityEntries,
   bulkProgressError,
   canCommitBulkPreview,
@@ -126,9 +125,9 @@ describe("progress filters", () => {
     expect(
       filterProgressRows(rows, {
         ...EMPTY_PROGRESS_FILTERS,
-        stage_definition_id: "sd2",
+        main_work_key: "pile-clean",
         acceptance_status: "NOT_LINKED",
-      }).map((item) => item.id),
+      }, ["sd2"]).map((item) => item.id),
     ).toEqual(["c2"]);
   });
 });
@@ -189,7 +188,7 @@ describe("stage ordering", () => {
 describe("bulk progress payload", () => {
   const draft = {
     ...EMPTY_BULK_PROGRESS,
-    stage_definition_id: "sd1",
+    main_work_key: "pile-clean",
     event_date: "2026-11-18",
     status: "COMPLETED" as const,
     quantity: "1.5",
@@ -197,31 +196,15 @@ describe("bulk progress payload", () => {
     note: " đã kiểm tra ",
   };
 
-  it("rejects missing selection, stage, date, status and bad quantity", () => {
+  it("rejects missing selection, work, date, status and bad quantity", () => {
     expect(bulkProgressError(draft, 0)).toMatch(/cấu kiện/);
-    expect(bulkProgressError({ ...draft, stage_definition_id: "" }, 1)).toMatch(
-      /bước/,
+    expect(bulkProgressError({ ...draft, main_work_key: "" }, 1)).toMatch(
+      /công tác/,
     );
     expect(bulkProgressError({ ...draft, event_date: "" }, 1)).toMatch(/ngày/);
     expect(bulkProgressError({ ...draft, status: "" }, 1)).toMatch(/trạng thái/);
     expect(bulkProgressError({ ...draft, quantity: "-1" }, 1)).toMatch(/Khối lượng/);
     expect(bulkProgressError({ ...draft, quantity: "abc" }, 1)).toMatch(/Khối lượng/);
-  });
-
-  it("keeps the exact selected ids and never adds evidence", () => {
-    const payload = buildBulkProgressPayload(["c2", "c1"], draft);
-    expect(payload.component_ids).toEqual(["c2", "c1"]);
-    expect(payload.stage_definition_id).toBe("sd1");
-    expect(payload.quantity).toBe(1.5);
-    expect(payload.unit).toBe("m3");
-    expect(payload.note).toBe("đã kiểm tra");
-    expect(payload.evidence_refs).toEqual([]);
-  });
-
-  it("uses null quantity when the user leaves it blank", () => {
-    expect(
-      buildBulkProgressPayload(["c1"], { ...draft, quantity: "" }).quantity,
-    ).toBeNull();
   });
 
   it("keeps explicit per-component stage selections and never guesses", () => {
@@ -258,13 +241,6 @@ describe("bulk progress payload", () => {
     expect(
       ambiguousStageRows([repeated], "sd1").map((item) => item.id),
     ).toEqual(["c1"]);
-    const payload = buildBulkProgressPayload(["c1"], draft, [
-      { component_id: "c1", stage_id: "st3" },
-      { component_id: "c2", stage_id: "st9" },
-    ]);
-    expect(payload.stage_selections).toEqual([
-      { component_id: "c1", stage_id: "st3" },
-    ]);
     expect(bulkProgressError(draft, 1, 1)).toMatch(/nhiều phạm vi/);
   });
 

@@ -5,8 +5,8 @@ import {
   scopeLabel,
   type BulkProgressDraft,
   type ProgressPreview,
-  type StageDefinition,
 } from "../lib/componentProgress";
+import type { MainWork } from "../lib/mainWorks";
 import {
   FOCUS_RING,
   PRIMARY_BUTTON,
@@ -17,7 +17,7 @@ import { formatISODate } from "../lib/datetime";
 
 type Props = {
   preview: ProgressPreview;
-  editorDefinitions: StageDefinition[];
+  work: MainWork | null;
   draft: BulkProgressDraft;
   confirmed: boolean;
   onConfirmedChange: (checked: boolean) => void;
@@ -29,7 +29,7 @@ type Props = {
 
 export default function ComponentProgressPreview({
   preview,
-  editorDefinitions,
+  work,
   draft,
   confirmed,
   onConfirmedChange,
@@ -54,12 +54,9 @@ export default function ComponentProgressPreview({
       </div>
       <div className="rounded-lg bg-slate-50 p-2 text-sm text-slate-700">
         <p className="break-words font-semibold">
-          {
-            editorDefinitions.find(
-              (definition) =>
-                definition.id === draft.stage_definition_id,
-            )?.name
-          }
+          {work
+            ? `${work.component_type === "pile" ? "Cọc" : "Dầm"} · ${work.label}`
+            : "Công tác"}
         </p>
         <p className="mt-1">
           {formatISODate(draft.event_date)} ·{" "}

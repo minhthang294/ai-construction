@@ -571,10 +571,12 @@ def download_generated(
 # Progress and journal routes live in their own module but share this DB
 # dependency object so dependency overrides in tests cover both routers.
 from .journal import router as journal_router  # noqa: E402
+from .main_works_router import router as main_works_router  # noqa: E402
 from .progress import router as progress_router  # noqa: E402
 
 router.routes.extend(progress_router.routes)
 router.routes.extend(journal_router.routes)
+router.routes.extend(main_works_router.routes)
 
 # Keep the dependency imported for tests/overrides that target it explicitly.
 __all__ = ["router", "get_db", "get_current_user"]

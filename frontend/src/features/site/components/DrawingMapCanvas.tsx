@@ -22,6 +22,7 @@ import {
   type VisibleLabel,
 } from "../lib/drawingMapPanel";
 import DrawingMapViewControls from "./DrawingMapViewControls";
+import SchematicPlanSurface from "./SchematicPlanSurface";
 import type { ImageState } from "./useDrawingMapResources";
 
 export type HitChoices = {
@@ -123,8 +124,9 @@ export default function DrawingMapCanvas({
               {activeSheet.title}
             </h4>
             <p className="mt-0.5 text-xs text-slate-600">
-              Bản vẽ {activeSheet.drawing} · trang {activeSheet.page} ·{" "}
-              {activeSheet.markers.length} vị trí
+              {activeSheet.schematic
+                ? `Sơ đồ theo mã cấu kiện · ${activeSheet.markers.length} vị trí`
+                : `Bản vẽ ${activeSheet.drawing} · trang ${activeSheet.page} · ${activeSheet.markers.length} vị trí`}
             </p>
           </div>
         </div>
@@ -153,7 +155,7 @@ export default function DrawingMapCanvas({
 
         {imageState === "loading" ? (
           <p className="absolute inset-0 grid place-items-center p-4 text-center text-sm text-slate-600">
-            Đang tải ảnh bản vẽ…
+            Đang tải mặt bằng…
           </p>
         ) : null}
 
@@ -161,32 +163,34 @@ export default function DrawingMapCanvas({
           <div className="absolute inset-0 grid place-items-center p-4 text-center">
             <div className="max-w-sm">
               <p role="alert" className="text-sm text-red-900">
-                Không tải được ảnh bản vẽ: {imageError}
+                Không tải được mặt bằng: {imageError}
               </p>
               <button
                 type="button"
                 className={`${BUTTON} mt-3 ${FOCUS_RING}`}
                 onClick={retryImage}
               >
-                Thử lại ảnh
+                Thử lại
               </button>
             </div>
           </div>
         ) : null}
 
-        {imageState === "ready" && imageUrl ? (
+        {imageState === "ready" && (imageUrl || activeSheet.schematic) ? (
           <div
             ref={contentRef}
             className="absolute inset-0 will-change-transform"
           >
-            <img
-              ref={imageRef}
-              src={imageUrl}
-              alt={`Bản vẽ ${activeSheet.drawing}, trang ${activeSheet.page}`}
-              className="h-full w-full object-contain"
-              draggable={false}
-              onLoad={onImageLoad}
-            />
+            {imageUrl ? (
+              <img
+                ref={imageRef}
+                src={imageUrl}
+                alt={`Bản vẽ ${activeSheet.drawing}, trang ${activeSheet.page}`}
+                className="h-full w-full object-contain"
+                draggable={false}
+                onLoad={onImageLoad}
+              />
+            ) : null}
             {imageBox ? (
               <div
                 className="absolute"
@@ -197,6 +201,17 @@ export default function DrawingMapCanvas({
                   height: imageBox.height,
                 }}
               >
+                {activeSheet.schematic ? (
+                  <SchematicPlanSurface
+                    plan={activeSheet.schematic}
+                    box={{
+                      left: 0,
+                      top: 0,
+                      width: imageBox.width,
+                      height: imageBox.height,
+                    }}
+                  />
+                ) : null}
                 <svg
                   role="group"
                   aria-label="Cấu kiện trên bản vẽ"
@@ -215,6 +230,8 @@ export default function DrawingMapCanvas({
                     const opacity = selection && !selectable ? 0.2 : 1;
                     const color = markerStrokeColor(marker, compact);
                     const accepted = Boolean(marker.accepted);
+                    const isCorner = /^Q-\d+$/i.test(marker.code);
+                    const isFender = /^K-/i.test(marker.code);
                     const path = points.map(([px, py]) => `${px},${py}`).join(" ");
                     return (
                       <g
@@ -253,11 +270,70 @@ export default function DrawingMapCanvas({
                               vectorEffect="non-scaling-stroke" />
                             <polyline points={path} fill="none"
                               stroke={selected ? "#111827" : color}
-                              strokeWidth={selected ? 2 : 1.25}
+                              strokeWidth={
+                                selected
+                                  ? marker.type === "beam"
+                                    ? 5
+                                    : 2.5
+                                  : marker.type === "beam"
+                                    ? 3.5
+                                    : 1.5
+                              }
                               strokeLinecap="round" strokeLinejoin="round"
                               strokeDasharray={markerDashArray(marker, "line")}
                               opacity={opacity}
                               vectorEffect="non-scaling-stroke" />
+                          </>
+                        ) : isCorner ? (
+                          <g transform={`rotate(45 ${x} ${y})`}>
+                            {accepted ? (
+                              <rect
+                                x={x - 0.008}
+                                y={y - 0.008 * imageBox.width / imageBox.height}
+                                width={0.016}
+                                height={0.016 * imageBox.width / imageBox.height}
+                                fill="none"
+                                stroke={ACCEPTANCE_OUTLINE_COLOR}
+                                strokeWidth={selected ? 3 : 2}
+                                opacity={opacity}
+                                vectorEffect="non-scaling-stroke"
+                              />
+                            ) : null}
+                            <rect
+                              x={x - 0.005}
+                              y={y - 0.005 * imageBox.width / imageBox.height}
+                              width={0.01}
+                              height={0.01 * imageBox.width / imageBox.height}
+                              fill="none"
+                              stroke={selected ? "#111827" : color}
+                              strokeWidth={selected ? 2 : 1.5}
+                              opacity={opacity}
+                              vectorEffect="non-scaling-stroke"
+                            />
+                          </g>
+                        ) : isFender ? (
+                          <>
+                            {accepted ? (
+                              <rect
+                                x={x - 0.007}
+                                y={y - 0.006 * imageBox.width / imageBox.height}
+                                width={0.014}
+                                height={0.012 * imageBox.width / imageBox.height}
+                                fill="none"
+                                stroke={ACCEPTANCE_OUTLINE_COLOR}
+                                strokeWidth={selected ? 3 : 2}
+                                opacity={opacity}
+                                vectorEffect="non-scaling-stroke"
+                              />
+                            ) : null}
+                            <rect
+                              x={x - 0.004}
+                              y={y - 0.0035 * imageBox.width / imageBox.height}
+                              width={0.008}
+                              height={0.007 * imageBox.width / imageBox.height}
+                              fill={color}
+                              opacity={opacity}
+                            />
                           </>
                         ) : (
                           <>

@@ -138,7 +138,7 @@ def test_latest_day_picks_the_max_progress_date_and_groups_works(env):
     body = response.json()
     assert body["date"] == "2026-11-03"
     assert body["works"] == [{
-        "stage_name": "Đục bê tông om vỡ",
+        "stage_name": "Đục bê tông",
         "zone": "Cầu chính",
         "segment": 2,
         "component_type": "pile",

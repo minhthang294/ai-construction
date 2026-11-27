@@ -30,6 +30,11 @@ import {
 import { deleteDraft, loadDraft, saveDraft } from "../lib/offlineDb";
 import { todayISO } from "../lib/componentProgress";
 import type { ProgressRow, StageDefinition } from "../lib/componentProgress";
+import {
+  fetchMainWorks,
+  mainWorkForDefinition,
+  type MainWork,
+} from "../lib/mainWorks";
 import ConstructionBatchSelector from "./ConstructionBatchSelector";
 import DrawingMapPanel from "./DrawingMapPanel";
 import {
@@ -120,7 +125,9 @@ export default function ProgressPastePanel({
   const [parsed, setParsed] = useState<PasteParse | null>(null);
   const [answers, setAnswers] = useState<PasteAnswers>({});
   const [manualStages, setManualStages] = useState<PasteManualStages>({});
+  const [manualMainWorks, setManualMainWorks] = useState<Record<number, string>>({});
   const [definitions, setDefinitions] = useState<StageDefinition[]>([]);
+  const [works, setWorks] = useState<MainWork[]>([]);
   const [applied, setApplied] = useState<PasteApplyResult | null>(null);
   const [preview, setPreview] = useState<DailyProgressPreviewResponse | null>(null);
   const [idempotencyKey, setIdempotencyKey] = useState<string | null>(null);
@@ -146,9 +153,15 @@ export default function ProgressPastePanel({
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    void listStageDefinitions(projectId)
-      .then(setDefinitions)
-      .catch(() => setDefinitions([]));
+    void Promise.all([listStageDefinitions(projectId), fetchMainWorks(projectId)])
+      .then(([stageDefinitions, catalog]) => {
+        setDefinitions(stageDefinitions);
+        setWorks(catalog.works);
+      })
+      .catch(() => {
+        setDefinitions([]);
+        setWorks([]);
+      });
   }, [projectId]);
 
   useEffect(() => {
@@ -216,6 +229,7 @@ export default function ProgressPastePanel({
     setPendingError(null);
     setAnswers({});
     setManualStages({});
+    setManualMainWorks({});
     setError(null);
     setPreviewError(null);
     setSaveError(null);
@@ -267,6 +281,7 @@ export default function ProgressPastePanel({
       setParsed(result);
       setAnswers({});
       setManualStages({});
+      setManualMainWorks({});
       setApplied(null);
       setPreview(null);
       setSaved(null);
@@ -453,25 +468,68 @@ export default function ProgressPastePanel({
     }
   }
 
-  const stageChoicesFor = (lineType: string) =>
-    definitions.filter((definition) => definition.type === lineType);
+  const mainWorkChoicesFor = (lineType: string) =>
+    works.filter((work) => work.component_type === lineType);
 
-  const stageOptionsForLine = (line: PasteParse["lines"][number]) => {
+  /** Concrete variants of one main work, from parse candidates and the catalog. */
+  const concreteOptionsForLine = (
+    line: PasteParse["lines"][number],
+    work: MainWork | null,
+  ) => {
+    if (!work) return [];
     const options = [
-      ...(line.stage_candidates ?? []).map((candidate) => ({
-        id: candidate.stage_definition_id,
-        name: candidate.name,
-      })),
-      ...stageChoicesFor(line.component_type).map((definition) => ({
-        id: definition.id,
-        name: definition.name,
-      })),
+      ...(line.stage_candidates ?? [])
+        .filter((candidate) =>
+          work.stage_definition_ids.includes(candidate.stage_definition_id),
+        )
+        .map((candidate) => ({
+          id: candidate.stage_definition_id,
+          name: candidate.name,
+        })),
+      ...definitions
+        .filter(
+          (definition) =>
+            definition.type === line.component_type &&
+            work.stage_definition_ids.includes(definition.id),
+        )
+        .map((definition) => ({ id: definition.id, name: definition.name })),
     ];
     return options.filter(
       (candidate, index) =>
         options.findIndex((item) => item.id === candidate.id) === index,
     );
   };
+
+  const selectedMainWorkForLine = (
+    line: PasteParse["lines"][number],
+    index: number,
+  ) => {
+    const selectedId =
+      manualStages[index] ??
+      (line.stage_candidates?.length === 1
+        ? line.stage_candidates[0].stage_definition_id
+        : "");
+    return (
+      works.find((work) => work.key === manualMainWorks[index]) ??
+      (selectedId ? mainWorkForDefinition(works, selectedId) : null)
+    );
+  };
+
+  function chooseMainWork(
+    line: PasteParse["lines"][number],
+    index: number,
+    key: string,
+  ) {
+    const work = works.find((item) => item.key === key) ?? null;
+    setManualMainWorks((current) => ({ ...current, [index]: key }));
+    const options = concreteOptionsForLine(line, work);
+    setManualStages((current) => {
+      const next = { ...current };
+      if (options.length === 1) next[index] = options[0].id;
+      else delete next[index];
+      return next;
+    });
+  }
 
   const selectedStageForLine = (
     line: PasteParse["lines"][number],
@@ -482,7 +540,9 @@ export default function ProgressPastePanel({
       (line.stage_candidates?.length === 1
         ? line.stage_candidates[0].stage_definition_id
         : "");
-    return stageOptionsForLine(line).find((candidate) => candidate.id === selectedId) ?? null;
+    return concreteOptionsForLine(line, selectedMainWorkForLine(line, index)).find(
+      (candidate) => candidate.id === selectedId,
+    ) ?? null;
   };
 
   return (
@@ -608,24 +668,50 @@ export default function ProgressPastePanel({
                     </div>
                     <div className="w-full min-w-0 sm:w-auto sm:max-w-72">
                       <label
-                        htmlFor={`stage-${lineIndex}`}
+                        htmlFor={`main-work-${lineIndex}`}
                         className="block text-xs font-medium text-slate-700"
                       >
-                        Công đoạn
+                        Công tác
                       </label>
                       <select
-                        id={`stage-${lineIndex}`}
+                        id={`main-work-${lineIndex}`}
                         className={FIELD}
-                        value={selectedStage?.id ?? ""}
-                        onChange={(event) => chooseStage(lineIndex, event.target.value)}
+                        value={selectedMainWorkForLine(line, lineIndex)?.key ?? ""}
+                        onChange={(event) =>
+                          chooseMainWork(line, lineIndex, event.target.value)
+                        }
                       >
-                        <option value="">— Chọn công đoạn —</option>
-                        {stageOptionsForLine(line).map((candidate) => (
-                          <option key={candidate.id} value={candidate.id}>
-                            {candidate.name}
+                        <option value="">— Chọn công tác —</option>
+                        {mainWorkChoicesFor(line.component_type).map((work) => (
+                          <option key={work.key} value={work.key}>
+                            {work.label}
                           </option>
                         ))}
                       </select>
+                      {(() => {
+                        const work = selectedMainWorkForLine(line, lineIndex);
+                        const options = concreteOptionsForLine(line, work);
+                        if (!work || options.length <= 1) return null;
+                        return (
+                          <label className="mt-1 block text-xs font-medium text-slate-700">
+                            Bước cụ thể
+                            <select
+                              className={FIELD}
+                              value={selectedStage?.id ?? ""}
+                              onChange={(event) =>
+                                chooseStage(lineIndex, event.target.value)
+                              }
+                            >
+                              <option value="">— Chọn bước —</option>
+                              {options.map((candidate) => (
+                                <option key={candidate.id} value={candidate.id}>
+                                  {candidate.name}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        );
+                      })()}
                       {selectedStage ? (
                         <p className="mt-1 break-words text-xs leading-5 text-slate-700">
                           {selectedStage.name}

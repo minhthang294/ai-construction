@@ -1,12 +1,11 @@
 import {
   constructionStatusLabel,
   scopeLabel,
-  stageOptionsFor,
   type BulkProgressDraft,
   type DesignQuantityGroup,
   type ProgressRow,
-  type StageDefinition,
 } from "../lib/componentProgress";
+import { stageOptionsForMainWork, type MainWork } from "../lib/mainWorks";
 import {
   FIELD,
   FOCUS_RING,
@@ -66,7 +65,8 @@ type Props = {
   selectedRows: ProgressRow[];
   draft: BulkProgressDraft;
   updateDraft: (patch: Partial<BulkProgressDraft>) => void;
-  editorDefinitions: StageDefinition[];
+  works: MainWork[];
+  work: MainWork | null;
   designStatus: "idle" | "loading" | "ready" | "error";
   selectedQuantityGroups: DesignQuantityGroup[];
   allQuantityGroups: DesignQuantityGroup[];
@@ -82,7 +82,8 @@ export default function ComponentProgressEditor({
   selectedRows,
   draft,
   updateDraft,
-  editorDefinitions,
+  works,
+  work,
   designStatus,
   selectedQuantityGroups,
   allQuantityGroups,
@@ -96,25 +97,33 @@ export default function ComponentProgressEditor({
   return (
     <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
       <label className="block text-xs font-medium text-slate-700">
-        Bước thi công
+        Công tác
         <select
           className={FIELD}
-          value={draft.stage_definition_id}
+          value={draft.main_work_key}
           onChange={(event) =>
-            updateDraft({ stage_definition_id: event.target.value })
+            updateDraft({ main_work_key: event.target.value })
           }
         >
-          <option value="">— Chọn bước —</option>
-          {editorDefinitions.map((definition) => (
-            <option key={definition.id} value={definition.id}>
-              {definition.name}
-            </option>
-          ))}
+          <option value="">— Chọn công tác —</option>
+          {(["pile", "beam"] as const).map((type) => {
+            const items = works.filter((item) => item.component_type === type);
+            if (!items.length) return null;
+            return (
+              <optgroup key={type} label={type === "pile" ? "Cọc" : "Dầm"}>
+                {items.map((item) => (
+                  <option key={item.key} value={item.key}>
+                    {item.label}
+                  </option>
+                ))}
+              </optgroup>
+            );
+          })}
         </select>
       </label>
-      {editorDefinitions.length === 0 ? (
+      {works.length === 0 ? (
         <p className="text-xs text-amber-800">
-          Cấu kiện đã chọn chưa gắn bước thi công.
+          Chưa tải được danh mục công tác.
         </p>
       ) : null}
 
@@ -135,9 +144,9 @@ export default function ComponentProgressEditor({
           />
         ) : (
           <p className="mt-1 text-sm text-slate-700">
-            {!draft.stage_definition_id && allQuantityGroups.length
-              ? "Chọn bước để xem khối lượng."
-              : draft.stage_definition_id && missingStageChoices
+            {!draft.main_work_key && allQuantityGroups.length
+              ? "Chọn công tác để xem khối lượng."
+              : draft.main_work_key && missingStageChoices
                 ? "Chọn phạm vi để xem khối lượng."
                 : "Chưa có khối lượng thiết kế cho lựa chọn này."}
           </p>
@@ -255,7 +264,7 @@ export default function ComponentProgressEditor({
                   }
                 >
                   <option value="">— Chọn phạm vi —</option>
-                  {stageOptionsFor(row, draft.stage_definition_id).map(
+                  {(work ? stageOptionsForMainWork(row, work) : []).map(
                     (stage) => (
                       <option key={stage.id} value={stage.id}>
                         {scopeLabel(stage.scope_kind)} · {stage.name} ·{" "}

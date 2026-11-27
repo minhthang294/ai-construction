@@ -17,6 +17,8 @@ import {
 type Props = {
   draft: DailyProgressDraft;
   preview: DailyProgressPreviewResponse;
+  /** Draft line index for each preview line (one draft line may split by definition). */
+  origins: number[];
   definitionOptions: StageDefinition[];
   confirmed: boolean;
   commitReady: boolean;
@@ -30,6 +32,7 @@ type Props = {
 export default function DailyProgressPreview({
   draft,
   preview,
+  origins,
   definitionOptions,
   confirmed,
   commitReady,
@@ -71,7 +74,7 @@ export default function DailyProgressPreview({
 
       <div className="space-y-2">
         {preview.lines.map((linePreview, index) => {
-          const lineIndex = linePreview.line_index ?? index;
+          const lineIndex = origins[index] ?? index;
           const line = draft.lines[lineIndex];
           const groupLabel = previewLineLabel(
             linePreview,
@@ -81,7 +84,7 @@ export default function DailyProgressPreview({
           const groupText = previewGroupText(linePreview);
           return (
             <section
-              key={lineIndex}
+              key={index}
               className="min-w-0 rounded-lg border border-slate-200 p-2"
             >
               <div className="flex flex-wrap items-baseline justify-between gap-1">
@@ -139,9 +142,9 @@ export default function DailyProgressPreview({
         })}
       </div>
 
-      {preview.lines.length !== draft.lines.length ? (
+      {preview.lines.length !== origins.length ? (
         <p className="text-xs text-red-800">
-          Máy chủ trả về {preview.lines.length} dòng, không khớp biểu mẫu.
+          Máy chủ trả về {preview.lines.length} đầu việc, không khớp biểu mẫu.
           Quay lại và xem lại.
         </p>
       ) : null}
@@ -155,7 +158,7 @@ export default function DailyProgressPreview({
           onChange={(event) => onConfirmedChange(event.target.checked)}
         />
         <span>
-          Tôi đã kiểm tra đúng {draft.lines.length} dòng, {totalSelected}{" "}
+          Tôi đã kiểm tra đúng {preview.lines.length} đầu việc, {totalSelected}{" "}
           lượt cập nhật và xác nhận ghi ngày{" "}
           {formatISODate(draft.event_date)}.
         </span>

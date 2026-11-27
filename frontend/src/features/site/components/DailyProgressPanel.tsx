@@ -10,6 +10,7 @@ import {
   type ProgressRow,
   type StageDefinition,
 } from "../lib/componentProgress";
+import { fetchMainWorks, mainWorkForDefinition, type MainWork } from "../lib/mainWorks";
 import { errorMessage } from "../lib/componentProgressPanel";
 import type { ComponentSegment } from "../lib/componentImport";
 import DailyProgressBanners from "./DailyProgressBanners";
@@ -20,8 +21,9 @@ import DailyProgressPreview from "./DailyProgressPreview";
 import {
   addDailyProgressLine,
   buildDailyProgressPayload,
+  buildDailyProgressSplit,
   canCommitDailyProgressPreview,
-  changeLineStageDefinition,
+  changeLineMainWork,
   copySelectionFromPriorLine,
   createDailyProgressDraft,
   dailyProgressError,
@@ -61,6 +63,7 @@ export default function DailyProgressPanel({ projectId, batchId, primaryZone, in
   const [rows, setRows] = useState<ProgressRow[]>([]);
   const [rowsLoaded, setRowsLoaded] = useState(false);
   const [definitions, setDefinitions] = useState<StageDefinition[]>([]);
+  const [works, setWorks] = useState<MainWork[]>([]);
   const [segments, setSegments] = useState<ComponentSegment[]>([]);
   const [filters, setFilters] = useState<DailyProgressFilters>({
     zone: "",
@@ -72,6 +75,7 @@ export default function DailyProgressPanel({ projectId, batchId, primaryZone, in
   const [preview, setPreview] = useState<DailyProgressPreviewResponse | null>(
     null,
   );
+  const [previewOrigins, setPreviewOrigins] = useState<number[]>([]);
   const [idempotencyKey, setIdempotencyKey] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState<DailyProgressBusy>(null);
@@ -86,14 +90,16 @@ export default function DailyProgressPanel({ projectId, batchId, primaryZone, in
     setBusy("load");
     setError(null);
     try {
-      const [progressRows, stageDefinitions, segmentRows] = await Promise.all([
+      const [progressRows, stageDefinitions, segmentRows, catalog] = await Promise.all([
         listComponentProgress(projectId, undefined, batchId),
         listStageDefinitions(projectId),
         listSegments(projectId),
+        fetchMainWorks(projectId),
       ]);
       setRows(progressRows);
       setRowsLoaded(true);
       setDefinitions(sortStagesByPosition(stageDefinitions));
+      setWorks(catalog.works);
       setSegments(segmentRows);
     } catch (err) {
       setError(errorMessage(err));
@@ -118,29 +124,33 @@ export default function DailyProgressPanel({ projectId, batchId, primaryZone, in
       const currentStage = initialStageDefinitionId
         ? row.stages.find((stage) => stage.stage_definition_id === initialStageDefinitionId)
         : null;
-      if (currentStage) {
+      const currentWork = currentStage
+        ? mainWorkForDefinition(works, currentStage.stage_definition_id)
+        : null;
+      if (currentStage && currentWork) {
         setDraft((current) => ({
           ...current,
           lines: updateDailyProgressLine(current.lines, 0, {
-            stage_definition_id: currentStage.stage_definition_id,
+            main_work_key: currentWork.key,
+            stage_selections: { [row.id]: currentStage.id },
           }),
         }));
         setMessage(`Đã chọn ${row.canonical_code} và bước đang làm “${currentStage.name}” từ mặt bằng.`);
       } else {
-        setMessage(`Đã chọn ${row.canonical_code} từ mặt bằng. Chọn bước thi công để ghi tiến độ.`);
+        setMessage(`Đã chọn ${row.canonical_code} từ mặt bằng. Chọn công tác để ghi tiến độ.`);
       }
     }
     onInitialComponentHandled?.();
-  }, [initialComponentId, initialStageDefinitionId, onInitialComponentHandled, rows, rowsLoaded]);
+  }, [initialComponentId, initialStageDefinitionId, onInitialComponentHandled, rows, rowsLoaded, works]);
 
   // Keep every selected id inside the current zone/segment and stage definition.
   useEffect(() => {
     if (!rows.length) return;
     setDraft((current) => ({
       ...current,
-      lines: pruneLinesToFilters(current.lines, rows, filters),
+      lines: pruneLinesToFilters(current.lines, rows, filters, works),
     }));
-  }, [rows, filters]);
+  }, [rows, filters, works]);
 
   const definitionOptions = useMemo(
     () => definitionOptionsFor(definitions, rows),
@@ -148,8 +158,8 @@ export default function DailyProgressPanel({ projectId, batchId, primaryZone, in
   );
 
   const availableWork = useMemo(
-    () => availableWorkFor(rows, filters, definitionOptions),
-    [definitionOptions, filters, rows],
+    () => availableWorkFor(rows, filters, works),
+    [works, filters, rows],
   );
 
   const zones = useMemo(() => zonesFor(segments, rows), [segments, rows]);
@@ -162,16 +172,23 @@ export default function DailyProgressPanel({ projectId, batchId, primaryZone, in
   const eligibleByLine = useMemo(
     () =>
       draft.lines.map((line) =>
-        eligibleRowsForLine(rows, line.stage_definition_id, filters),
+        eligibleRowsForLine(
+          rows,
+          works.find((work) => work.key === line.main_work_key) ?? null,
+          filters,
+        ),
       ),
-    [draft.lines, rows, filters],
+    [draft.lines, rows, filters, works],
   );
 
   useEffect(() => {
     if (!pendingComponentId) return;
     const lineIndex = draft.lines.findIndex((line) =>
-      eligibleRowsForLine(rows, line.stage_definition_id, filters)
-        .some((row) => row.id === pendingComponentId),
+      eligibleRowsForLine(
+        rows,
+        works.find((work) => work.key === line.main_work_key) ?? null,
+        filters,
+      ).some((row) => row.id === pendingComponentId),
     );
     if (lineIndex < 0) return;
     setActiveLineIndex(lineIndex);
@@ -188,13 +205,12 @@ export default function DailyProgressPanel({ projectId, batchId, primaryZone, in
     });
     if (target) setMessage(`Đã thêm ${target.canonical_code} vào dòng ${lineIndex + 1}. Kiểm tra bước cụ thể trước khi xem lại.`);
     setPendingComponentId(null);
-  }, [draft.lines, filters, pendingComponentId, rows]);
+  }, [draft.lines, filters, pendingComponentId, rows, works]);
 
   const totalSelected = dailyProgressSelectedCount(draft);
-  const commitReady = canCommitDailyProgressPreview(
-    preview,
-    draft.lines.length,
-  );
+  const commitReady =
+    canCommitDailyProgressPreview(preview, previewOrigins.length) &&
+    previewOrigins.length === (preview?.lines.length ?? 0);
   const filtersLocked = preview !== null || totalSelected > 0;
   const pendingCode = pendingComponentId
     ? rows.find((row) => row.id === pendingComponentId)?.canonical_code ?? "cấu kiện"
@@ -247,10 +263,10 @@ export default function DailyProgressPanel({ projectId, batchId, primaryZone, in
     invalidatePreview();
   }
 
-  function changeDefinition(index: number, stageDefinitionId: string) {
+  function changeDefinition(index: number, mainWorkKey: string) {
     setDraft((current) => ({
       ...current,
-      lines: changeLineStageDefinition(current.lines, index, stageDefinitionId),
+      lines: changeLineMainWork(current.lines, index, mainWorkKey),
     }));
     invalidatePreview();
   }
@@ -295,7 +311,12 @@ export default function DailyProgressPanel({ projectId, batchId, primaryZone, in
   function copyPrior(index: number) {
     if (index <= 0) return;
     const eligible = eligibleByLine[index] ?? [];
-    const copied = copySelectionFromPriorLine(draft.lines, index, eligible);
+    const copied = copySelectionFromPriorLine(
+      draft.lines,
+      index,
+      eligible,
+      works.find((work) => work.key === draft.lines[index]?.main_work_key) ?? null,
+    );
     updateLine(index, copied);
     setMessage(
       copied.selected_ids.length
@@ -315,7 +336,7 @@ export default function DailyProgressPanel({ projectId, batchId, primaryZone, in
   }
 
   async function handlePreview() {
-    const validation = dailyProgressError(draft, rows, filters);
+    const validation = dailyProgressError(draft, rows, filters, works);
     if (validation || busy) {
       setError(validation);
       return;
@@ -325,11 +346,10 @@ export default function DailyProgressPanel({ projectId, batchId, primaryZone, in
     setError(null);
     setMessage(null);
     try {
-      const data = await previewDailyProgress(
-        projectId,
-        buildDailyProgressPayload(draft),
-      );
+      const split = buildDailyProgressSplit(draft, rows, works);
+      const data = await previewDailyProgress(projectId, split.payload);
       setPreview(data);
+      setPreviewOrigins(split.origins);
       setConfirmed(false);
       setIdempotencyKey(newDailyProgressIdempotencyKey());
     } catch (err) {
@@ -354,11 +374,12 @@ export default function DailyProgressPanel({ projectId, batchId, primaryZone, in
     try {
       const result = await saveDailyProgress(
         projectId,
-        buildDailyProgressPayload(draft),
+        buildDailyProgressPayload(draft, rows, works),
         idempotencyKey,
       );
       setMessage(`Đã ghi ${result.created} sự kiện tiến độ.`);
       setPreview(null);
+      setPreviewOrigins([]);
       setConfirmed(false);
       setIdempotencyKey(null);
       setDraft(createDailyProgressDraft(draft.event_date));
@@ -415,7 +436,7 @@ export default function DailyProgressPanel({ projectId, batchId, primaryZone, in
                 line={line}
                 rows={rows}
                 eligible={eligible}
-                definitionOptions={definitionOptions}
+                works={works}
                 availableWork={availableWork}
                 lineCount={draft.lines.length}
                 busy={busy}
@@ -426,8 +447,8 @@ export default function DailyProgressPanel({ projectId, batchId, primaryZone, in
                   setActiveLineIndex((current) => current === index ? -1 : index)
                 }
                 onRemove={() => removeLine(index)}
-                onChangeDefinition={(stageDefinitionId) =>
-                  changeDefinition(index, stageDefinitionId)
+                onChangeDefinition={(mainWorkKey) =>
+                  changeDefinition(index, mainWorkKey)
                 }
                 onUpdateLine={(patch) => updateLine(index, patch)}
                 onToggleComponent={(componentId) =>
@@ -463,6 +484,7 @@ export default function DailyProgressPanel({ projectId, batchId, primaryZone, in
         <DailyProgressPreview
           draft={draft}
           preview={preview}
+          origins={previewOrigins}
           definitionOptions={definitionOptions}
           confirmed={confirmed}
           commitReady={commitReady}

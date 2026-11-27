@@ -6,7 +6,6 @@ import {
   buildDesignQuantityEntries,
   constructionStatusLabel,
   groupDesignQuantityEntries,
-  selectedStageForRow,
   sortStagesByPosition,
   type DesignQuantityGroup,
   type DesignQuantityMap,
@@ -14,6 +13,7 @@ import {
   type ProgressRow,
   type StageDefinition,
 } from "./componentProgress";
+import { resolveMainWorkStage, type MainWork } from "./mainWorks";
 
 export type ProgressBusy = "load" | "preview" | "save" | null;
 
@@ -64,14 +64,13 @@ export function errorMessage(error: unknown): string {
 export function buildActiveFilterChips(
   filters: ProgressFilters,
   definitions: ReadonlyArray<StageDefinition>,
+  works: ReadonlyArray<MainWork> = [],
 ): string[] {
   const chips: string[] = [];
   if (filters.type) chips.push(filters.type === "pile" ? "Cọc" : "Dầm");
-  if (filters.stage_definition_id) {
-    const definition = definitions.find(
-      (item) => item.id === filters.stage_definition_id,
-    );
-    chips.push(definition ? definition.name : "Bước thi công");
+  if (filters.main_work_key) {
+    const work = works.find((item) => item.key === filters.main_work_key);
+    chips.push(work ? `${work.component_type === "pile" ? "Cọc" : "Dầm"} · ${work.label}` : "Công tác");
   }
   if (filters.construction_status) {
     chips.push(
@@ -89,7 +88,7 @@ export function buildActiveFilterChips(
 export function countAdvancedFilters(filters: ProgressFilters): number {
   return [
     filters.type,
-    filters.stage_definition_id,
+    filters.main_work_key,
     filters.construction_status,
     filters.acceptance_status,
   ].filter(Boolean).length;
@@ -164,26 +163,25 @@ export function editorDefinitionsFor(
   return sortStagesByPosition([...known, ...derived]);
 }
 
-/** Quantity groups for the chosen stage only; unresolved scopes are left out. */
+/** Quantity groups for the chosen main work only; unresolved scopes are left out. */
 export function selectedStageQuantityGroups(
   selectedRows: ReadonlyArray<ProgressRow>,
   designQuantities: DesignQuantityMap,
-  stageDefinitionId: string,
+  work: MainWork | null,
   stageSelections: Readonly<Record<string, string>>,
 ): DesignQuantityGroup[] {
-  if (!stageDefinitionId) return [];
+  if (!work) return [];
   const stageIds = new Set(
-    selectedRows.map(
-      (row) =>
-        selectedStageForRow(row, stageDefinitionId, stageSelections[row.id])
-          ?.id,
-    ),
+    selectedRows
+      .map((row) =>
+        resolveMainWorkStage(row, work, stageSelections[row.id])?.id,
+      )
+      .filter((id): id is string => Boolean(id)),
   );
   return groupDesignQuantityEntries(
     buildDesignQuantityEntries(
       selectedRows,
       designQuantities,
-      stageDefinitionId,
     ).filter((entry) => stageIds.has(entry.stageId)),
   );
 }

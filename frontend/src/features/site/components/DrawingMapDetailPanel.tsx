@@ -16,7 +16,6 @@ import {
   shortSha,
   statusChipClass,
   verificationLabel,
-  type Placement,
 } from "../lib/drawingMapPanel";
 import type { DetailState } from "./useDrawingMapDetail";
 
@@ -32,6 +31,7 @@ type CompactProps = {
   detailMarker: DrawingMarker;
   closeDetail: () => void;
   onOpenComponent?: (componentId: string) => void;
+  onOpenOriginal?: () => void;
   onRequestProgress?: (
     componentId: string,
     stageDefinitionId?: string | null,
@@ -42,6 +42,7 @@ export function DrawingMapCompactDetail({
   detailMarker,
   closeDetail,
   onOpenComponent,
+  onOpenOriginal,
   onRequestProgress,
 }: CompactProps) {
   return (
@@ -95,7 +96,7 @@ export function DrawingMapCompactDetail({
         </button>
         <button
           type="button"
-          className={`${PRIMARY_BUTTON} w-full ${FOCUS_RING}`}
+          className={`${BUTTON} w-full ${FOCUS_RING}`}
           disabled={!onRequestProgress}
           onClick={() =>
             onRequestProgress?.(
@@ -107,6 +108,15 @@ export function DrawingMapCompactDetail({
         >
           Ghi tiến độ
         </button>
+        {onOpenOriginal ? (
+          <button
+            type="button"
+            className={`${BUTTON} w-full ${FOCUS_RING}`}
+            onClick={onOpenOriginal}
+          >
+            Bản vẽ gốc
+          </button>
+        ) : null}
       </div>
     </div>
   );
@@ -119,10 +129,7 @@ type Props = {
   detailError: string | null;
   openDetail: (marker: DrawingMarker) => void;
   closeDetail: () => void;
-  startOverride: (marker: DrawingMarker) => void;
-  reviewPosition: (marker: DrawingMarker) => void;
-  reviewBusyId: string | null;
-  placement: Placement | null;
+  onOpenOriginal?: () => void;
   onRequestProgress?: (
     componentId: string,
     stageDefinitionId?: string | null,
@@ -138,10 +145,7 @@ export default function DrawingMapDetailPanel({
   detailError,
   openDetail,
   closeDetail,
-  startOverride,
-  reviewPosition,
-  reviewBusyId,
-  placement,
+  onOpenOriginal,
   onRequestProgress,
   detailHeadingId,
   detailHeadingRef,
@@ -192,33 +196,15 @@ export default function DrawingMapDetailPanel({
         </button>
       ) : null}
 
-      <div className="mt-3 grid gap-2 min-[375px]:grid-cols-2">
+      {onOpenOriginal ? (
         <button
           type="button"
-          className={`${BUTTON} w-full ${FOCUS_RING}`}
-          disabled={Boolean(placement)}
-          onClick={() => startOverride(detailMarker)}
+          className={`${BUTTON} mt-3 w-full ${FOCUS_RING}`}
+          onClick={onOpenOriginal}
         >
-          Đặt lại vị trí
+          Bản vẽ gốc
         </button>
-        {detailMarker.position_id &&
-        detailMarker.position_status === "DRAFT" ? (
-          <button
-            type="button"
-            className={`${PRIMARY_BUTTON} w-full ${FOCUS_RING}`}
-            disabled={reviewBusyId === detailMarker.component_id}
-            onClick={() => void reviewPosition(detailMarker)}
-          >
-            {reviewBusyId === detailMarker.component_id
-              ? "Đang duyệt…"
-              : "Duyệt vị trí"}
-          </button>
-        ) : null}
-      </div>
-      <p className="mt-1 text-xs text-slate-500">
-        Đặt lại vị trí sẽ ghi đè vị trí bản vẽ và lưu vết kiểm
-        toán. Chỉ quản lý dự án duyệt được vị trí.
-      </p>
+      ) : null}
 
       {detailState === "loading" ? (
         <p className="mt-3 text-sm text-slate-600">

@@ -3,8 +3,9 @@ import {
   EMPTY_DAILY_PROGRESS_FILTERS,
   addDailyProgressLine,
   buildDailyProgressPayload,
+  buildDailyProgressSplit,
   canCommitDailyProgressPreview,
-  changeLineStageDefinition,
+  changeLineMainWork,
   copySelectionFromPriorLine,
   createDailyProgressDraft,
   dailyProgressError,
@@ -30,6 +31,16 @@ import {
   type DailyProgressPreviewResponse,
 } from "./dailyProgress";
 import type { ProgressRow, ProgressStage } from "./componentProgress";
+import type { MainWork } from "./mainWorks";
+
+const PILE_WORK: MainWork = {
+  key: "pile-clean",
+  label: "Vệ sinh bề mặt",
+  component_type: "pile",
+  order: 3,
+  stage_definition_ids: ["sd1", "sd2"],
+};
+const WORKS = [PILE_WORK];
 
 function stage(
   id: string,
@@ -117,16 +128,16 @@ describe("eligible work", () => {
     ];
 
     expect(
-      eligibleRowsForLine(rows, "sd1", EMPTY_DAILY_PROGRESS_FILTERS).map(
+      eligibleRowsForLine(rows, PILE_WORK, EMPTY_DAILY_PROGRESS_FILTERS).map(
         (item) => item.id,
       ),
-    ).toEqual(["c1", "c3"]);
+    ).toEqual(["c1", "c2", "c3"]);
     expect(
-      eligibleRowsForLine(rows, "sd1", { zone: "Cầu chính", segment_id: "s1" }).map(
+      eligibleRowsForLine(rows, PILE_WORK, { zone: "Cầu chính", segment_id: "s1" }).map(
         (item) => item.id,
       ),
-    ).toEqual(["c1"]);
-    expect(eligibleRowsForLine(rows, "", EMPTY_DAILY_PROGRESS_FILTERS)).toEqual([]);
+    ).toEqual(["c1", "c2"]);
+    expect(eligibleRowsForLine(rows, null, EMPTY_DAILY_PROGRESS_FILTERS)).toEqual([]);
   });
 
   it("derives segment options from rows when the segment list is empty", () => {
@@ -151,21 +162,21 @@ describe("eligible work", () => {
 describe("selection state", () => {
   it("copies the prior line ids that remain eligible and keeps matching exact stages", () => {
     const prior = line({
-      stage_definition_id: "sd1",
+      main_work_key: "pile-clean",
       selected_ids: ["c1", "c2"],
       stage_selections: { c1: "st1", c2: "st-other" },
     });
-    const current = line({ stage_definition_id: "sd1" });
+    const current = line({ main_work_key: "pile-clean" });
     const eligible = [
       row({ id: "c1", stages: [stage("st1", "sd1")] }),
       row({ id: "c3", stages: [stage("st3", "sd1")] }),
     ];
 
-    expect(copySelectionFromPriorLine([prior, current], 1, eligible)).toEqual({
+    expect(copySelectionFromPriorLine([prior, current], 1, eligible, PILE_WORK)).toEqual({
       selected_ids: ["c1"],
       stage_selections: { c1: "st1" },
     });
-    expect(copySelectionFromPriorLine([prior, current], 0, eligible)).toEqual({
+    expect(copySelectionFromPriorLine([prior, current], 0, eligible, PILE_WORK)).toEqual({
       selected_ids: [],
       stage_selections: {},
     });
@@ -182,23 +193,23 @@ describe("selection state", () => {
     expect(toggleDailyProgressComponent(withStage, "c1")).toEqual({
       selected_ids: [],
       stage_selections: {},
-      stage_definition_id: "",
+      main_work_key: "",
       status: "",
       group_quantity: "",
       group_unit: "",
     });
   });
 
-  it("changing the stage definition clears the exact selection", () => {
+  it("changing the main work clears the exact selection", () => {
     const lines = [
       line({
-        stage_definition_id: "sd1",
+        main_work_key: "pile-clean",
         selected_ids: ["c1"],
         stage_selections: { c1: "st1" },
       }),
     ];
-    expect(changeLineStageDefinition(lines, 0, "sd2")[0]).toMatchObject({
-      stage_definition_id: "sd2",
+    expect(changeLineMainWork(lines, 0, "pile-sand")[0]).toMatchObject({
+      main_work_key: "pile-sand",
       selected_ids: [],
       stage_selections: {},
     });
@@ -207,7 +218,7 @@ describe("selection state", () => {
   it("prunes ids and stage choices after a filter change", () => {
     const pruned = pruneLineToEligible(
       line({
-        stage_definition_id: "sd1",
+        main_work_key: "pile-clean",
         selected_ids: ["c1", "c2"],
         stage_selections: { c1: "st1", c2: "st2" },
       }),
@@ -217,21 +228,21 @@ describe("selection state", () => {
     expect(pruned.stage_selections).toEqual({ c1: "st1" });
   });
 
-  it("clears a line whose stage definition has no eligible rows under the filter", () => {
+  it("clears a line whose main work has no eligible rows under the filter", () => {
     const lines = [
       line({
-        stage_definition_id: "sd1",
+        main_work_key: "pile-clean",
         selected_ids: ["c1"],
         stage_selections: { c1: "st1" },
       }),
-      line({ stage_definition_id: "" }),
+      line({ main_work_key: "" }),
     ];
     const pruned = pruneLinesToFilters(lines, [row({ id: "c1" })], {
       zone: "Cầu phụ",
       segment_id: "s2",
-    });
+    }, WORKS);
     expect(pruned[0]).toMatchObject({
-      stage_definition_id: "",
+      main_work_key: "",
       selected_ids: [],
       stage_selections: {},
     });
@@ -260,30 +271,38 @@ describe("selection state", () => {
 });
 
 describe("validation and payload", () => {
+  const rows = [
+    row({
+      id: "c1",
+      canonical_code: "I36",
+      stages: [stage("st1", "sd1"), stage("st2", "sd1")],
+    }),
+    row({
+      id: "c2",
+      canonical_code: "I37",
+      stages: [stage("st3", "sd2")],
+    }),
+  ];
+
   it("requires a date, actual eligible work, exact stages, status and valid quantity", () => {
-    const rows = [
-      row({
-        id: "c1",
-        stages: [stage("st1", "sd1"), stage("st2", "sd1")],
-      }),
-    ];
     const valid = createDailyProgressDraft("2026-11-20");
     valid.lines[0] = line({
-      stage_definition_id: "sd1",
+      main_work_key: "pile-clean",
       selected_ids: ["c1"],
       stage_selections: { c1: "st2" },
       status: "IN_PROGRESS",
     });
 
-    expect(dailyProgressError(valid, rows)).toBeNull();
-    expect(dailyProgressError({ ...valid, event_date: "" }, rows)).toBe(
-      "Chọn ngày ghi nhận.",
-    );
+    expect(dailyProgressError(valid, rows, EMPTY_DAILY_PROGRESS_FILTERS, WORKS)).toBeNull();
+    expect(
+      dailyProgressError({ ...valid, event_date: "" }, rows, undefined, WORKS),
+    ).toBe("Chọn ngày ghi nhận.");
     expect(
       dailyProgressError(
         { ...valid, event_date: "2999-01-01" },
         rows,
         undefined,
+        WORKS,
         "2026-11-20",
       ),
     ).toBe("Ngày ghi nhận không được ở tương lai.");
@@ -297,6 +316,7 @@ describe("validation and payload", () => {
         },
         rows,
         undefined,
+        WORKS,
         "2026-11-20",
       ),
     ).toBe(`Tối đa ${MAX_DAILY_PROGRESS_LINES} dòng mỗi lần ghi.`);
@@ -316,6 +336,7 @@ describe("validation and payload", () => {
         },
         rows,
         undefined,
+        WORKS,
         "2026-11-20",
       ),
     ).toBe(
@@ -323,8 +344,10 @@ describe("validation and payload", () => {
     );
     expect(
       dailyProgressError(
-        { ...valid, lines: [line({ stage_definition_id: "sd1" })] },
+        { ...valid, lines: [line({ main_work_key: "pile-clean" })] },
         rows,
+        undefined,
+        WORKS,
       ),
     ).toBe("Dòng 1: chọn ít nhất một cấu kiện.");
     expect(
@@ -334,17 +357,21 @@ describe("validation and payload", () => {
           lines: [line({ ...valid.lines[0], stage_selections: {} })],
         },
         rows,
+        undefined,
+        WORKS,
       ),
     ).toBe("Dòng 1: chọn bước cụ thể cho 1 cấu kiện.");
     expect(
       dailyProgressError(
         {
           ...valid,
-          lines: [line({ ...valid.lines[0], stage_definition_id: "sd-other" })],
+          lines: [line({ ...valid.lines[0], main_work_key: "unknown" })],
         },
         rows,
+        undefined,
+        WORKS,
       ),
-    ).toContain("không thuộc bước");
+    ).toBe("Dòng 1: công tác không còn trong danh mục.");
     expect(
       dailyProgressError(
         {
@@ -352,6 +379,8 @@ describe("validation and payload", () => {
           lines: [line({ ...valid.lines[0], status: "" })],
         },
         rows,
+        undefined,
+        WORKS,
       ),
     ).toBe("Dòng 1: chọn trạng thái thi công.");
     expect(
@@ -359,6 +388,8 @@ describe("validation and payload", () => {
         line({ ...valid.lines[0], group_quantity: "-1" }),
         0,
         rows,
+        EMPTY_DAILY_PROGRESS_FILTERS,
+        WORKS,
       ),
     ).toBe("Dòng 1: khối lượng phải là số không âm.");
     expect(
@@ -366,18 +397,25 @@ describe("validation and payload", () => {
         line({ ...valid.lines[0], group_unit: "x".repeat(31) }),
         0,
         rows,
+        EMPTY_DAILY_PROGRESS_FILTERS,
+        WORKS,
       ),
     ).toBe("Dòng 1: đơn vị tối đa 30 ký tự.");
     expect(
-      dailyProgressError(valid, rows, { zone: "Cầu phụ", segment_id: "s2" }),
-    ).toContain("không thuộc bước");
+      dailyProgressError(
+        valid,
+        rows,
+        { zone: "Cầu phụ", segment_id: "s2" },
+        WORKS,
+      ),
+    ).toContain("không thuộc công tác");
   });
 
   it("preserves exact ids/stages and omits blank optional group values", () => {
     const draft = createDailyProgressDraft("2026-11-20");
     draft.lines = [
       line({
-        stage_definition_id: "sd1",
+        main_work_key: "pile-clean",
         selected_ids: ["c1"],
         stage_selections: { c1: "st1" },
         status: "COMPLETED",
@@ -385,13 +423,13 @@ describe("validation and payload", () => {
         group_unit: " m ",
       }),
       line({
-        stage_definition_id: "sd2",
+        main_work_key: "pile-clean",
         selected_ids: ["c2"],
         status: "BLOCKED",
       }),
     ];
 
-    expect(buildDailyProgressPayload(draft)).toEqual({
+    expect(buildDailyProgressPayload(draft, rows, WORKS)).toEqual({
       event_date: "2026-11-20",
       lines: [
         {
@@ -405,17 +443,67 @@ describe("validation and payload", () => {
         {
           stage_definition_id: "sd2",
           component_ids: ["c2"],
+          stage_selections: [{ component_id: "c2", stage_id: "st3" }],
           status: "BLOCKED",
         },
       ],
     });
 
     expect(() =>
-      buildDailyProgressPayload({
-        event_date: "2026-11-20",
-        lines: [line({ stage_definition_id: "sd1", selected_ids: ["c1"] })],
-      }),
+      buildDailyProgressPayload(
+        {
+          event_date: "2026-11-20",
+          lines: [line({ main_work_key: "pile-clean", selected_ids: ["c1"] })],
+        },
+        rows,
+        WORKS,
+      ),
     ).toThrow("Chọn trạng thái thi công");
+  });
+
+  it("splits one main-work line into per-definition lines and caps quantities", () => {
+    const draft = createDailyProgressDraft("2026-11-20");
+    draft.lines = [
+      line({
+        main_work_key: "pile-clean",
+        selected_ids: ["c1", "c2"],
+        stage_selections: { c1: "st1" },
+        status: "COMPLETED",
+        group_quantity: "10",
+        group_unit: "m2",
+      }),
+    ];
+    const split = buildDailyProgressSplit(draft, rows, WORKS);
+    expect(split.origins).toEqual([0, 0]);
+    expect(split.payload.lines).toEqual([
+      {
+        stage_definition_id: "sd1",
+        component_ids: ["c1"],
+        stage_selections: [{ component_id: "c1", stage_id: "st1" }],
+        status: "COMPLETED",
+      },
+      {
+        stage_definition_id: "sd2",
+        component_ids: ["c2"],
+        stage_selections: [{ component_id: "c2", stage_id: "st3" }],
+        status: "COMPLETED",
+      },
+    ]);
+  });
+
+  it("rejects ambiguous per-component stages without guessing", () => {
+    const draft = createDailyProgressDraft("2026-11-20");
+    draft.lines = [
+      line({
+        main_work_key: "pile-clean",
+        selected_ids: ["c1"],
+        status: "COMPLETED",
+      }),
+    ];
+    expect(
+      dailyProgressError(draft, rows, EMPTY_DAILY_PROGRESS_FILTERS, WORKS),
+    ).toBe("Dòng 1: chọn bước cụ thể cho 1 cấu kiện.");
+    expect(buildDailyProgressSplit(draft, rows, WORKS).payload.lines).toEqual([]);
   });
 });
 

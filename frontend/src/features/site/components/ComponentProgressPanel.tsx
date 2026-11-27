@@ -16,14 +16,11 @@ import {
 import {
   EMPTY_BULK_PROGRESS,
   EMPTY_PROGRESS_FILTERS,
-  ambiguousStageRows,
-  buildBulkProgressPayload,
   bulkProgressError,
   canCommitBulkPreview,
   filterProgressRows,
   newProgressIdempotencyKey,
   selectedProgressRows,
-  selectionsForSelected,
   todayISO,
   type BulkProgressDraft,
   type DesignQuantityMap,
@@ -33,11 +30,18 @@ import {
   type StageDefinition,
 } from "../lib/componentProgress";
 import {
+  fetchMainWorks,
+  mergeProgressPreviews,
+  mergeProgressSaveResults,
+  splitBulkProgressPayloads,
+  stageOptionsForMainWork,
+  type MainWork,
+} from "../lib/mainWorks";
+import {
   PROGRESS_PAGE_SIZE,
   allStageQuantityGroups,
   buildActiveFilterChips,
   countAdvancedFilters,
-  editorDefinitionsFor,
   errorMessage,
   hasProgressFilters,
   quickCodeRowsFor,
@@ -71,6 +75,7 @@ export default function ComponentProgressPanel({
 }: Props) {
   const [rows, setRows] = useState<ProgressRow[]>([]);
   const [definitions, setDefinitions] = useState<StageDefinition[]>([]);
+  const [works, setWorks] = useState<MainWork[]>([]);
   const [definitionsError, setDefinitionsError] = useState(false);
   const [filters, setFilters] = useState<ProgressFilters>({
     ...EMPTY_PROGRESS_FILTERS,
@@ -118,10 +123,16 @@ export default function ComponentProgressPanel({
   const loadDefinitions = useCallback(async () => {
     setDefinitionsError(false);
     try {
-      setDefinitions(await listStageDefinitions(projectId));
+      const [stageDefinitions, catalog] = await Promise.all([
+        listStageDefinitions(projectId),
+        fetchMainWorks(projectId),
+      ]);
+      setDefinitions(stageDefinitions);
+      setWorks(catalog.works);
     } catch {
       // Rows still read; the editor can derive stages attached to each row.
       setDefinitions([]);
+      setWorks([]);
       setDefinitionsError(true);
     }
   }, [projectId]);
@@ -179,11 +190,17 @@ export default function ComponentProgressPanel({
     return () => request.abort();
   }, [mode, projectId, selected]);
 
-  const filtered = useMemo(() => filterProgressRows(rows, filters), [rows, filters]);
+  const selectedWork =
+    works.find((work) => work.key === draft.main_work_key) ?? null;
+  const mainWorkStageIds = selectedWork?.stage_definition_ids ?? [];
+  const filtered = useMemo(
+    () => filterProgressRows(rows, filters, mainWorkStageIds),
+    [rows, filters, selectedWork],
+  );
   const selectedRows = useMemo(() => selectedProgressRows(rows, selected), [rows, selected]);
   const selectedQuantityGroups = useMemo(
-    () => selectedStageQuantityGroups(selectedRows, designQuantities, draft.stage_definition_id, stageSelections),
-    [draft.stage_definition_id, designQuantities, selectedRows, stageSelections],
+    () => selectedStageQuantityGroups(selectedRows, designQuantities, selectedWork, stageSelections),
+    [selectedWork, designQuantities, selectedRows, stageSelections],
   );
   const allQuantityGroups = useMemo(
     () => allStageQuantityGroups(selectedRows, designQuantities),
@@ -192,21 +209,33 @@ export default function ComponentProgressPanel({
   const selectedSet = useMemo(() => new Set(selected), [selected]);
   const quickCodeRows = useMemo(() => quickCodeRowsFor(rows, filters), [rows, filters.zone, filters.segment]);
   const ambiguousSelectedRows = useMemo(
-    () => ambiguousStageRows(selectedRows, draft.stage_definition_id),
-    [selectedRows, draft.stage_definition_id],
+    () =>
+      selectedWork
+        ? selectedRows.filter(
+            (row) => stageOptionsForMainWork(row, selectedWork).length > 1,
+          )
+        : [],
+    [selectedRows, selectedWork],
+  );
+  const noStageRows = useMemo(
+    () =>
+      selectedWork
+        ? selectedRows.filter(
+            (row) => stageOptionsForMainWork(row, selectedWork).length === 0,
+          )
+        : [],
+    [selectedRows, selectedWork],
   );
   const missingStageChoices = useMemo(
     () => ambiguousSelectedRows.filter((row) => !stageSelections[row.id]).length,
     [ambiguousSelectedRows, stageSelections],
   );
-  const selectedStageSelections = useMemo(
-    () => selectionsForSelected(selected, stageSelections),
-    [selected, stageSelections],
-  );
   const zones = useMemo(() => Array.from(new Set(rows.map((row) => row.zone))), [rows]);
   const segmentOptions = useMemo(() => segmentOptionsFor(rows, filters.zone), [rows, filters.zone]);
-  const editorDefinitions = useMemo(() => editorDefinitionsFor(definitions, selectedRows), [definitions, selectedRows]);
-  const activeFilterChips = useMemo(() => buildActiveFilterChips(filters, definitions), [filters, definitions]);
+  const activeFilterChips = useMemo(
+    () => buildActiveFilterChips(filters, definitions, works),
+    [filters, definitions, works],
+  );
   const advancedFilterCount = countAdvancedFilters(filters);
   const hasFilters = hasProgressFilters(filters);
   const visibleRows = filtered.slice(0, visibleCount);
@@ -249,7 +278,7 @@ export default function ComponentProgressPanel({
 
   function updateDraft(patch: Partial<BulkProgressDraft>) {
     setDraft((current) => ({ ...current, ...patch }));
-    if ("stage_definition_id" in patch) setStageSelections({});
+    if ("main_work_key" in patch) setStageSelections({});
     invalidatePreview();
   }
 
@@ -328,15 +357,27 @@ export default function ComponentProgressPanel({
       setError(validation);
       return;
     }
+    if (noStageRows.length) {
+      setError(
+        `${noStageRows.length} cấu kiện không có bước phù hợp với công tác đã chọn.`,
+      );
+      return;
+    }
     setBusy("preview");
     setError(null);
     setMessage(null);
     try {
-      const data = await previewProgressBulk(
-        projectId,
-        buildBulkProgressPayload(selected, draft, selectedStageSelections),
+      const payloads = splitBulkProgressPayloads(
+        selected,
+        draft,
+        stageSelections,
+        selectedRows,
+        selectedWork,
       );
-      setPreview(data);
+      const previews = await Promise.all(
+        payloads.map((payload) => previewProgressBulk(projectId, payload)),
+      );
+      setPreview(mergeProgressPreviews(previews));
       setConfirmed(false);
       setIdempotencyKey(newProgressIdempotencyKey());
     } catch (err) {
@@ -359,11 +400,23 @@ export default function ComponentProgressPanel({
     setBusy("save");
     setError(null);
     try {
-      const result = await saveProgressBulk(projectId, {
-        ...buildBulkProgressPayload(selected, draft, selectedStageSelections),
-        reviewed: true,
-        idempotency_key: idempotencyKey,
-      });
+      const payloads = splitBulkProgressPayloads(
+        selected,
+        draft,
+        stageSelections,
+        selectedRows,
+        selectedWork,
+      );
+      const results = await Promise.all(
+        payloads.map((payload, index) =>
+          saveProgressBulk(projectId, {
+            ...payload,
+            reviewed: true,
+            idempotency_key: `${idempotencyKey}:${index}`.slice(0, 120),
+          }),
+        ),
+      );
+      const result = mergeProgressSaveResults(results);
       setMessage(`Đã ghi ${result.created} sự kiện tiến độ.`);
       setSelected([]);
       setStageSelections({});
@@ -400,7 +453,7 @@ export default function ComponentProgressPanel({
             clearFilters={clearFilters}
             zones={zones}
             segmentOptions={segmentOptions}
-            definitions={definitions}
+            works={works}
             activeFilterChips={activeFilterChips}
             advancedFilterCount={advancedFilterCount}
             hasFilters={hasFilters}
@@ -460,7 +513,8 @@ export default function ComponentProgressPanel({
               selectedRows={selectedRows}
               draft={draft}
               updateDraft={updateDraft}
-              editorDefinitions={editorDefinitions}
+              works={works}
+              work={selectedWork}
               designStatus={designStatus}
               selectedQuantityGroups={selectedQuantityGroups}
               allQuantityGroups={allQuantityGroups}
@@ -476,7 +530,7 @@ export default function ComponentProgressPanel({
           {preview ? (
             <ComponentProgressPreview
               preview={preview}
-              editorDefinitions={editorDefinitions}
+              work={selectedWork}
               draft={draft}
               confirmed={confirmed}
               onConfirmedChange={setConfirmed}

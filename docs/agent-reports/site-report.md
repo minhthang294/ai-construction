@@ -1549,3 +1549,66 @@ npm run build   # OK; DrawingMapPanel chunk 55,27 kB
 Test mới: khoảng cách điểm-đoạn, hit-test gần cọc/dầm, ưu tiên dầm, trả nhiều ứng viên khi gần nhau; viết tắt 10 công đoạn + fallback; ngưỡng mật độ nhãn và collision; round-trip toạ độ, zoom quanh điểm chạm, pinch giữ trung điểm; backend fallback stage chưa có event.
 
 **Chưa kiểm**: chưa đo 60 fps trên điện thoại thật với 500 marker; chưa có browser/E2E cho double-tap, quán tính và menu chọn. Nhãn vẫn scale theo wrapper trong lúc gesture, chỉ đổi mật độ sau khi thả tay.
+
+## Vùng 14 - công tác chính, viewport một lần và sơ đồ sinh từ mã
+
+Cập nhật: 27/11/2026. Phạm vi: `backend/app/core/main_works.py`, `backend/app/site/main_works_router.py`, `backend/app/site/router.py`, `backend/app/core/drawing_map_router.py`, `backend/app/core/overview_router.py`, test site/drawing/overview; `frontend/src/features/site/*`, test; báo cáo này. Không migration, không sửa `data/storage/dap-maps`, không đổi bảng `component_map_positions`, không commit/stash/push.
+
+### 1. Viewport không tự dời
+
+- Thêm reducer thuần `viewportFitStep` (`frontend/src/features/site/lib/drawingMap.ts`): chỉ trả `fit=true` khi mở sheet lần đầu (ảnh đã sẵn sàng) hoặc khi người dùng bấm "Vừa khung" (`reset`). Các sự kiện `metrics`, `data`, `selection` luôn trả `fit=false`; `gesture` đánh dấu sheet đã được người dùng đổi để không có fit muộn.
+- `useDrawingMapViewport` bỏ hiệu ứng reset theo `activeImageUrl`/`imageReloadKey`; hiệu ứng fit dùng reducer, không phụ thuộc label density, selection hay data refresh. Pinch vẫn dùng `pinchView` giữ điểm dưới trung điểm hai ngón tay.
+- Test: mở lần đầu fit; sau đó `metrics/data/selection` và gesture không fit; sheet mới chỉ fit khi dữ liệu sẵn sàng; reset mới fit lại.
+
+### 2. Danh mục công tác chính (backend)
+
+`GET /api/v1/projects/{p}/main-works?type=pile|beam` (chỉ đọc, `require_project_member`) trả:
+
+```json
+{"works":[{"key","label","component_type","order","stage_definition_ids":[]}],"hidden":[...],"unmapped":[...]}
+```
+
+Luật mẫu nằm trong `backend/app/core/main_works.py`; mỗi `StageDefinition` chỉ khớp tối đa một công tác. Danh sách chính thức:
+
+- **Cọc**: 1 Đục bê tông; 2 Tẩy gỉ cốt thép; 3 Vệ sinh bề mặt; 4 Bổ sung/khoan cấy cốt thép; 5 Quét epoxy; 6 Rắc cát tạo nhám; 7 Lắp vỏ composite; 8 Bơm vữa không co ngót; 9 Dán sợi carbon; 10 Sơn bảo vệ.
+- **Dầm**: 1 Đục bê tông; 2 Tẩy gỉ cốt thép; 3 Vệ sinh bề mặt; 4 Bổ sung/khoan cấy cốt thép; 5 Quét epoxy; 6 Rắc cát tạo nhám; 7 Ván khuôn; 8 Đổ/bơm vữa; 9 Dán sợi thủy tinh; 10 Sơn bảo vệ.
+
+Kiểm tra trên bản sao chỉ đọc của `data/storage/demo-live/app.db` (sqlite backup sang thư mục tạm): **0 tên chưa map**. Các mục phụ (bao tải, vận chuyển đổ thải, vệ sinh bằng nước, hút nước, đục hà bám, keo gắn cấy, đường hàn, trám vá/trám phẳng, thợ lặn, demo) được trả trong `hidden` (99 dòng trên dữ liệu thật) và không xuất hiện trong picker.
+
+### 3. Picker và tách dòng theo cấu kiện
+
+- `frontend/src/features/site/lib/mainWorks.ts`: kiểu `MainWork`, fetch, tìm công tác theo definition, stage của từng cấu kiện trong công tác, tách payload theo definition, gộp preview/kết quả nhiều nhóm.
+- **Ghi tiến độ ngày**: `DailyProgressLineDraft` chuyển từ `stage_definition_id` sang `main_work_key`. Khi gọi preview/save, mỗi cấu kiện được giải về stage riêng trong công tác và tách thành các dòng `stage_definition_id` mà API hiện có cần. Cấu kiện có 0 hoặc >1 stage trong công tác hiện UI chọn bước cụ thể; không tự đoán. Khối lượng nhóm chỉ giữ khi một công tác ra đúng một definition, tránh nhân bản khối lượng.
+- **Chọn nhanh/bulk**: picker công tác chính; preview/save tách theo từng definition của từng cấu kiện, gộp kết quả. Idempotency key có hậu tố theo nhóm để retry an toàn.
+- **Dán tin nhắn**: chọn công tác chính; nếu một công tác có nhiều biến thể trong tin nhắn/catalog thì hiện thêm "Bước cụ thể" ngay dưới, không đưa toàn bộ catalog vào danh sách chính.
+- **Bộ lọc tiến độ**: chọn "Công tác" thay vì "Bước thi công", chip hiện `Cọc/Dầm · tên công tác`.
+- **Nhãn bản đồ/Zalo**: `current_work_name` và `stage_name` tổng hợp ngày dùng nhãn công tác chính; `current_stage_name` vẫn giữ tên đầy đủ kèm `t` để hiện chi tiết cấu kiện.
+
+### 4. Sơ đồ sinh từ mã (SVG)
+
+- Không tải ảnh scan mặc định. `useSchematicMapResources` lấy `GET /projects/{p}/progress?batch_id=...` + `GET /main-works`, gộp theo phân đoạn, gộp Bunke vào Cầu chính (batch "PD2 Cầu chính" gồm 2 cấu kiện Bunke + 86 cấu kiện Cầu chính).
+- `frontend/src/features/site/lib/schematicMap.ts` phân tích mã: `I49` cọc; `F-66-67` dầm ngang; `A-B-153`/`O-Q-198` dầm dọc; `Q-270` góc; `K-111-112`/`K-1` tấm chắn tàu; mã lạ là "?" ở cuối.
+- Trục trái sang phải, bong bóng số trục trên đầu, **nén khoảng trục không dùng** (mỗi trục cách đều, nhãn đầy đủ); hàng ngang từ trên xuống `I,H,G,F`, Bunke `E,D,C,B,A` nằm dưới, có khung nét đứt + chữ "Bunke". Nếu trục Bunke dùng chung với trục chính thì canh thẳng; nếu rời nhau thì dời sang khối bên phải có khoảng cách.
+- Cọc = hình tròn nhỏ; dầm = đoạn dày theo màu trạng thái; góc = hình thoi; tấm chắn tàu = hình chữ nhật; trạng thái/nghiệm thu/khung chọn giữ nguyên từ marker cũ.
+- Giữ hit-test 22 px cọc / 14 px dầm, chọn khi gần nhau, pinch/pan/quán tính/double-tap, label đầy đủ ≥1.3/chỉ mã ≥1.05, va chạm bị bỏ qua. Fit chỉ lần đầu hoặc "Vừa khung".
+- Nút "Bản vẽ gốc" trong chi tiết chỉ tải ảnh scan khi bấm; ảnh lấy qua `fetchDrawingMap` + cache ảnh riêng hiện có.
+- Ẩn "Đặt lại vị trí" và panel placement; bảng `component_map_positions` và API vị trí không đổi.
+
+### File chính
+
+- Backend: `backend/app/core/main_works.py`, `backend/app/site/main_works_router.py`, `backend/app/site/router.py`, `backend/app/core/drawing_map_router.py`, `backend/app/core/overview_router.py`, `backend/tests/site_report/test_main_works.py`, `backend/tests/test_drawing_map.py`, `backend/tests/test_overview.py`, `backend/tests/test_design_parameters_api.py`.
+- Frontend: `lib/mainWorks.ts`, `lib/schematicMap.ts`, `components/useSchematicMapResources.ts`, `components/SchematicPlanSurface.tsx`, `components/DrawingMapPanel.tsx`, `components/DrawingMapCanvas.tsx`, `components/useDrawingMapViewport.ts`, `components/DailyProgress*.tsx`, `components/ComponentProgress*.tsx`, `components/ProgressPastePanel.tsx`, test `mainWorks.test.ts`, `schematicMap.test.ts`, `dailyProgress.test.ts`, `drawingMap.test.ts`, v.v.
+
+### Kiểm thử
+
+```bash
+# Backend, DATABASE_URL trỏ SQLite tạm
+.venv\Scripts\python.exe -m pytest backend/tests -q
+# 448 passed, 6 skipped
+
+cd frontend
+npm test        # 43 files, 321 tests passed
+npm run build   # OK
+```
+
+**Chưa kiểm**: chưa chạy app local/browser để chụp màn hình sơ đồ thật (không có server đang chạy); chưa đo 60 fps trên điện thoại với 500 marker; chưa có E2E cho pinch/double-tap. Bulk nhiều definition gọi nhiều request preview/save; retry dùng cùng key có hậu tố nhóm nhưng nếu một nhóm lỗi giữa chừng có thể đã ghi các nhóm trước (API bulk hiện tại chỉ một definition mỗi lần).

@@ -1,9 +1,6 @@
 import type { RefObject } from "react";
-import {
-  stageDefinitionLabel,
-  type ProgressFilters,
-  type StageDefinition,
-} from "../lib/componentProgress";
+import type { ProgressFilters } from "../lib/componentProgress";
+import type { MainWork } from "../lib/mainWorks";
 import {
   FIELD,
   FOCUS_RING,
@@ -17,7 +14,7 @@ type Props = {
   clearFilters: () => void;
   zones: string[];
   segmentOptions: Array<[string, number]>;
-  definitions: StageDefinition[];
+  works: MainWork[];
   activeFilterChips: string[];
   advancedFilterCount: number;
   hasFilters: boolean;
@@ -40,7 +37,7 @@ export default function ComponentProgressToolbar({
   clearFilters,
   zones,
   segmentOptions,
-  definitions,
+  works,
   activeFilterChips,
   advancedFilterCount,
   hasFilters,
@@ -187,22 +184,35 @@ export default function ComponentProgressToolbar({
             </select>
           </label>
           <label className="min-w-0 text-xs font-medium text-slate-700">
-            Bước thi công
+            Công tác
             <select
               className={FIELD}
-              value={filters.stage_definition_id}
+              value={filters.main_work_key}
               onChange={(event) =>
                 updateFilter({
-                  stage_definition_id: event.target.value,
+                  main_work_key: event.target.value,
                 })
               }
             >
-              <option value="">Tất cả bước</option>
-              {definitions.map((definition) => (
-                <option key={definition.id} value={definition.id}>
-                  {stageDefinitionLabel(definition)}
-                </option>
-              ))}
+              <option value="">Tất cả công tác</option>
+              {(["pile", "beam"] as const).map((type) => {
+                const items = works.filter(
+                  (work) => work.component_type === type,
+                );
+                if (!items.length) return null;
+                return (
+                  <optgroup
+                    key={type}
+                    label={type === "pile" ? "Cọc" : "Dầm"}
+                  >
+                    {items.map((work) => (
+                      <option key={work.key} value={work.key}>
+                        {work.label}
+                      </option>
+                    ))}
+                  </optgroup>
+                );
+              })}
             </select>
           </label>
           <label className="min-w-0 text-xs font-medium text-slate-700">

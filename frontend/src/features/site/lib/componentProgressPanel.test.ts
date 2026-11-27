@@ -7,6 +7,7 @@ import {
   type ProgressStage,
   type StageDefinition,
 } from "./componentProgress";
+import type { MainWork } from "./mainWorks";
 import {
   acceptanceChipClass,
   allStageQuantityGroups,
@@ -74,6 +75,14 @@ function quantity(overrides: Partial<DesignQuantity> = {}): DesignQuantity {
   };
 }
 
+const WORK: MainWork = {
+  key: "pile-clean",
+  label: "Vệ sinh bề mặt",
+  component_type: "pile",
+  order: 3,
+  stage_definition_ids: ["sd1"],
+};
+
 describe("componentProgressPanel chips", () => {
   it("maps statuses to their badge classes and falls back to not started", () => {
     expect(statusChipClass("COMPLETED")).toBe(
@@ -121,24 +130,25 @@ describe("componentProgressPanel filters", () => {
         {
           ...EMPTY_PROGRESS_FILTERS,
           type: "beam",
-          stage_definition_id: "sd1",
+          main_work_key: "pile-clean",
           construction_status: "COMPLETED",
           acceptance_status: "APPROVED",
         },
         [definition()],
+        [WORK],
       ),
     ).toEqual([
       "Dầm",
-      "Sửa chữa cọc",
+      "Cọc · Vệ sinh bề mặt",
       "Thi công: Hoàn thành",
       "Nghiệm thu: Đã xác nhận",
     ]);
     expect(
       buildActiveFilterChips(
-        { ...EMPTY_PROGRESS_FILTERS, stage_definition_id: "missing" },
+        { ...EMPTY_PROGRESS_FILTERS, main_work_key: "missing" },
         [],
       ),
-    ).toEqual(["Bước thi công"]);
+    ).toEqual(["Công tác"]);
   });
 
   it("counts advanced filters and detects active filters", () => {
@@ -276,19 +286,19 @@ describe("componentProgressPanel quantity groups", () => {
     stC: quantity({ quantity: 2 }),
   };
 
-  it("returns no groups before a stage is chosen", () => {
+  it("returns no groups before a work is chosen", () => {
     expect(
-      selectedStageQuantityGroups(rows, quantities, "", {}),
+      selectedStageQuantityGroups(rows, quantities, null, {}),
     ).toEqual([]);
   });
 
   it("leaves out ambiguous rows until a scope is selected", () => {
-    const [group] = selectedStageQuantityGroups(rows, quantities, "sd1", {});
+    const [group] = selectedStageQuantityGroups(rows, quantities, WORK, {});
     expect(group.items.map((item) => item.componentCodes)).toEqual([["I40"]]);
   });
 
   it("includes every resolved scope after selection", () => {
-    const groups = selectedStageQuantityGroups(rows, quantities, "sd1", {
+    const groups = selectedStageQuantityGroups(rows, quantities, WORK, {
       c1: "stA",
     });
     expect(groups.flatMap((group) => group.items)).toHaveLength(2);

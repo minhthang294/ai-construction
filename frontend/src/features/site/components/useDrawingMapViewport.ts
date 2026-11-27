@@ -6,18 +6,18 @@ import {
   clampZoom,
   fitViewToBounds,
   markerBounds,
+  viewportFitStep,
   zoomAroundPoint,
   type DrawingSheet,
   type ImageBox,
   type View,
+  type ViewportFitState,
 } from "../lib/drawingMap";
 import type { ImageState } from "./useDrawingMapResources";
 
 export type SetView = (next: View | ((current: View) => View)) => void;
 
 type Params = {
-  activeImageUrl: string;
-  imageReloadKey: number;
   activeSheetKey: string;
   activeSheet: DrawingSheet | null;
   imageState: ImageState;
@@ -26,8 +26,6 @@ type Params = {
 };
 
 export function useDrawingMapViewport({
-  activeImageUrl,
-  imageReloadKey,
   activeSheetKey,
   activeSheet,
   imageState,
@@ -43,32 +41,47 @@ export function useDrawingMapViewport({
     pan: { x: 0, y: 0 },
   });
   const viewRef = useRef<View>(view);
+  const fitStateRef = useRef<ViewportFitState>({
+    activeSheetKey: "",
+    fittedSheetKey: null,
+  });
   const setView = useCallback((next: View | ((current: View) => View)) => {
     const value = typeof next === "function" ? next(viewRef.current) : next;
     viewRef.current = value;
     setViewState(value);
   }, []);
 
-  useEffect(() => {
-    if (!activeImageUrl) return;
-    setView({ zoom: 1, pan: { x: 0, y: 0 } });
-  }, [activeImageUrl, imageReloadKey, setView]);
+  const markUserInteraction = useCallback(() => {
+    fitStateRef.current = viewportFitStep(fitStateRef.current, {
+      type: "gesture",
+    }).state;
+  }, []);
 
   useEffect(() => {
-    if (imageState !== "ready" || !imageBox || !activeSheet) return;
+    if (!activeSheetKey) return;
+    const imageReady = imageState === "ready" && Boolean(imageBox);
+    const step = viewportFitStep(fitStateRef.current, {
+      type: "open",
+      sheetKey: activeSheetKey,
+      imageReady,
+    });
+    fitStateRef.current = step.state;
+    if (!step.fit || !imageBox || !activeSheet) return;
     const viewport = viewportRef.current;
     if (!viewport) return;
     const fitted = fitViewToBounds(
-      markerBounds(activeSheet.markers),
+      activeSheet.schematic
+        ? { minX: 0, minY: 0, maxX: 1, maxY: 1 }
+        : markerBounds(activeSheet.markers),
       imageBox,
       viewport.clientWidth,
       viewport.clientHeight,
-      0.08,
+      activeSheet.schematic ? 0.02 : 0.08,
     );
     const next = fitted ?? { zoom: 1, pan: { x: 0, y: 0 } };
     setFitView(next);
     setView(next);
-  }, [activeSheetKey, imageBox, imageState, setView]);
+  }, [activeSheetKey, activeSheet, imageBox, imageState, setView]);
 
   useEffect(() => {
     if (imageState !== "ready" || !activeSheetKey) return;
@@ -77,6 +90,7 @@ export function useDrawingMapViewport({
     function handleWheel(event: WheelEvent) {
       if (!element) return;
       event.preventDefault();
+      markUserInteraction();
       const next = clampZoom(viewRef.current.zoom + (event.deltaY < 0 ? 0.25 : -0.25));
       setView(
         zoomAroundPoint(
@@ -89,7 +103,7 @@ export function useDrawingMapViewport({
     }
     element.addEventListener("wheel", handleWheel, { passive: false });
     return () => element.removeEventListener("wheel", handleWheel);
-  }, [activeSheetKey, imageState, setView]);
+  }, [activeSheetKey, imageState, setView, markUserInteraction]);
 
   function viewportSize(): { width: number; height: number } {
     const element = viewportRef.current;
@@ -100,6 +114,7 @@ export function useDrawingMapViewport({
   }
 
   function zoomBy(delta: number) {
+    markUserInteraction();
     const next = clampZoom(viewRef.current.zoom + delta);
     const { width, height } = viewportSize();
     setView((current) => ({
@@ -109,10 +124,29 @@ export function useDrawingMapViewport({
   }
 
   function resetView() {
-    setView(fitView);
+    if (!activeSheet || !imageBox) return;
+    const step = viewportFitStep(fitStateRef.current, {
+      type: "reset",
+      imageReady: true,
+    });
+    fitStateRef.current = step.state;
+    const { width, height } = viewportSize();
+    const fitted = fitViewToBounds(
+      activeSheet.schematic
+        ? { minX: 0, minY: 0, maxX: 1, maxY: 1 }
+        : markerBounds(activeSheet.markers),
+      imageBox,
+      width,
+      height,
+      activeSheet.schematic ? 0.02 : 0.08,
+    );
+    const next = fitted ?? { zoom: 1, pan: { x: 0, y: 0 } };
+    setFitView(next);
+    setView(next);
   }
 
   function showWholeSheet() {
+    markUserInteraction();
     setView({ zoom: 1, pan: { x: 0, y: 0 } });
   }
 
@@ -124,6 +158,7 @@ export function useDrawingMapViewport({
     zoomBy,
     resetView,
     showWholeSheet,
+    markUserInteraction,
   };
 }
 

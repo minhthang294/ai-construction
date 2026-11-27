@@ -179,7 +179,7 @@ def test_markers_expose_terminal_stage_last_event_and_acceptance(monkeypatch):
         result = drawing.drawing_map("p", db)
     marker = result["sheets"][0]["markers"][0]
     assert marker["current_stage_name"].endswith("t = 3 cm")
-    assert marker["current_work_name"].endswith("t = 3 cm")
+    assert marker["current_work_name"] == "Đục bê tông"
     assert marker["current_work_status"] == "IN_PROGRESS"
     assert marker["last_event_date"] == "2026-11-20"
     assert marker["accepted"] is True

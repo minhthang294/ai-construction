@@ -79,7 +79,7 @@ export type ProgressFilters = {
   zone: string;
   segment: string;
   type: string;
-  stage_definition_id: string;
+  main_work_key: string;
   construction_status: string;
   acceptance_status: string;
 };
@@ -89,13 +89,13 @@ export const EMPTY_PROGRESS_FILTERS: ProgressFilters = {
   zone: "",
   segment: "",
   type: "",
-  stage_definition_id: "",
+  main_work_key: "",
   construction_status: "",
   acceptance_status: "",
 };
 
 export type BulkProgressDraft = {
-  stage_definition_id: string;
+  main_work_key: string;
   event_date: string;
   status: ConstructionInputStatus | "";
   quantity: string;
@@ -104,7 +104,7 @@ export type BulkProgressDraft = {
 };
 
 export const EMPTY_BULK_PROGRESS: BulkProgressDraft = {
-  stage_definition_id: "",
+  main_work_key: "",
   event_date: "",
   status: "",
   quantity: "",
@@ -450,8 +450,10 @@ function searchable(row: ProgressRow): string {
 export function filterProgressRows(
   rows: ReadonlyArray<ProgressRow>,
   filters: ProgressFilters,
+  mainWorkStageIds: ReadonlyArray<string> = [],
 ): ProgressRow[] {
   const query = filters.query.trim().toLowerCase();
+  const workIds = new Set(mainWorkStageIds);
   return rows.filter((row) => {
     if (filters.zone && row.zone !== filters.zone) return false;
     if (filters.segment && String(row.segment_number) !== filters.segment) {
@@ -459,9 +461,9 @@ export function filterProgressRows(
     }
     if (filters.type && row.type !== filters.type) return false;
     if (
-      filters.stage_definition_id &&
-      !row.stages.some(
-        (stage) => stage.stage_definition_id === filters.stage_definition_id,
+      filters.main_work_key &&
+      !row.stages.some((stage) =>
+        workIds.has(stage.stage_definition_id),
       )
     ) {
       return false;
@@ -497,14 +499,14 @@ export function bulkProgressError(
   missingStageChoiceCount = 0,
 ): string | null {
   if (selectedCount === 0) return "Chọn ít nhất một cấu kiện.";
-  if (!draft.stage_definition_id.trim()) return "Chọn bước thi công.";
+  if (!draft.main_work_key.trim()) return "Chọn công tác.";
   if (missingStageChoiceCount > 0) {
     return `Chọn bước cụ thể cho ${missingStageChoiceCount} cấu kiện có nhiều phạm vi.`;
   }
   if (!draft.event_date) return "Chọn ngày ghi nhận.";
   if (!draft.status) return "Chọn trạng thái thi công.";
   if (draft.quantity.trim()) {
-    const value = Number(draft.quantity);
+    const value = Number(draft.quantity.trim().replace(",", "."));
     if (!Number.isFinite(value) || value < 0) {
       return "Khối lượng phải là số không âm.";
     }
@@ -512,36 +514,6 @@ export function bulkProgressError(
   if (draft.unit.trim().length > 30) return "Đơn vị tối đa 30 ký tự.";
   if (draft.note.trim().length > 2000) return "Ghi chú tối đa 2000 ký tự.";
   return null;
-}
-
-/** Payload for preview and save; the exact selected ids/stages are preserved. */
-export function buildBulkProgressPayload(
-  selectedIds: ReadonlyArray<string>,
-  draft: BulkProgressDraft,
-  stageSelections: ReadonlyArray<StageSelection> = [],
-): BulkProgressInput {
-  if (!draft.status) {
-    throw new Error("Chọn trạng thái thi công trước khi gửi.");
-  }
-  const quantity = draft.quantity.trim() ? Number(draft.quantity) : null;
-  if (quantity !== null && (!Number.isFinite(quantity) || quantity < 0)) {
-    throw new Error("Khối lượng phải là số không âm.");
-  }
-  const selectedSet = new Set(selectedIds);
-  return {
-    stage_definition_id: draft.stage_definition_id.trim(),
-    component_ids: [...selectedIds],
-    stage_selections: stageSelections.filter((item) =>
-      selectedSet.has(item.component_id),
-    ),
-    event_date: draft.event_date,
-    status: draft.status,
-    quantity,
-    unit: draft.unit.trim() || null,
-    note: draft.note.trim() || null,
-    // Evidence is added from confirmed photos only; the UI does not invent it.
-    evidence_refs: [],
-  };
 }
 
 export function newProgressIdempotencyKey(

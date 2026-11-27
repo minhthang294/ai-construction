@@ -110,7 +110,7 @@ def test_detail_overview_daily_and_journal_use_per_pile_t(env):
     assert body["stages"][0]["name"] == f"{STAGE_NAME[:-2]} t = 2 cm"
 
     latest = client.get(f"/api/v1/projects/{project}/overview/latest-day", headers=admin).json()
-    assert latest["works"][0]["stage_name"] == f"{STAGE_NAME[:-2]} t = 2–5 cm"
+    assert latest["works"][0]["stage_name"] == "Đục bê tông"
     assert latest["works"][0]["codes"] == ["F64 (t = 5 cm)", "F67 (t = 2 cm)"]
 
     preview = client.post(f"/api/v1/projects/{project}/progress/daily-preview", headers=admin, json={

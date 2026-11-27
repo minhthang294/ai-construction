@@ -46,6 +46,7 @@ type Params = {
   placementActive: boolean;
   addPlacementPoint: (event: { clientX: number; clientY: number }) => void;
   onTap: (clientX: number, clientY: number) => void;
+  onUserInteraction: () => void;
 };
 
 export function useDrawingMapGestures({
@@ -56,6 +57,7 @@ export function useDrawingMapGestures({
   placementActive,
   addPlacementPoint,
   onTap,
+  onUserInteraction,
 }: Params) {
   const gesture = useRef<GestureState>({
     mode: "none",
@@ -200,6 +202,7 @@ export function useDrawingMapGestures({
 
   function handlePointerDown(event: React.PointerEvent<HTMLDivElement>) {
     if (event.pointerType === "mouse" && event.button !== 0) return;
+    onUserInteraction();
     stopInertia();
     flushPending();
     const element = event.currentTarget;

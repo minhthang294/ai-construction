@@ -341,9 +341,6 @@ export async function listComponentProgress(
   if (filters?.zone) params.set("zone", filters.zone);
   if (filters?.segment) params.set("segment_id", filters.segment);
   if (filters?.type) params.set("type", filters.type);
-  if (filters?.stage_definition_id) {
-    params.set("stage_definition_id", filters.stage_definition_id);
-  }
   if (filters?.construction_status) {
     params.set("construction_status", filters.construction_status);
   }

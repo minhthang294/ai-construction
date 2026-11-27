@@ -14,6 +14,7 @@ import {
   type DailyProgressLineDraft,
   type DailyProgressLinePreview,
 } from "./dailyProgress";
+import { componentTypeLabel, type MainWork } from "./mainWorks";
 
 export {
   FIELD,
@@ -33,7 +34,12 @@ export const DAILY_STATUS_OPTIONS = [
 
 export const GROUP_UNITS = ["cọc", "dầm", "vị trí", "m", "m²", "m³", "kg", "tấn", "lít", "ca"];
 
-export type AvailableWork = { id: string; label: string };
+export type AvailableWork = {
+  key: string;
+  label: string;
+  type: "pile" | "beam";
+  count: number;
+};
 
 /** Catalog definitions, completed from the stages attached to the loaded rows. */
 export function definitionOptionsFor(
@@ -58,31 +64,28 @@ export function definitionOptionsFor(
   return sortStagesByPosition([...derived.values()]);
 }
 
-/** Stage choices that still have a matching component inside the filters. */
+/** Main-work choices that still have a matching component inside the filters. */
 export function availableWorkFor(
   rows: ReadonlyArray<ProgressRow>,
   filters: DailyProgressFilters,
-  definitions: ReadonlyArray<StageDefinition>,
+  works: ReadonlyArray<MainWork>,
 ): AvailableWork[] {
-  const coverage = new Map<string, { count: number; groups: Set<string> }>();
-  for (const row of rows) {
-    if (filters.zone && row.zone !== filters.zone) continue;
-    if (filters.segment_id && row.segment_id !== filters.segment_id) continue;
-    for (const id of new Set(row.stages.map((stage) => stage.stage_definition_id))) {
-      const entry = coverage.get(id) ?? { count: 0, groups: new Set<string>() };
-      entry.count += 1;
-      if (row.design_group) entry.groups.add(row.design_group);
-      coverage.set(id, entry);
-    }
-  }
-  return definitions.flatMap((definition) => {
-    const entry = coverage.get(definition.id);
-    if (!entry) return [];
-    const scope = [...entry.groups].join(", ");
-    const type = definition.type === "pile" ? "Cọc" : "Dầm";
+  const scoped = rows.filter(
+    (row) =>
+      (!filters.zone || row.zone === filters.zone) &&
+      (!filters.segment_id || row.segment_id === filters.segment_id),
+  );
+  return works.flatMap((work) => {
+    const ids = new Set(work.stage_definition_ids);
+    const count = scoped.filter((row) =>
+      row.stages.some((stage) => ids.has(stage.stage_definition_id)),
+    ).length;
+    if (!count) return [];
     return [{
-      id: definition.id,
-      label: `${type} · ${definition.name}${scope ? ` · ${scope}` : ""} (${entry.count})`,
+      key: work.key,
+      type: work.component_type,
+      count,
+      label: `${componentTypeLabel(work.component_type)} · ${work.label} (${count})`,
     }];
   });
 }
@@ -133,12 +136,13 @@ export function previewGroupText(line: DailyProgressLinePreview): string {
 export function previewLineLabel(
   linePreview: DailyProgressLinePreview,
   definitions: ReadonlyArray<StageDefinition>,
-  line: DailyProgressLineDraft | undefined,
+  _line?: DailyProgressLineDraft,
 ): string {
-  const group = line
-    ? stageDefinitionLabelFor(definitions, line.stage_definition_id)
-    : "Dòng không còn trong biểu mẫu";
-  return linePreview.stage_display_name || group;
+  return (
+    linePreview.stage_display_name ||
+    stageDefinitionLabelFor(definitions, linePreview.stage_definition_id) ||
+    "Đầu việc đã tách"
+  );
 }
 
 /** Exact stage label for one previewed component row. */

@@ -1,15 +1,16 @@
 import {
   constructionStatusLabel,
   scopeLabel,
-  stageOptionsFor,
   type ProgressRow,
-  type StageDefinition,
 } from "../lib/componentProgress";
 import {
   selectedStageForLineRow,
-  stageDefinitionLabelFor,
   type DailyProgressLineDraft,
 } from "../lib/dailyProgress";
+import {
+  stageOptionsForMainWork,
+  type MainWork,
+} from "../lib/mainWorks";
 import {
   DAILY_STATUS_OPTIONS,
   FIELD,
@@ -41,7 +42,7 @@ type Props = {
   line: DailyProgressLineDraft;
   rows: ProgressRow[];
   eligible: ProgressRow[];
-  definitionOptions: StageDefinition[];
+  works: MainWork[];
   availableWork: AvailableWork[];
   lineCount: number;
   busy: DailyProgressBusy;
@@ -50,7 +51,7 @@ type Props = {
   listOpen: boolean;
   onToggleExpanded: () => void;
   onRemove: () => void;
-  onChangeDefinition: (stageDefinitionId: string) => void;
+  onChangeDefinition: (mainWorkKey: string) => void;
   onUpdateLine: (patch: Partial<DailyProgressLineDraft>) => void;
   onToggleComponent: (componentId: string) => void;
   onStageChoice: (componentId: string, stageId: string) => void;
@@ -69,7 +70,7 @@ export default function DailyProgressLineCard({
   line,
   rows,
   eligible,
-  definitionOptions,
+  works,
   availableWork,
   lineCount,
   busy,
@@ -89,6 +90,10 @@ export default function DailyProgressLineCard({
   onToggleList,
 }: Props) {
   const selectedSet = new Set(line.selected_ids);
+  const work = works.find((item) => item.key === line.main_work_key) ?? null;
+  const workLabel =
+    availableWork.find((item) => item.key === line.main_work_key)?.label ??
+    (work ? `${work.component_type === "pile" ? "Cọc" : "Dầm"} · ${work.label}` : "");
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
       <div className="flex items-center gap-2">
@@ -99,7 +104,7 @@ export default function DailyProgressLineCard({
           onClick={onToggleExpanded}
         >
           <span className="block truncate text-sm font-semibold text-slate-900">
-            {index + 1}. {stageDefinitionLabelFor(definitionOptions, line.stage_definition_id) || "Chọn công tác"}
+            {index + 1}. {workLabel || "Chọn công tác"}
           </span>
           <span className="block truncate text-xs text-slate-600">
             {lineSelectionSummary(line, eligible.length, rows)}
@@ -121,19 +126,30 @@ export default function DailyProgressLineCard({
       <div className="mt-3 space-y-3">
 
       <label className="block text-xs font-medium text-slate-700">
-        Bước thi công
+        Công tác
         <select
           className={FIELD}
-          value={line.stage_definition_id}
+          value={line.main_work_key}
           disabled={busy === "load"}
           onChange={(event) => onChangeDefinition(event.target.value)}
         >
-          <option value="">— Chọn bước —</option>
-          {availableWork.map((work) => (
-            <option key={work.id} value={work.id}>
-              {work.label}
-            </option>
-          ))}
+          <option value="">— Chọn công tác —</option>
+          {(["pile", "beam"] as const).map((type) => {
+            const items = availableWork.filter((item) => item.type === type);
+            if (!items.length) return null;
+            return (
+              <optgroup
+                key={type}
+                label={type === "pile" ? "Cọc" : "Dầm"}
+              >
+                {items.map((item) => (
+                  <option key={item.key} value={item.key}>
+                    {item.label}
+                  </option>
+                ))}
+              </optgroup>
+            );
+          })}
         </select>
       </label>
       {availableWork.length === 0 ? (
@@ -142,7 +158,7 @@ export default function DailyProgressLineCard({
         </p>
       ) : null}
 
-      {line.stage_definition_id ? (
+      {line.main_work_key ? (
         <QuickCodeEntry
           rows={eligible}
           selectedIds={line.selected_ids}
@@ -160,10 +176,10 @@ export default function DailyProgressLineCard({
       <button
         type="button"
         className={`${SECONDARY_BUTTON} w-full ${FOCUS_RING}`}
-        disabled={busy !== null || (!line.stage_definition_id && !mapOpen)}
+        disabled={busy !== null || (!line.main_work_key && !mapOpen)}
         onClick={onToggleMap}
       >
-        {mapOpen ? "Ẩn sơ đồ" : line.stage_definition_id ? "Chọn cấu kiện trên sơ đồ" : "Chọn bước thi công trước"}
+        {mapOpen ? "Ẩn sơ đồ" : line.main_work_key ? "Chọn cấu kiện trên sơ đồ" : "Chọn công tác trước"}
       </button>
       {mapOpen ? (
         <DrawingMapPanel
@@ -178,7 +194,7 @@ export default function DailyProgressLineCard({
         />
       ) : null}
 
-      {line.stage_definition_id ? (
+      {line.main_work_key ? (
         <>
           <div className="flex flex-wrap gap-2">
             <button
@@ -223,11 +239,10 @@ export default function DailyProgressLineCard({
             <div className="max-h-80 space-y-2 overflow-auto">
               {eligible.map((row) => {
                 const selected = selectedSet.has(row.id);
-                const options = stageOptionsFor(
-                  row,
-                  line.stage_definition_id,
-                );
-                const chosen = selectedStageForLineRow(line, row);
+                const options = work
+                  ? stageOptionsForMainWork(row, work)
+                  : [];
+                const chosen = selectedStageForLineRow(line, row, work);
                 return (
                   <div
                     key={row.id}

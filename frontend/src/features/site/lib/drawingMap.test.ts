@@ -17,6 +17,7 @@ import {
   zoomAroundPoint,
   fitViewToBounds,
   markerBounds,
+  viewportFitStep,
   type DrawingSheet,
   type ImageBox,
 } from "./drawingMap";
@@ -238,6 +239,69 @@ describe("fit the view to the batch marker bounding box", () => {
     );
     expect(view?.zoom).toBe(4);
     expect(view?.pan).toEqual({ x: 0, y: 0 });
+  });
+});
+
+describe("viewport fit happens once per sheet", () => {
+  it("fits on open, then ignores metrics, data and selection noise", () => {
+    const opened = viewportFitStep(
+      { activeSheetKey: "", fittedSheetKey: null },
+      { type: "open", sheetKey: "sheet-1", imageReady: true },
+    );
+    expect(opened.fit).toBe(true);
+    expect(opened.state.fittedSheetKey).toBe("sheet-1");
+
+    for (const event of [
+      { type: "metrics" },
+      { type: "data" },
+      { type: "selection" },
+    ] as const) {
+      const step = viewportFitStep(opened.state, event);
+      expect(step.fit).toBe(false);
+      expect(step.state).toEqual(opened.state);
+    }
+  });
+
+  it("never refits after the user moves the view", () => {
+    const opened = viewportFitStep(
+      { activeSheetKey: "", fittedSheetKey: null },
+      { type: "open", sheetKey: "sheet-1", imageReady: true },
+    );
+    const moved = viewportFitStep(opened.state, { type: "gesture" });
+    expect(moved.fit).toBe(false);
+    expect(moved.state.fittedSheetKey).toBe("sheet-1");
+    expect(
+      viewportFitStep(moved.state, {
+        type: "open",
+        sheetKey: "sheet-1",
+        imageReady: true,
+      }).fit,
+    ).toBe(false);
+  });
+
+  it("waits for the image and fits a newly opened sheet", () => {
+    const notReady = viewportFitStep(
+      { activeSheetKey: "sheet-1", fittedSheetKey: "sheet-1" },
+      { type: "open", sheetKey: "sheet-2", imageReady: false },
+    );
+    expect(notReady.fit).toBe(false);
+    expect(notReady.state.activeSheetKey).toBe("sheet-2");
+    const ready = viewportFitStep(notReady.state, {
+      type: "open",
+      sheetKey: "sheet-2",
+      imageReady: true,
+    });
+    expect(ready.fit).toBe(true);
+  });
+
+  it("fits again only on an explicit reset request", () => {
+    const state = { activeSheetKey: "sheet-1", fittedSheetKey: "sheet-1" };
+    expect(viewportFitStep(state, { type: "reset", imageReady: true }).fit).toBe(
+      true,
+    );
+    expect(
+      viewportFitStep(state, { type: "reset", imageReady: false }).fit,
+    ).toBe(false);
   });
 });
 

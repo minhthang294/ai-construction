@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from .access import require_project_member
 from .batch_scope import batch_component_ids
 from .design_parameters import display_stage_name, format_parameter_value, load_t_values
+from .main_works import main_work_label
 from .component_models import (
     ComponentStage,
     ProgressEvent,
@@ -233,9 +234,13 @@ def _works_for_day(db: Session, project_id: str, day: date, batch_id: str | None
     )
     grouped: dict[tuple, dict[str, float | None]] = defaultdict(dict)
     for event, component, segment, zone, definition in latest.values():
+        display_name = (
+            main_work_label(component.type, definition.name)
+            or display_stage_name(definition.name, [t_by_component.get(component.id)])
+        )
         grouped[
             (
-                definition.name,
+                display_name,
                 zone.name,
                 segment.number,
                 component.type,
@@ -244,15 +249,12 @@ def _works_for_day(db: Session, project_id: str, day: date, batch_id: str | None
         ][component.canonical_code] = t_by_component.get(component.id)
 
     works = []
-    for (raw_stage_name, zone, segment, component_type, status), code_values in grouped.items():
+    for (stage_name, zone, segment, component_type, status), code_values in grouped.items():
         ordered_codes = sorted(code_values)
         numeric_values = sorted(
             {round(value, 4) for value in code_values.values() if value is not None}
         )
         has_missing = any(value is None for value in code_values.values())
-        stage_name = display_stage_name(
-            raw_stage_name, [code_values[code] for code in ordered_codes]
-        )
         mixed = len(numeric_values) > 1 or (has_missing and bool(numeric_values))
         codes = [
             (
